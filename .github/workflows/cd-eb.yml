@@ -1,0 +1,149 @@
+name: CD - Elastic Beanstalk
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: eb-prod-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME }}
+  EB_ENVIRONMENT_NAME: ${{ vars.EB_ENVIRONMENT_NAME }}
+  EB_S3_BUCKET: ${{ vars.EB_S3_BUCKET }}
+
+jobs:
+  deploy:
+    name: Build and deploy to EB
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate required variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in AWS_REGION ECR_REPOSITORY EB_APPLICATION_NAME EB_ENVIRONMENT_NAME EB_S3_BUCKET; do
+            if [[ -z "${!v:-}" ]]; then
+              echo "Missing required repository variable: $v"
+              exit 1
+            fi
+          done
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Ensure ECR repository exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>&1 || \
+          aws ecr create-repository --repository-name "$ECR_REPOSITORY" >/dev/null
+
+      - name: Build and push image
+        id: image
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${GITHUB_SHA::12}"
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          LATEST_URI="$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+          docker build -t "$IMAGE_URI" -t "$LATEST_URI" .
+          docker push "$IMAGE_URI"
+          docker push "$LATEST_URI"
+
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create Dockerrun and deploy bundle
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_LABEL="${EB_APPLICATION_NAME}-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::12}"
+          S3_KEY="${EB_APPLICATION_NAME}/${VERSION_LABEL}.zip"
+
+          mkdir -p .eb-bundle
+          cat > .eb-bundle/Dockerrun.aws.json <<EOF
+          {
+            "AWSEBDockerrunVersion": "1",
+            "Image": {
+              "Name": "${{ steps.image.outputs.image_uri }}",
+              "Update": "true"
+            },
+            "Ports": [
+              {
+                "ContainerPort": "8080"
+              }
+            ]
+          }
+          EOF
+
+          if [[ -d .ebextensions ]]; then
+            cp -R .ebextensions .eb-bundle/.ebextensions
+          fi
+
+          if [[ -d .platform ]]; then
+            cp -R .platform .eb-bundle/.platform
+          fi
+
+          (
+            cd .eb-bundle
+            zip -r ../deploy.zip .
+          )
+
+          aws s3 cp deploy.zip "s3://$EB_S3_BUCKET/$S3_KEY"
+
+          echo "version_label=$VERSION_LABEL" >> "$GITHUB_OUTPUT"
+          echo "s3_key=$S3_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Create EB application version
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws elasticbeanstalk create-application-version \
+            --application-name "$EB_APPLICATION_NAME" \
+            --version-label "${{ steps.bundle.outputs.version_label }}" \
+            --source-bundle S3Bucket="$EB_S3_BUCKET",S3Key="${{ steps.bundle.outputs.s3_key }}"
+
+      - name: Deploy application version
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws elasticbeanstalk update-environment \
+            --environment-name "$EB_ENVIRONMENT_NAME" \
+            --version-label "${{ steps.bundle.outputs.version_label }}"
+
+          aws elasticbeanstalk wait environment-updated \
+            --environment-names "$EB_ENVIRONMENT_NAME"
+
+      - name: Show environment endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws elasticbeanstalk describe-environments \
+            --application-name "$EB_APPLICATION_NAME" \
+            --environment-names "$EB_ENVIRONMENT_NAME" \
+            --query 'Environments[0].CNAME' \
+            --output text

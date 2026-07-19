@@ -120,18 +120,3 @@ On push to `main`, [CD workflow](../.github/workflows/cd-eb.yml) does:
 - Confirm the RDS security group allows EB instances
 - Confirm `/health` returns 200 before enabling traffic
 
-## Step 9 — Local verification
-
-Open `http://localhost:8080` and verify the app responds.
-
-## Best-practice deployment choice for a client
-
-- Use Elastic Beanstalk if you want the simplest reliable rollout.
-- Use ECS Fargate if you want more control and future horizontal scaling.
-- For this repo, EB is the fastest path to a professional client deployment.
-
-## If you want me to continue
-
-I can generate either of these next:
-- a Terraform/CloudFormation stack for ECR + EB + RDS + IAM, or
-- a client-ready AWS checklist and launch plan you can hand over directly.
