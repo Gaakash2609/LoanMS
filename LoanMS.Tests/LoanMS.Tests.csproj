@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk"                    Version="17.14.1" />
+    <PackageReference Include="xunit"                                     Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio"                 Version="3.0.2" />
+    <PackageReference Include="Moq"                                       Version="4.20.72" />
+    <PackageReference Include="FluentAssertions"                          Version="8.3.0" />
+    <PackageReference Include="FluentValidation.TestHelper"               Version="11.11.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory"    Version="10.0.0" />
+    <PackageReference Include="AutoMapper"                                Version="14.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration"       Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LoanMS.Application\LoanMS.Application.csproj" />
+    <ProjectReference Include="..\LoanMS.Infrastructure\LoanMS.Infrastructure.csproj" />
+    <ProjectReference Include="..\LoanMS.Domain\LoanMS.Domain.csproj" />
+  </ItemGroup>
+</Project>

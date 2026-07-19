@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Perfios — Bank Statement Analysis</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="css/perfios.css">
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loader-ring"></div>
+  <div class="loader-msg" id="loaderMsg">Processing…</div>
+</div>
+
+<!-- Password modal -->
+<div class="modal-overlay" id="pwdModal">
+  <div class="modal">
+    <h3>🔒 Password-Protected PDF</h3>
+    <div class="modal-filename" id="pwdFileName">file.pdf</div>
+    <div class="pwd-autotry" id="pwdAutotry"><span>⚡</span><span id="pwdAutotryMsg">Trying saved password…</span></div>
+    <p id="pwdDesc">This PDF is password-protected. Enter the password to unlock and process it.</p>
+    <div class="pwd-hint" id="pwdHint">
+      <strong id="pwdHintBank">💡 Bank Hint</strong><br>
+      <span id="pwdHintText"></span>
+      <div class="hint-chips" id="pwdHintExamples"></div>
+    </div>
+    <div class="input-wrap">
+      <input type="password" id="pwdInput" placeholder="Enter PDF password…" autocomplete="off">
+      <button class="pwd-eye" id="pwdToggle" onclick="togglePwdVisibility()">👁</button>
+    </div>
+    <div class="pwd-error" id="pwdError">❌ Incorrect password. Please try again.</div>
+    <div class="pwd-attempts" id="pwdAttempt"></div>
+    <label class="pwd-apply-all" id="pwdApplyAllRow" style="display:none">
+      <input type="checkbox" id="pwdApplyAll">
+      Apply this password to all remaining protected files
+    </label>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="skipPasswordedFile()">⊘ Skip File</button>
+      <button class="btn btn-primary" id="pwdUnlockBtn" onclick="submitPassword()">🔓 Unlock &amp; Process</button>
+    </div>
+    <div style="margin-top:8px;text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--text3)" id="pwdFileProgress"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"><span id="toastMsg"></span></div>
+
+<div class="wrap">
+
+  <!-- Pipeline -->
+  <div class="pipeline">
+    <div class="pipe-step active" id="pStep1"><div class="pipe-num">01</div><div class="pipe-label">Upload PDF</div></div>
+    <div class="pipe-step"        id="pStep2"><div class="pipe-num">02</div><div class="pipe-label">Parse &amp; Validate</div></div>
+    <div class="pipe-step"        id="pStep3"><div class="pipe-num">03</div><div class="pipe-label">Detect Salary</div></div>
+    <div class="pipe-step"        id="pStep4"><div class="pipe-num">04</div><div class="pipe-label">Run Checks</div></div>
+    <div class="pipe-step"        id="pStep5"><div class="pipe-num">05</div><div class="pipe-label">Complete</div></div>
+  </div>
+
+
+  <!-- Validation banner -->
+  <div class="banner" id="valBanner">
+    <div class="banner-icon" id="bannerIcon"></div>
+    <div class="banner-body">
+      <div class="banner-title" id="bannerTitle"></div>
+      <div class="banner-detail" id="bannerDetail"></div>
+    </div>
+  </div>
+
+  <!-- Bulk password panel -->
+  <div class="bulk-panel" id="bulkPwdPanel" style="display:none!important">
+    <div class="bulk-panel-head">
+      🔑 Pre-set Password for Protected Files
+      <span style="margin-left:auto;font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">Optional — skip if unprotected</span>
+    </div>
+    <div class="bulk-row">
+      <div style="position:relative;flex:1">
+        <input type="password" id="bulkPwdInput" placeholder="Common password (DOB, PAN, mobile…)" autocomplete="off">
+        <button onclick="toggleBulkPwdVisibility()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);font-size:13px">👁</button>
+      </div>
+      <button class="btn btn-ghost" onclick="saveBulkPassword()" style="padding:8px 13px;font-size:12px">💾 Save</button>
+      <button class="btn btn-ghost" onclick="clearBulkPassword()" style="padding:8px 11px;font-size:12px;color:var(--danger)">✕</button>
+    </div>
+    <div class="bulk-hint">
+      Bank statements are often protected with <strong style="color:var(--text)">Date of Birth</strong> (DDMMYYYY), <strong style="color:var(--text)">PAN</strong>, <strong style="color:var(--text)">Account number</strong>, or <strong style="color:var(--text)">Mobile number</strong>.
+    </div>
+    <div class="bulk-saved" id="bulkPwdSaved">✅ Password saved — will auto-try on protected files</div>
+    <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">
+      <span style="font-family:var(--font-mono);font-size:10px;color:var(--text3);align-self:center;margin-right:4px">Quick:</span>
+      <span class="hint-chip" onclick="setBulkExample('DDMMYYYY')">DDMMYYYY</span>
+      <span class="hint-chip" onclick="setBulkExample('DD-MM-YYYY')">DD-MM-YYYY</span>
+      <span class="hint-chip" onclick="setBulkExample('DDMMYY')">DDMMYY</span>
+      <span class="hint-chip" onclick="setBulkExample('PAN')">PAN</span>
+      <span class="hint-chip" onclick="setBulkExample('Mobile')">Mobile No.</span>
+    </div>
+  </div>
+
+  <!-- Upload zone -->
+  <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+    <div class="upload-icon">📄</div>
+    <h2>Drop Bank Statement PDF</h2>
+    <p>Supports 45+ banks · password-protected &amp; plain PDFs · multiple files<br>90-day span check · staleness check · salary, bounce &amp; overdraft detection</p>
+    <div class="bank-chips" style="display:none">
+      <span class="bank-chip">HDFC</span><span class="bank-chip">SBI</span><span class="bank-chip">ICICI</span>
+      <span class="bank-chip">Axis</span><span class="bank-chip">Kotak</span><span class="bank-chip">Yes Bank</span>
+      <span class="bank-chip">PNB</span><span class="bank-chip">IDFC FIRST</span><span class="bank-chip">IndusInd</span>
+      <span class="bank-chip">Canara</span><span class="bank-chip">Bank of Baroda</span><span class="bank-chip">Union Bank</span>
+      <span class="bank-chip">Federal Bank</span><span class="bank-chip">RBL</span><span class="bank-chip">AU SFB</span>
+      <span class="bank-chip">Bandhan</span><span class="bank-chip">DBS</span><span class="bank-chip">HSBC</span>
+      <span class="bank-chip">+ 27 more</span>
+    </div>
+    <button class="btn btn-primary" onclick="event.stopPropagation();document.getElementById('fileInput').click()">
+      📁 Select PDF Files
+    </button>
+    <input type="file" id="fileInput" accept=".pdf" multiple>
+  </div>
+
+  <!-- Processing log -->
+  <div class="card log-card" id="logCard" style="display:none">
+    <div class="card-head">
+      <h3>⚡ Processing Log</h3>
+      <div class="badge" id="logBadge"></div>
+    </div>
+    <div class="log-body" id="logInner"></div>
+  </div>
+
+  <!-- Validation section — only shown after parsing ── -->
+  <div class="val-section" id="validationSection" style="display:none!important">
+    <div class="card">
+      <div class="card-head">
+        <h3>✅ Validation Report</h3>
+        <div class="badge" id="validationBadge"></div>
+      </div>
+      <div class="vcheck-list" id="validationGrid"></div>
+    </div>
+  </div>
+
+  <!-- Confirm attachment bar — shown after successful parsing ── -->
+  <div class="confirm-bar" id="confirmBar">
+    <div class="confirm-bar-text">
+      Analysis complete — attach this statement to the application
+      <span id="confirmBarMeta"></span>
+    </div>
+    <div class="confirm-bar-actions">
+      <button class="btn-confirm" onclick="_pfv9Confirm()">📎 Confirm Attachment</button>
+      <button class="btn-dismiss" onclick="document.getElementById('confirmBar').classList.remove('show')">✕</button>
+    </div>
+  </div>
+
+  <!-- Documents section -->
+  <div class="card doc-section" id="docSection" style="display:none!important">
+    <div class="doc-head">
+      <span style="font-size:14px">📁</span>
+      <h3>Attached Documents</h3>
+      <div class="doc-count" id="docCount">0 files</div>
+    </div>
+    <div class="doc-list" id="docList">
+      <div class="doc-empty">No documents attached yet</div>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+
+<script src="js/perfios-core.js?v=2"></script>
+<script src="js/perfios-popup.js?v=2"></script>
+
+</body>
+</html>

@@ -1,0 +1,13 @@
+/* ── Perfios Report Tabs + KYC fix — extracted from index.html ── */
+/* ── Perfios Report Tabs ── */
+.pfr-tab {
+  padding:5px 12px; border-radius:6px; border:1px solid var(--border2);
+  background:var(--surface2); color:var(--text2); font-size:11px;
+  font-weight:600; cursor:pointer; transition:all .15s; white-space:nowrap;
+  font-family:var(--font-body);
+}
+.pfr-tab:hover  { border-color:var(--accent); color:var(--accent); }
+.pfr-tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+.pfr-panel      { display:none; }
+.pfr-panel.pfr-active { display:block; }
+.kyc-fix-btn { pointer-events:auto; }

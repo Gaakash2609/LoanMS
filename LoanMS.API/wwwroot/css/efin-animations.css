@@ -1,0 +1,131 @@
+/* ═══════════════════════════════════════════════════════════════
+   EFIN — Banking Animations  (additive only, zero conflicts)
+   All classes are prefixed ea- to avoid any collision
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 1. Wizard Step — done circle pulse ─────────────────────── */
+@keyframes ea-step-done {
+  0%   { box-shadow: 0 0 0 0   rgba(16,185,129,.55); }
+  60%  { box-shadow: 0 0 0 8px rgba(16,185,129,.0);  }
+  100% { box-shadow: 0 0 0 0   rgba(16,185,129,.0);  }
+}
+.ea-step-just-done {
+  animation: ea-step-done .5s ease-out forwards;
+}
+
+/* ── 2. Wizard panel — slide-in when step changes ───────────── */
+@keyframes ea-slide-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+.ea-step-enter {
+  animation: ea-slide-in .22s ease-out forwards;
+}
+
+/* ── 3. Initial Offer — count-up shimmer on amount ──────────── */
+@keyframes ea-amount-reveal {
+  0%   { opacity: 0; letter-spacing: 4px; }
+  60%  { opacity: 1; letter-spacing: 1px; }
+  100% { opacity: 1; letter-spacing: normal; }
+}
+.ea-amount-reveal {
+  animation: ea-amount-reveal .7s cubic-bezier(.22,1,.36,1) forwards;
+}
+
+/* ── 4. Offer card entrance ─────────────────────────────────── */
+@keyframes ea-card-rise {
+  from { opacity: 0; transform: translateY(22px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);   }
+}
+.ea-card-rise {
+  animation: ea-card-rise .38s cubic-bezier(.22,1,.36,1) forwards;
+}
+
+/* ── 5. Document upload — green flash ───────────────────────── */
+@keyframes ea-doc-success {
+  0%   { outline: 0px solid rgba(16,185,129,0);   }
+  30%  { outline: 3px solid rgba(16,185,129,.55); }
+  100% { outline: 3px solid rgba(16,185,129,0);   }
+}
+.ea-doc-uploaded {
+  animation: ea-doc-success .65s ease-out forwards;
+}
+
+/* ── 6. Bank cards — staggered fade-in ──────────────────────── */
+@keyframes ea-bank-card {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+.ea-bank-card-enter {
+  opacity: 0;
+  animation: ea-bank-card .35s ease-out forwards;
+}
+.ea-bank-card-enter:nth-child(1) { animation-delay: .05s; }
+.ea-bank-card-enter:nth-child(2) { animation-delay: .15s; }
+.ea-bank-card-enter:nth-child(3) { animation-delay: .25s; }
+.ea-bank-card-enter:nth-child(4) { animation-delay: .35s; }
+.ea-bank-card-enter:nth-child(5) { animation-delay: .45s; }
+.ea-bank-card-enter:nth-child(6) { animation-delay: .55s; }
+
+/* ── 7. Status badge — single pulse on change ───────────────── */
+@keyframes ea-badge-pulse {
+  0%   { transform: scale(1);    box-shadow: 0 0 0 0   rgba(26,79,163,.4);  }
+  40%  { transform: scale(1.08); box-shadow: 0 0 0 6px rgba(26,79,163,.0);  }
+  100% { transform: scale(1);    box-shadow: 0 0 0 0   rgba(26,79,163,.0);  }
+}
+.ea-badge-pulse {
+  animation: ea-badge-pulse .45s ease-out forwards;
+}
+
+/* ── 8. Progress bar — smooth fill ──────────────────────────── */
+#wiz-progress {
+  transition: width .35s cubic-bezier(.4,0,.2,1) !important;
+}
+
+/* ── 9. Disbursement status — gold shimmer ──────────────────── */
+@keyframes ea-gold-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.ea-disbursed-shimmer {
+  background: linear-gradient(
+    90deg,
+    #1a7340 0%, #1a7340 30%,
+    #d4af37 45%, #f5e17a 50%, #d4af37 55%,
+    #1a7340 70%, #1a7340 100%
+  ) !important;
+  background-size: 200% auto !important;
+  animation: ea-gold-shimmer 1.6s ease-in-out 2 !important;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* ── 10. Submit button — breathing glow while processing ─────── */
+@keyframes ea-btn-glow {
+  0%, 100% { box-shadow: 0 0 0   0   rgba(26,79,163,.35); }
+  50%       { box-shadow: 0 0 14px 4px rgba(26,79,163,.45); }
+}
+.ea-btn-processing {
+  animation: ea-btn-glow .9s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── 11. Eligibility loading bar — smoother ─────────────────── */
+@keyframes ea-elig-bar {
+  0%   { opacity: .5; transform: scaleX(.85); }
+  50%  { opacity: 1;  transform: scaleX(1);   }
+  100% { opacity: .5; transform: scaleX(.85); }
+}
+.ea-elig-scanning {
+  animation: ea-elig-bar 1.2s ease-in-out infinite;
+  transform-origin: left;
+}
+
+/* ── 12. Table row — flash on status change ──────────────────── */
+@keyframes ea-row-status {
+  0%   { background: rgba(26,79,163,.12); }
+  100% { background: transparent; }
+}
+.ea-row-status-changed {
+  animation: ea-row-status .8s ease-out forwards;
+}

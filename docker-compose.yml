@@ -1,0 +1,82 @@
+version: '3.9'
+
+services:
+  # ── LoanMS API ───────────────────────────────────────────────────────────────
+  loanms:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "7070:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_Jwt__Key=${ASPNETCORE_Jwt__Key}
+      - Database__Provider=${Database__Provider:-sqlite}
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/loanms.db
+      - ConnectionStrings__PostgreSQL=${ConnectionStrings__PostgreSQL:-}
+      - AI__Enabled=${AI__Enabled:-false}
+      - AI__Provider=${AI__Provider:-claude}
+      - AI__ApiKey=${AI__ApiKey:-}
+      - Redis__Enabled=${Redis__Enabled:-false}
+      - Redis__ConnectionString=${Redis__ConnectionString:-}
+    volumes:
+      - loanms_data:/app/data
+      - loanms_logs:/app/logs
+      - loanms_uploads:/app/secure_uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── PostgreSQL (enable with --profile postgres) ───────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: loanms_postgres
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: loanms
+      POSTGRES_USER: loanms_user
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-loanms_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loanms_user -d loanms"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis (enable with --profile redis) ───────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: loanms_redis
+    profiles: ["redis"]
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  loanms_data:
+  loanms_logs:
+  loanms_uploads:
+  postgres_data:
+  redis_data:

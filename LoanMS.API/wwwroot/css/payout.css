@@ -1,0 +1,73 @@
+/* ── Payout Management UI Styles — extracted from index.html ── */
+    /* ── KPI Cards ── */
+    .pm-kpi-card {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+      cursor: pointer;
+      transition: transform .15s, box-shadow .15s, border-color .15s;
+      position: relative;
+      overflow: hidden;
+    }
+    .pm-kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 14px 14px 0 0;
+    }
+    .pm-kpi-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.07); }
+    .pm-kpi-warn  { border-color: rgba(230,126,0,.25); }
+    .pm-kpi-warn::before  { background: var(--warn); }
+    .pm-kpi-warn:hover  { border-color: var(--warn); }
+    .pm-kpi-success { border-color: rgba(26,115,64,.25); }
+    .pm-kpi-success::before { background: var(--success); }
+    .pm-kpi-success:hover { border-color: var(--success); }
+    .pm-kpi-accent { border-color: rgba(26,79,163,.25); }
+    .pm-kpi-accent::before { background: var(--accent); }
+    .pm-kpi-accent:hover { border-color: var(--accent); }
+    .pm-kpi-danger { border-color: rgba(212,43,43,.25); }
+    .pm-kpi-danger::before { background: var(--accent2); }
+    .pm-kpi-danger:hover { border-color: var(--accent2); }
+    .pm-kpi-total { background: linear-gradient(135deg,rgba(26,79,163,.09),rgba(26,79,163,.04)); border-color: rgba(26,79,163,.3) !important; }
+    .pm-kpi-total::before { background: var(--accent); }
+    .pm-kpi-month { background: var(--surface2); }
+    .pm-kpi-month::before { background: var(--text3); }
+    .pm-kpi-icon { font-size: 15px; margin-bottom: 8px; opacity: .75; display: block; }
+    .pm-kpi-num { font-weight: 800; font-size: 26px; color: var(--text); line-height: 1; margin-bottom: 4px; }
+    .pm-kpi-num--lg { font-size: 20px; color: var(--accent); }
+    .pm-kpi-warn .pm-kpi-num { color: var(--warn); }
+    .pm-kpi-success .pm-kpi-num { color: var(--success); }
+    .pm-kpi-accent .pm-kpi-num { color: var(--accent); }
+    .pm-kpi-danger .pm-kpi-num { color: var(--accent2); }
+    .pm-kpi-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .9px; color: var(--text3); margin-bottom: 2px; }
+    .pm-kpi-sub { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* ── Filters Bar ── */
+    .pm-filters-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: var(--surface); border: 1.5px solid var(--border); border-radius: 14px; padding: 12px 16px; margin-bottom: 14px; }
+    .pm-search-wrap { flex: 1; min-width: 200px; position: relative; display: flex; align-items: center; }
+    .pm-search-icon { position: absolute; left: 10px; font-size: 13px; pointer-events: none; }
+    .pm-search-input { width: 100%; padding: 7px 12px 7px 32px; border: 1.5px solid var(--border2); border-radius: 8px; font-size: 13px; background: var(--surface2); color: var(--text); outline: none; transition: border-color .15s; }
+    .pm-search-input:focus { border-color: var(--accent); background: var(--surface); }
+    .pm-select { padding: 7px 10px; border: 1.5px solid var(--border2); border-radius: 8px; font-size: 13px; background: var(--surface2); color: var(--text); outline: none; cursor: pointer; transition: border-color .15s; }
+    .pm-select:focus, .pm-select:hover { border-color: var(--accent); }
+    .pm-clear-btn { padding: 7px 14px; border: 1.5px solid var(--border2); border-radius: 8px; background: transparent; font-size: 12.5px; color: var(--text3); cursor: pointer; transition: all .15s; white-space: nowrap; }
+    .pm-clear-btn:hover { border-color: var(--accent2); color: var(--accent2); background: rgba(212,43,43,.06); }
+    /* ── Table ── */
+    .pm-table-wrap { background: var(--surface); border: 1.5px solid var(--border); border-radius: 14px; overflow: hidden; }
+    .pm-table { width: 100%; border-collapse: collapse; }
+    .pm-table thead tr { background: var(--surface2); border-bottom: 1.5px solid var(--border); }
+    .pm-table thead th { padding: 10px 12px; font-size: 11px; font-weight: 700; letter-spacing: .8px; color: var(--text3); text-align: left; white-space: nowrap; }
+    .pm-th-sort { cursor: pointer; user-select: none; }
+    .pm-th-sort:hover { color: var(--accent); }
+    .pm-table tbody tr { border-bottom: 1px solid var(--border); transition: background .12s; }
+    .pm-table tbody tr:last-child { border-bottom: none; }
+    .pm-table tbody tr:hover { background: var(--surface2) !important; }
+    .pm-table tbody td { padding: 10px 12px; vertical-align: middle; }
+    .pm-empty-row { text-align: center; padding: 56px 20px !important; color: var(--text3); font-size: 13.5px; }
+    .pm-table-footer { display: flex; align-items: center; justify-content: space-between; padding: 11px 18px; border-top: 1.5px solid var(--border); flex-wrap: wrap; gap: 10px; background: var(--surface2); }
+    .pm-bulk-btn { font-weight: 600; font-size: 12px; padding: 5px 12px; border-radius: 7px; border: 1.5px solid; }
+    .pm-bulk-pay     { background: rgba(26,79,163,.1);  color: var(--accent);   border-color: rgba(26,79,163,.3); }
+    .pm-bulk-approve { background: rgba(26,115,64,.1);  color: var(--success);  border-color: rgba(26,115,64,.3); }
+    .pm-bulk-reject  { background: rgba(212,43,43,.08); color: var(--accent2);  border-color: rgba(212,43,43,.2); }
+    .pm-bulk-hold    { background: rgba(230,126,0,.08); color: var(--warn);     border-color: rgba(230,126,0,.25); }

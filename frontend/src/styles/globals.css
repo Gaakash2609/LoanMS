@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-sans text-gray-900 antialiased;
+  }
+  * {
+    @apply box-border;
+  }
+}
+
+@layer utilities {
+  .bg-efin-blue      { background-color: #0a589a; }
+  .bg-efin-blue-dark { background-color: #1e3a5f; }
+  .text-efin-blue    { color: #0a589a; }
+  .ring-efin-blue    { --tw-ring-color: #0a589a; }
+  .focus\:ring-efin-blue:focus { --tw-ring-color: #0a589a; }
+  .hover\:bg-efin-blue-dark:hover { background-color: #1e3a5f; }
+}
