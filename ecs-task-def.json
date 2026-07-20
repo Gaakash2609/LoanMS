@@ -4,12 +4,12 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole",
+  "executionRoleArn": "arn:aws:iam::664418956749:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::664418956749:role/ecsTaskRole",
   "containerDefinitions": [
     {
       "name": "loanms-api",
-      "image": "ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com/loanms:latest",
+      "image": "664418956749.dkr.ecr.ap-south-1.amazonaws.com/loanms:latest",
       "portMappings": [
         {
           "containerPort": 8080,
@@ -26,11 +26,11 @@
       "secrets": [
         {
           "name": "ASPNETCORE_Jwt__Key",
-          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:loanms/prod/jwt-key:JwtKey::"
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:664418956749:secret:loanms/prod/jwt-key:JwtKey::"
         },
         {
           "name": "ConnectionStrings__PostgreSQL",
-          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:loanms/prod/db:ConnectionString::"
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:664418956749:secret:loanms/prod/db:ConnectionString::"
         }
       ],
       "healthCheck": {
