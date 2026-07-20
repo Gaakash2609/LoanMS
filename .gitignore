@@ -19,3 +19,4 @@ appsettings.Development.json
 frontend/dist/
 frontend/build/
 .github/copilot-instructions.md
+.venv
