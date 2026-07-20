@@ -1,4 +1,4 @@
-FROM node:22-alpine AS frontend-build
+FROM --platform=linux/amd64 node:22-alpine AS frontend-build
 WORKDIR /src/frontend
 
 COPY frontend/package*.json ./
@@ -7,7 +7,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
 WORKDIR /src
 
 COPY LoanMS.API/LoanMS.API.csproj LoanMS.API/
@@ -22,7 +22,7 @@ RUN dotnet publish LoanMS.API/LoanMS.API.csproj -c Release -o /app/publish /p:Us
 
 COPY --from=frontend-build /src/LoanMS.API/wwwroot/react /app/publish/wwwroot/react
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
 ENV ASPNETCORE_URLS=http://+:8080
