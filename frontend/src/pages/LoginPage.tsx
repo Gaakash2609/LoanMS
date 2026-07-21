@@ -35,7 +35,9 @@ export default function LoginPage() {
 
           {login.error && (
             <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
-              Invalid email or password. Please try again.
+              {login.error instanceof Error
+                ? login.error.message
+                : 'Invalid email or password. Please try again.'}
             </div>
           )}
 

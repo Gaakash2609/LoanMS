@@ -8,13 +8,21 @@ export function useLogin() {
   const navigate = useNavigate()
 
   return useMutation({
-    mutationFn: authApi.login,
-    onSuccess: ({ data }) => {
-      if (data.success && data.data) {
-        const { user, accessToken, refreshToken } = data.data
-        setAuth(user, accessToken, refreshToken)
-        navigate('/dashboard')
+    mutationFn: async (payload: Parameters<typeof authApi.login>[0]) => {
+      const response = await authApi.login(payload)
+      const body = response.data
+
+      if (!body.success || !body.data) {
+        const message = body.message || body.errors?.[0] || 'Login failed. Please try again.'
+        throw new Error(message)
       }
+
+      return body.data
+    },
+    onSuccess: (data) => {
+      const { user, accessToken, refreshToken } = data
+      setAuth(user, accessToken, refreshToken)
+      navigate('/dashboard')
     },
   })
 }
