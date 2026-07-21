@@ -60,7 +60,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-xs text-gray-400 mt-6">
-            EFIN Enterprise Loan Management System v2.0
+            EFIN Enterprise Loan Management System v2.0 (Mudrahub)
           </p>
         </div>
       </div>
