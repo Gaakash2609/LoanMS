@@ -22,8 +22,8 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-white/20 flex items-center justify-center mx-auto mb-4">
-            <span className="text-white font-bold text-3xl">E</span>
+          <div className="w-20 h-20 rounded-2xl bg-white/20 flex items-center justify-center mx-auto mb-4 p-2">
+            <img src="/assets/logo-004.png" alt="Mudrahub Logo" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-2xl font-bold text-white">EFIN LoanMS</h1>
           <p className="text-white/70 text-sm mt-1">Enterprise Loan Management System</p>

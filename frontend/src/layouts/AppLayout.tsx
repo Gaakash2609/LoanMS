@@ -52,8 +52,8 @@ export default function AppLayout() {
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       <aside className={`${open ? 'w-56' : 'w-14'} bg-[#1e3a5f] flex flex-col transition-all duration-200 shrink-0 overflow-hidden`}>
         <div className="flex items-center gap-3 p-4 border-b border-white/10">
-          <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
-            <span className="text-white font-bold text-sm">E</span>
+          <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center shrink-0 p-1">
+            <img src="/assets/logo-004.png" alt="Mudrahub Logo" className="w-full h-full object-contain" />
           </div>
           {open && <span className="text-white font-semibold text-sm truncate">EFIN LoanMS</span>}
         </div>
@@ -93,6 +93,7 @@ export default function AppLayout() {
           <button onClick={() => setOpen(!open)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
             {open ? <X size={18} /> : <Menu size={18} />}
           </button>
+          <img src="/assets/logo-004.png" alt="Mudrahub Logo" className="w-6 h-6 object-contain" />
           <span className="text-sm text-gray-500">EFIN Enterprise Loan Management</span>
         </header>
         <main className="flex-1 overflow-y-auto p-6"><Outlet /></main>
