@@ -20,3 +20,21 @@ frontend/dist/
 frontend/build/
 .github/copilot-instructions.md
 .venv
+
+# OS / editor junk
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Environment and local overrides
+.env.*
+!.env.example
+
+# Misc temp files
+*.tmp
+*.temp
