@@ -19,6 +19,7 @@
       "essential": true,
       "environment": [
         { "name": "ASPNETCORE_ENVIRONMENT", "value": "Production" },
+        { "name": "ASPNETCORE_URLS",        "value": "http://0.0.0.0:8080" },
         { "name": "Database__Provider",     "value": "postgresql" },
         { "name": "Redis__Enabled",         "value": "false" },
         { "name": "AI__Enabled",            "value": "false" }
