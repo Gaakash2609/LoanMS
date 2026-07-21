@@ -443,8 +443,21 @@ try
     app.UseCors("RestrictedCors");
 
     // ── Static files MUST come before Auth/Security middleware ─────────────
-    // UseDefaultFiles enables serving index.html at "/"
-    app.UseDefaultFiles();
+    var reactRoot = Path.Combine(app.Environment.WebRootPath, "react");
+    var hasReact = Directory.Exists(reactRoot);
+
+    // Serve React build at root in production (prevents legacy wwwroot/index.html from loading)
+    if (hasReact)
+    {
+        app.UseDefaultFiles(new DefaultFilesOptions
+        {
+            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot)
+        });
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot)
+        });
+    }
 
     // Serve wwwroot static files; block /uploads/* from direct browser access
     app.UseStaticFiles(new StaticFileOptions
@@ -466,21 +479,20 @@ try
     app.UseMiddleware<LoanMS.API.Middleware.ExceptionMiddleware>();
     app.UseMiddleware<LoanMS.API.Middleware.AuditMiddleware>();
 
-    // Serve React app from /app path (new frontend)
-    // Existing wwwroot/index.html is still served at root for backward compatibility
-    if (Directory.Exists(Path.Combine(app.Environment.WebRootPath, "react")))
+    // Backward-compat: also serve React under /app
+    if (hasReact)
     {
         app.UseStaticFiles(new StaticFileOptions
         {
             FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(
-                Path.Combine(app.Environment.WebRootPath, "react")),
+                reactRoot),
             RequestPath = "/app"
         });
         app.MapFallback("/app/{**path}", context =>
         {
             context.Response.ContentType = "text/html";
             return context.Response.SendFileAsync(
-                Path.Combine(app.Environment.WebRootPath, "react", "index.html"));
+                Path.Combine(reactRoot, "index.html"));
         });
     }
 
@@ -488,7 +500,18 @@ try
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
-    app.MapFallbackToFile("index.html");
+    if (hasReact)
+    {
+        app.MapFallback(context =>
+        {
+            context.Response.ContentType = "text/html";
+            return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
+        });
+    }
+    else
+    {
+        app.MapFallbackToFile("index.html");
+    }
 
     Log.Information(
         "LoanMS API started | DB={Provider} | AI={AI} ({AIProvider}) | Redis={Redis} | Env={Env}",
