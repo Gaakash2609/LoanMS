@@ -340,6 +340,29 @@ try
                 logger.LogInformation("Applying PostgreSQL migrations...");
                 await db.Database.MigrateAsync();
                 logger.LogInformation("PostgreSQL migrations applied.");
+
+                // Safety fallback for fresh/misaligned DBs: if core table is still absent,
+                // create schema from current model so app can boot and seed users.
+                await using (var conn = db.Database.GetDbConnection())
+                {
+                    if (conn.State != System.Data.ConnectionState.Open)
+                        await conn.OpenAsync();
+
+                    await using var cmd = conn.CreateCommand();
+                    cmd.CommandText = @"SELECT EXISTS (
+                        SELECT 1
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = 'Users'
+                    )";
+
+                    var usersTableExists = Convert.ToBoolean(await cmd.ExecuteScalarAsync() ?? false);
+                    if (!usersTableExists)
+                    {
+                        logger.LogWarning("Users table not found after migration; running EnsureCreated fallback.");
+                        await db.Database.EnsureCreatedAsync();
+                        logger.LogInformation("EnsureCreated fallback completed.");
+                    }
+                }
             }
             else
             {
