@@ -350,6 +350,20 @@ try
                 catch (Npgsql.PostgresException pex) when (pex.SqlState == "42P01")
                 {
                     logger.LogWarning("Users table not found after migration; running EnsureCreated fallback.");
+
+                    var nonHistoryTables = await db.Database
+                        .SqlQueryRaw<int>(@"SELECT COUNT(*)
+                                           FROM information_schema.tables
+                                           WHERE table_schema = 'public'
+                                             AND table_type = 'BASE TABLE'
+                                             AND table_name <> '__EFMigrationsHistory'")
+                        .SingleAsync();
+
+                    if (nonHistoryTables == 0)
+                    {
+                        await db.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS \"__EFMigrationsHistory\";");
+                    }
+
                     await db.Database.EnsureCreatedAsync();
                     logger.LogInformation("EnsureCreated fallback completed.");
                 }
