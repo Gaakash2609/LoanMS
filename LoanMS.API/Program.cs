@@ -352,7 +352,7 @@ try
                     logger.LogWarning("Users table not found after migration; running EnsureCreated fallback.");
 
                     var nonHistoryTables = await db.Database
-                        .SqlQueryRaw<int>(@"SELECT COUNT(*)
+                                                .SqlQueryRaw<int>(@"SELECT COUNT(*) AS \"Value\"
                                            FROM information_schema.tables
                                            WHERE table_schema = 'public'
                                              AND table_type = 'BASE TABLE'
