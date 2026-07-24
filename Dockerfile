@@ -7,7 +7,7 @@ RUN npm ci
 COPY frontend/ ./
 
 # Build with API URL — use environment variable for Vite
-ARG VITE_API_URL=/api
+ARG VITE_API_URL=
 ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
