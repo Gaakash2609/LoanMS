@@ -5,6 +5,10 @@ COPY frontend/package*.json ./
 RUN npm ci
 
 COPY frontend/ ./
+
+# Build with API URL — use environment variable for Vite
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
 FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
