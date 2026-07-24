@@ -29,6 +29,13 @@ COPY --from=frontend-build /src/LoanMS.API/wwwroot/react /app/publish/wwwroot/re
 FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
+# Runtime deps:
+# - curl: required by ECS container health check command
+# - libgssapi-krb5-2: required by Npgsql native dependency on Debian-based runtime images
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends curl libgssapi-krb5-2 \
+	&& rm -rf /var/lib/apt/lists/*
+
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 
