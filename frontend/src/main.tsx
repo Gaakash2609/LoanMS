@@ -19,10 +19,12 @@ const queryClient = new QueryClient({
   },
 })
 
+const basePath = window.location.pathname.startsWith('/app') ? '/app' : '/'
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter basename="/app">
+      <BrowserRouter basename={basePath}>
         <AppRoutes />
       </BrowserRouter>
       {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
