@@ -486,7 +486,21 @@ try
         });
         app.UseStaticFiles(new StaticFileOptions
         {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot)
+            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot),
+            OnPrepareResponse = ctx =>
+            {
+                var fileName = ctx.File.Name;
+                if (fileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+                {
+                    ctx.Context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+                    ctx.Context.Response.Headers["Pragma"] = "no-cache";
+                    ctx.Context.Response.Headers["Expires"] = "0";
+                }
+                else
+                {
+                    ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
+                }
+            }
         });
     }
 
@@ -517,11 +531,28 @@ try
         {
             FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(
                 reactRoot),
-            RequestPath = "/app"
+            RequestPath = "/app",
+            OnPrepareResponse = ctx =>
+            {
+                var fileName = ctx.File.Name;
+                if (fileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+                {
+                    ctx.Context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+                    ctx.Context.Response.Headers["Pragma"] = "no-cache";
+                    ctx.Context.Response.Headers["Expires"] = "0";
+                }
+                else
+                {
+                    ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
+                }
+            }
         });
         app.MapFallback("/app/{**path}", context =>
         {
             context.Response.ContentType = "text/html";
+            context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+            context.Response.Headers["Pragma"] = "no-cache";
+            context.Response.Headers["Expires"] = "0";
             return context.Response.SendFileAsync(
                 Path.Combine(reactRoot, "index.html"));
         });
@@ -536,6 +567,9 @@ try
         app.MapFallback(context =>
         {
             context.Response.ContentType = "text/html";
+            context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+            context.Response.Headers["Pragma"] = "no-cache";
+            context.Response.Headers["Expires"] = "0";
             return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
         });
     }
