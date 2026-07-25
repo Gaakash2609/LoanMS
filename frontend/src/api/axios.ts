@@ -2,10 +2,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/store/authStore'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const rawBaseUrl = ((import.meta as any).env?.VITE_API_URL ?? '').toString().trim()
-const BASE_URL = rawBaseUrl
-  .replace(/\/+$/, '')
-  .replace(/\/api$/, '')
+const BASE_URL = (import.meta as any).env?.VITE_API_URL ?? ''
 
 export const api = axios.create({
   baseURL: BASE_URL,
@@ -61,8 +58,7 @@ api.interceptors.response.use(
       }
 
       try {
-        const refreshUrl = `${BASE_URL}/api/auth/refresh`
-        const { data } = await axios.post(refreshUrl, { refreshToken })
+        const { data } = await axios.post(`${BASE_URL}/api/auth/refresh`, { refreshToken })
         const newToken = data.data.accessToken
         useAuthStore.getState().setTokens(newToken, data.data.refreshToken)
         processQueue(null, newToken)

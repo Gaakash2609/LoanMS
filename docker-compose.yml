@@ -1,14 +1,17 @@
+version: '3.9'
+
 services:
   # ── LoanMS API ───────────────────────────────────────────────────────────────
   loanms:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: loanms_app
     ports:
       - "7070:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_Jwt__Key=${ASPNETCORE_Jwt__Key}      # 1) Confirm AWS account/region context
+      - ASPNETCORE_Jwt__Key=${ASPNETCORE_Jwt__Key}
       - Database__Provider=${Database__Provider:-sqlite}
       - ConnectionStrings__DefaultConnection=Data Source=/app/data/loanms.db
       - ConnectionStrings__PostgreSQL=${ConnectionStrings__PostgreSQL:-}

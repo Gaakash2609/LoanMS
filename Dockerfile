@@ -1,44 +1,64 @@
-FROM --platform=linux/amd64 node:22-alpine AS frontend-build
-WORKDIR /src/frontend
+# ── LoanMS API — Production Dockerfile (multi-stage) ───────────────────────
+# Matches docker-compose.yml expectations: internal port 8080, /health endpoint
 
-COPY frontend/package*.json ./
+# ── Stage 1: Build React frontend ────────────────────────────────────────────
+# Always builds fresh from frontend/src so the deployed bundle can never go
+# stale (previously wwwroot/react was a manually pre-built, easy-to-forget copy).
+FROM node:22-alpine AS frontend-build
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
-
 COPY frontend/ ./
-
-# Build with API URL — use environment variable for Vite
-ARG VITE_API_URL=
-ENV VITE_API_URL=${VITE_API_URL}
+# vite.config.ts sets outDir: '../LoanMS.API/wwwroot/react' (relative to /frontend),
+# which resolves to the absolute path /LoanMS.API/wwwroot/react in this stage.
 RUN npm run build
 
-FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
+# ── Stage 2: Build .NET API ─────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-COPY LoanMS.API/LoanMS.API.csproj LoanMS.API/
-COPY LoanMS.Application/LoanMS.Application.csproj LoanMS.Application/
+# Copy csproj files first (layer caching for faster rebuilds)
 COPY LoanMS.Domain/LoanMS.Domain.csproj LoanMS.Domain/
+COPY LoanMS.Application/LoanMS.Application.csproj LoanMS.Application/
 COPY LoanMS.Infrastructure/LoanMS.Infrastructure.csproj LoanMS.Infrastructure/
-
+COPY LoanMS.API/LoanMS.API.csproj LoanMS.API/
 RUN dotnet restore LoanMS.API/LoanMS.API.csproj
 
-COPY . .
-RUN dotnet publish LoanMS.API/LoanMS.API.csproj -c Release -o /app/publish /p:UseAppHost=false
+# Copy everything else and build
+COPY LoanMS.Domain/ LoanMS.Domain/
+COPY LoanMS.Application/ LoanMS.Application/
+COPY LoanMS.Infrastructure/ LoanMS.Infrastructure/
+COPY LoanMS.API/ LoanMS.API/
 
-COPY --from=frontend-build /src/LoanMS.API/wwwroot/react /app/publish/wwwroot/react
+RUN dotnet publish LoanMS.API/LoanMS.API.csproj -c Release -o /app/publish --no-restore
 
-FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+# Overwrite the stale wwwroot/react (if any was checked in) with the fresh frontend build
+RUN rm -rf /app/publish/wwwroot/react
+COPY --from=frontend-build /LoanMS.API/wwwroot/react /app/publish/wwwroot/react
+
+# ── Stage 3: Runtime ────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-# Runtime deps:
-# - curl: required by ECS container health check command
-# - libgssapi-krb5-2: required by Npgsql native dependency on Debian-based runtime images
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends curl libgssapi-krb5-2 \
+# curl needed for docker-compose healthcheck; libgssapi required by Npgsql on Debian runtime
+RUN apt-get update && apt-get install -y --no-install-recommends curl libgssapi-krb5-2 \
 	&& rm -rf /var/lib/apt/lists/*
 
-ENV ASPNETCORE_URLS=http://+:8080
-EXPOSE 8080
+# Non-root user (ECS/Fargate best practice)
+RUN groupadd -r loanms && useradd -r -g loanms loanms
 
-COPY --from=backend-build /app/publish .
+COPY --from=build /app/publish .
+
+# Writable dirs used by the app (mounted as volumes locally; on ECS use EFS or leave ephemeral)
+RUN mkdir -p /app/data /app/logs /app/secure_uploads \
+	&& chown -R loanms:loanms /app
+
+USER loanms
+
+ENV ASPNETCORE_URLS=http://+:8080 \
+	ASPNETCORE_ENVIRONMENT=Production \
+	DOTNET_RUNNING_IN_CONTAINER=true
+
+EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "LoanMS.API.dll"]

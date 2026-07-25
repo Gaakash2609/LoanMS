@@ -2,7 +2,11 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
-export default defineConfig({
+// base: '/app/' only for production builds (matches the /app mount point in
+// LoanMS.API/Program.cs). Local dev server keeps serving from root ('/') so
+// `npm run dev` at http://localhost:5173 continues to work unchanged.
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/app/' : '/',
   plugins: [react()],
   resolve: {
     alias: {
@@ -37,4 +41,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

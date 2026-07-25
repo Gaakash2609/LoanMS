@@ -22,8 +22,8 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-20 h-20 rounded-2xl bg-white/20 flex items-center justify-center mx-auto mb-4 p-2">
-            <img src="/assets/logo-004.png" alt="Mudrahub Logo" className="w-full h-full object-contain" />
+          <div className="w-16 h-16 rounded-2xl bg-white/20 flex items-center justify-center mx-auto mb-4">
+            <span className="text-white font-bold text-3xl">E</span>
           </div>
           <h1 className="text-2xl font-bold text-white">EFIN LoanMS</h1>
           <p className="text-white/70 text-sm mt-1">Enterprise Loan Management System</p>
@@ -35,9 +35,7 @@ export default function LoginPage() {
 
           {login.error && (
             <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
-              {login.error instanceof Error
-                ? login.error.message
-                : 'Invalid email or password. Please try again.'}
+              Invalid email or password. Please try again.
             </div>
           )}
 
@@ -62,7 +60,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-xs text-gray-400 mt-6">
-            EFIN Enterprise Loan Management System v2.0 (Mudrahub)
+            EFIN Enterprise Loan Management System v2.0
           </p>
         </div>
       </div>

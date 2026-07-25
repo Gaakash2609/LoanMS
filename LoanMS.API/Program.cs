@@ -340,37 +340,6 @@ try
                 logger.LogInformation("Applying PostgreSQL migrations...");
                 await db.Database.MigrateAsync();
                 logger.LogInformation("PostgreSQL migrations applied.");
-
-                // Safety fallback for fresh/misaligned DBs: if core table is still absent,
-                // create schema from current model so app can boot and seed users.
-                try
-                {
-                    await db.Users.AsNoTracking().Select(x => x.Id).Take(1).ToListAsync();
-                }
-                catch (Npgsql.PostgresException pex) when (pex.SqlState == "42P01")
-                {
-                    logger.LogWarning("Users table not found after migration; running EnsureCreated fallback.");
-
-                                        var nonHistoryTables = await db.Database
-                                                                                                .SqlQueryRaw<int>(@"SELECT COUNT(*) AS ""Value""
-                                                                                     FROM information_schema.tables
-                                                                                     WHERE table_schema = 'public'
-                                                                                         AND table_type = 'BASE TABLE'
-                                                                                         AND table_name <> '__EFMigrationsHistory'")
-                        .SingleAsync();
-
-                    if (nonHistoryTables == 0)
-                    {
-                        await db.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS \"__EFMigrationsHistory\";");
-                    }
-
-                    await db.Database.EnsureCreatedAsync();
-                    logger.LogInformation("EnsureCreated fallback completed.");
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Could not verify Users table after migration; continuing startup.");
-                }
             }
             else
             {
@@ -474,35 +443,8 @@ try
     app.UseCors("RestrictedCors");
 
     // ── Static files MUST come before Auth/Security middleware ─────────────
-    var reactRoot = Path.Combine(app.Environment.WebRootPath, "react");
-    var hasReact = Directory.Exists(reactRoot);
-
-    // Serve React build at root in production (prevents legacy wwwroot/index.html from loading)
-    if (hasReact)
-    {
-        app.UseDefaultFiles(new DefaultFilesOptions
-        {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot)
-        });
-        app.UseStaticFiles(new StaticFileOptions
-        {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot),
-            OnPrepareResponse = ctx =>
-            {
-                var fileName = ctx.File.Name;
-                if (fileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
-                {
-                    ctx.Context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
-                    ctx.Context.Response.Headers["Pragma"] = "no-cache";
-                    ctx.Context.Response.Headers["Expires"] = "0";
-                }
-                else
-                {
-                    ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
-                }
-            }
-        });
-    }
+    // UseDefaultFiles enables serving index.html at "/"
+    app.UseDefaultFiles();
 
     // Serve wwwroot static files; block /uploads/* from direct browser access
     app.UseStaticFiles(new StaticFileOptions
@@ -524,37 +466,32 @@ try
     app.UseMiddleware<LoanMS.API.Middleware.ExceptionMiddleware>();
     app.UseMiddleware<LoanMS.API.Middleware.AuditMiddleware>();
 
-    // Backward-compat: also serve React under /app
-    if (hasReact)
+    // Serve React app from /app path (new frontend)
+    // Existing wwwroot/index.html is still served at root for backward compatibility
+    if (Directory.Exists(Path.Combine(app.Environment.WebRootPath, "react")))
     {
+        var reactRoot = Path.Combine(app.Environment.WebRootPath, "react");
+
         app.UseStaticFiles(new StaticFileOptions
         {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(
-                reactRoot),
-            RequestPath = "/app",
-            OnPrepareResponse = ctx =>
-            {
-                var fileName = ctx.File.Name;
-                if (fileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
-                {
-                    ctx.Context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
-                    ctx.Context.Response.Headers["Pragma"] = "no-cache";
-                    ctx.Context.Response.Headers["Expires"] = "0";
-                }
-                else
-                {
-                    ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
-                }
-            }
+            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot),
+            RequestPath = "/app"
         });
+
+        // Bare "/app" (no trailing slash) does NOT match the "/app/{**path}" fallback
+        // below, so without this it used to fall through to the root MapFallbackToFile
+        // and render the OLD vanilla UI instead of the React app — this was the
+        // "different look and flow" bug. Handle it explicitly here.
+        app.MapGet("/app", context =>
+        {
+            context.Response.ContentType = "text/html";
+            return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
+        });
+
         app.MapFallback("/app/{**path}", context =>
         {
             context.Response.ContentType = "text/html";
-            context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
-            context.Response.Headers["Pragma"] = "no-cache";
-            context.Response.Headers["Expires"] = "0";
-            return context.Response.SendFileAsync(
-                Path.Combine(reactRoot, "index.html"));
+            return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
         });
     }
 
@@ -562,21 +499,7 @@ try
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
-    if (hasReact)
-    {
-        app.MapFallback(context =>
-        {
-            context.Response.ContentType = "text/html";
-            context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
-            context.Response.Headers["Pragma"] = "no-cache";
-            context.Response.Headers["Expires"] = "0";
-            return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
-        });
-    }
-    else
-    {
-        app.MapFallbackToFile("index.html");
-    }
+    app.MapFallbackToFile("index.html");
 
     Log.Information(
         "LoanMS API started | DB={Provider} | AI={AI} ({AIProvider}) | Redis={Redis} | Env={Env}",
