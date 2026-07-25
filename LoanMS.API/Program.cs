@@ -443,22 +443,8 @@ try
     app.UseCors("RestrictedCors");
 
     // ── Static files MUST come before Auth/Security middleware ─────────────
-    var reactRoot = Path.Combine(app.Environment.WebRootPath, "react");
-    var hasReact = Directory.Exists(reactRoot);
-
-    // Prefer React shell at root so AWS and local docker show the same UI.
-    if (hasReact)
-    {
-        app.UseDefaultFiles(new DefaultFilesOptions
-        {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot)
-        });
-
-        app.UseStaticFiles(new StaticFileOptions
-        {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot)
-        });
-    }
+    // UseDefaultFiles enables serving index.html at "/"
+    app.UseDefaultFiles();
 
     // Serve wwwroot static files; block /uploads/* from direct browser access
     app.UseStaticFiles(new StaticFileOptions
@@ -480,9 +466,12 @@ try
     app.UseMiddleware<LoanMS.API.Middleware.ExceptionMiddleware>();
     app.UseMiddleware<LoanMS.API.Middleware.AuditMiddleware>();
 
-    // Backward compatibility: also serve React app from /app path.
-    if (hasReact)
+    // Serve React app from /app path (new frontend)
+    // Existing wwwroot/index.html is still served at root for backward compatibility
+    if (Directory.Exists(Path.Combine(app.Environment.WebRootPath, "react")))
     {
+        var reactRoot = Path.Combine(app.Environment.WebRootPath, "react");
+
         app.UseStaticFiles(new StaticFileOptions
         {
             FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot),
@@ -510,18 +499,7 @@ try
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
-    if (hasReact)
-    {
-        app.MapFallback(context =>
-        {
-            context.Response.ContentType = "text/html";
-            return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
-        });
-    }
-    else
-    {
-        app.MapFallbackToFile("index.html");
-    }
+    app.MapFallbackToFile("index.html");
 
     Log.Information(
         "LoanMS API started | DB={Provider} | AI={AI} ({AIProvider}) | Redis={Redis} | Env={Env}",
