@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --port 5173 --host",
     "build": "tsc -b && vite build",
+    "build:docker": "vite build",
     "preview": "vite preview --port 5173",
     "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
     "type-check": "tsc --noEmit"

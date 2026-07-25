@@ -11,7 +11,7 @@ RUN npm ci
 COPY frontend/ ./
 # vite.config.ts sets outDir: '../LoanMS.API/wwwroot/react' (relative to /frontend),
 # which resolves to the absolute path /LoanMS.API/wwwroot/react in this stage.
-RUN npm run build
+RUN npm run build:docker
 
 # ── Stage 2: Build .NET API ─────────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
