@@ -1304,59 +1304,8 @@
   }
 
   /* ── Action Plan ── */
-  function _buildActionPlan(bd) {
-    var factors = Object.values(bd);
-    if (!factors.length) return '';
-    var rows = factors.map(function(f){
-      var v=f.value||0, gap=Math.max(0,100-v);
-      var ptsGain=Math.round((gap/100)*(f.weight||0)*1.5);
-      var statusColor=v>=80?'#059669':v>=50?'#d97706':'#dc2626';
-      var advice=/Payment/i.test(f.label)?'Pay every EMI on time':/Utilis/i.test(f.label)?'Keep card usage below 30%':/Age/i.test(f.label)?'Keep old accounts open':/Mix/i.test(f.label)?'Add a secured + unsecured mix':/Enquir/i.test(f.label)?'Avoid frequent loan enquiries':'Maintain healthy credit habits';
-      return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">' +
-        '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--text)">'+esc(f.label)+'</div><div style="font-size:11px;color:var(--text3);margin-top:1px">'+esc(advice)+'</div></div>' +
-        '<div style="text-align:right;min-width:90px">' +
-          (ptsGain>0
-            ? '<div style="font-size:14px;font-weight:800;color:'+statusColor+'">+'+ptsGain+' pts</div><div style="font-size:10px;color:var(--text3)">potential gain</div>'
-            : '<div style="font-size:13px;font-weight:700;color:#059669">✓ Optimal</div>') +
-        '</div>' +
-      '</div>';
-    }).join('');
-    return '<div class="cibil-section" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px">' +
-      '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px">🎯 Action Plan — Boost Your Score</div>' +
-      '<div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Estimated points you could gain by improving each factor.</div>' +
-      rows +
-    '</div>';
-  }
 
   /* ── Improvement Tips ── */
-  function _buildTips(recommendations) {
-    function tipMeta(r){
-      if (/EMI|payment|history/i.test(r))      return {icon:'🔴',label:'Critical',c:'#dc2626'};
-      if (/utilis|credit card|30%/i.test(r))   return {icon:'🟠',label:'High',   c:'#ea580c'};
-      if (/enquir|secured|rehabilit/i.test(r)) return {icon:'🟡',label:'Moderate',c:'#d97706'};
-      return                                          {icon:'🔵',label:'Advisory',c:'#2563eb'};
-    }
-    var tipRows = recommendations && recommendations.length
-      ? '<div style="display:flex;flex-direction:column;gap:7px">' +
-          recommendations.map(function(r){
-            var t=tipMeta(r);
-            return '<div style="display:flex;gap:9px;align-items:flex-start;background:var(--surface2);border-radius:var(--r-sm);padding:10px 12px;border:1px solid var(--border);border-left:3px solid '+t.c+'">' +
-              '<span style="font-size:14px;flex-shrink:0">'+t.icon+'</span>' +
-              '<div><div style="font-size:10px;font-weight:700;color:'+t.c+';text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">'+t.label+'</div>' +
-              '<div style="font-size:12.5px;color:var(--text2);line-height:1.5">'+esc(r)+'</div></div>' +
-            '</div>';
-          }).join('') +
-        '</div>'
-      : '<div style="text-align:center;padding:20px;color:#16a34a;font-size:13px;font-weight:600">🏆 Excellent score — maintain current behaviour.</div>';
-
-    return '<div class="cibil-section" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:12px" onclick="_cibilToggle(\'cibil-tips\',this)">' +
-        '<div style="font-size:14px;font-weight:700;color:var(--text)">💡 Improvement Tips</div>' +
-        '<span style="font-size:12px;color:var(--text3)" id="cibil-tips-arrow">▾</span>' +
-      '</div>' +
-      '<div id="cibil-tips">'+tipRows+'</div>' +
-    '</div>';
-  }
 
   /* ── Loan History in EFIN ── */
   function _buildLoanHistory(loanHistory) {
@@ -1386,29 +1335,7 @@
   /* ═══════════════════════════════════════════════════════════════════════
      11. SHARED SECTION BUILDER HELPERS
   ═══════════════════════════════════════════════════════════════════════ */
-  function _infoSection(id, title, fields) {
-    var cells = fields.map(function(f){
-      var isEmpty = !f.val || f.val === '—' || f.val === '';
-      var copyBtn = f.copy && !isEmpty
-        ? ' <span onclick="_cibilCopy(\''+esc(f.val)+'\',this)" title="Copy" style="cursor:pointer;margin-left:5px;font-size:11px;color:var(--text3)">📋</span>'
-        : '';
-      return '<div class="cibil-kv-cell">' +
-        '<div class="cibil-kv-lbl">'+esc(f.lbl)+'</div>' +
-        '<div class="cibil-kv-val '+(isEmpty?'empty':'')+'">'+esc(f.val||'—')+copyBtn+'</div>' +
-      '</div>';
-    }).join('');
-    return '<div class="cibil-section" id="'+id+'" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px">' +
-      '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:12px">'+title+'</div>' +
-      '<div class="cibil-kv-grid">'+cells+'</div>' +
-    '</div>';
-  }
 
-  function _emptySection(id, title, msg) {
-    return '<div class="cibil-section" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px">' +
-      '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:12px">'+title+'</div>' +
-      '<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">'+esc(msg)+'</div>' +
-    '</div>';
-  }
 
   /* ═══════════════════════════════════════════════════════════════════════
      12. DATA RESOLVER HELPERS

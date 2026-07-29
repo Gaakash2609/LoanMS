@@ -16,24 +16,6 @@
     return Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  function makeTableRows(arr, cols) {
-    if (!arr || !arr.length) return '<tr><td colspan="' + cols + '" style="text-align:center;padding:12px;color:var(--text3)">None detected</td></tr>';
-    return arr.map(function(t) {
-      return '<tr style="border-bottom:1px solid var(--border)">' +
-        cols.map(function(c) {
-          var val = t[c.key] !== undefined ? t[c.key] : '—';
-          var style = 'padding:8px 10px;' + (c.right ? 'text-align:right;' : '') + (c.style || '');
-          if (c.key === 'type') {
-            var color = val === 'CR' ? 'color:#16a34a;font-weight:700' : 'color:#dc2626;font-weight:700';
-            return '<td style="' + style + color + '">' + val + '</td>';
-          }
-          if (c.key === 'amount') val = '₹ ' + fmt(val);
-          if (c.key === 'balance') val = '₹ ' + fmt(val);
-          return '<td style="' + style + '">' + (val || '—') + '</td>';
-        }).join('') +
-      '</tr>';
-    }).join('');
-  }
 
   // ══ Keyword helper functions (mirrored from perfios/js/perfios.js) ══
   function _pfr_getSalaryKeyword(desc) {
@@ -91,8 +73,6 @@
     function tag(text,color) { return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;background:'+color+'22;color:'+color+';border:1px solid '+color+'33;white-space:nowrap">'+text+'</span>'; }
     function summCard(label,val,color) { return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">'+label+'</div><div style="font-size:15px;font-weight:700;color:'+(color||'var(--text)')+'">'+val+'</div></div>'; }
     function noRows(cols,msg) { return '<tr><td colspan="'+cols+'" style="padding:24px;text-align:center;color:var(--text3)">'+msg+'</td></tr>'; }
-    function panelWrap(title,content) { return '<div class="card" style="margin-bottom:0"><div class="card-head"><div class="card-title">'+title+'</div></div>'+content+'</div>'; }
-    function tblWrap(html) { return '<div style="overflow-x:auto">'+html+'</div>'; }
     function summGrid(items) { return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:14px">'+items+'</div>'; }
 
     // Show data section

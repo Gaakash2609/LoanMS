@@ -1,7 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { isAxiosError } from 'axios'
 import { wizardApi, type WizardSubmitPayload } from '@/api/wizardApi'
+import { loansApi } from '@/api/loansApi'
 import { kycApi } from '@/api/kycApi'
 import { useAuthStore } from '@/store/authStore'
 import { CheckCircle, ChevronRight, ChevronLeft, AlertCircle, Upload, Loader, CheckCircle2 } from 'lucide-react'
@@ -12,6 +14,29 @@ import { createDraftId, saveDraft, getDraft, deleteDraft } from '@/utils/draftSt
 
 function fmtINR(n: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+}
+
+// Shared field-format patterns — kept in sync with the backend's
+// ValidateFieldFormats so the two never disagree about what's valid.
+const MOBILE_RE = /^\d{10}$/
+const PIN_RE     = /^\d{6}$/
+const AADHAR_RE  = /^\d{12}$/
+const EMAIL_RE   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PAN_RE     = /^[A-Z]{5}[0-9]{4}[A-Z]$/
+
+// Extracts a human-readable message from a failed API call. The backend
+// returns { success: false, errors: string[] } on validation failures (e.g.
+// duplicate-application checks) — axios's own error.message is just a
+// generic "Request failed with status code 400" and never surfaces that.
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (isAxiosError(error)) {
+    const errors = error.response?.data?.errors as string[] | undefined
+    if (errors?.length) return errors.join(' ')
+    const message = error.response?.data?.message as string | undefined
+    if (message) return message
+  }
+  if (error instanceof Error && error.message) return error.message
+  return fallback
 }
 
 // ── Constants matching legacy frontend ────────────────────────────────────────
@@ -71,6 +96,8 @@ interface WizardData {
   // Step 1
   mobile: string; pan: string; location: string; salesPerson: string
   channel: string; dsaName: string
+  // Phase 2A — actual FK ids selected alongside the display fields above.
+  dsaId: string; partnerId: string
   // Step 2 (KYC - manual entry in React version)
   kycFirstName: string; kycLastName: string; kycDob: string
   kycAadhar: string; kycGender: string; kycFather: string
@@ -92,6 +119,7 @@ interface WizardData {
 
 const emptyData: WizardData = {
   mobile: '', pan: '', location: '', salesPerson: '', channel: 'direct', dsaName: '',
+  dsaId: '', partnerId: '',
   kycFirstName: '', kycLastName: '', kycDob: '', kycAadhar: '', kycGender: '', kycFather: '',
   kycStreet1: '', kycCity: '', kycState: '', kycPin: '',
   firstName: '', middleName: '', lastName: '', dob: '', gender: '', aadhar: '', email: '', phone: '', father: '',
@@ -117,17 +145,45 @@ function FormGroup({ label, required, error, children }: {
   )
 }
 
-function TextInput({ value, onChange, placeholder, type = 'text', maxLength, className = '' }: {
+function TextInput({
+  value, onChange, placeholder, type = 'text', inputMode, pattern, maxLength, minLength,
+  className = '', digitsOnly, decimalOnly,
+}: {
   value: string; onChange: (v: string) => void; placeholder?: string
-  type?: string; maxLength?: number; className?: string
+  type?: string
+  inputMode?: 'text' | 'numeric' | 'decimal' | 'tel' | 'email' | 'search' | 'url' | 'none'
+  pattern?: string; maxLength?: number; minLength?: number; className?: string
+  // Filters what can be typed at all — not just what's flagged as an error
+  // afterwards. digitsOnly strips anything but 0-9 (mobile/PIN/Aadhaar/
+  // tenure/CIBIL). decimalOnly strips anything but 0-9 and a single decimal
+  // point (money/rate fields like salary, EMI obligations, loan amount).
+  digitsOnly?: boolean
+  decimalOnly?: boolean
 }) {
+  const filter = (raw: string): string => {
+    let v = raw
+    if (digitsOnly) {
+      v = v.replace(/\D/g, '')
+    } else if (decimalOnly) {
+      v = v.replace(/[^0-9.]/g, '')
+      const firstDot = v.indexOf('.')
+      if (firstDot !== -1) {
+        v = v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, '')
+      }
+    }
+    if (maxLength && v.length > maxLength) v = v.slice(0, maxLength)
+    return v
+  }
   return (
     <input
       type={type}
+      inputMode={inputMode}
+      pattern={pattern}
       value={value}
-      onChange={e => onChange(e.target.value)}
+      onChange={e => onChange(filter(e.target.value))}
       placeholder={placeholder}
       maxLength={maxLength}
+      minLength={minLength}
       className={`w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${className}`}
     />
   )
@@ -169,12 +225,14 @@ function Step1({ data, onChange, errors }: {
     queryFn: () => wizardApi.getUsers().then(r => r.data.data ?? []),
     staleTime: 300_000,
   })
-  const { data: dsaList } = useQuery({
+  const { data: dsaPartnerList } = useQuery({
     queryKey: ['wizard-dsa'],
     queryFn: () => wizardApi.getDsaPartners().then(r => r.data.data ?? []),
     staleTime: 300_000,
-    enabled: data.channel === 'dsa',
+    enabled: data.channel === 'dsa' || data.channel === 'agent',
   })
+  const dsaList     = (dsaPartnerList ?? []).filter(d => d.partnerType === 'Dsa')
+  const partnerList = (dsaPartnerList ?? []).filter(d => d.partnerType === 'Partner')
 
   const salesUsers = (usersResp ?? []).filter(u => ['Sales', 'Manager', 'Admin'].includes(u.role))
 
@@ -182,12 +240,14 @@ function Step1({ data, onChange, errors }: {
     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
       <FormGroup label="Mobile Number" required error={errors.mobile}>
         <TextInput value={data.mobile} onChange={v => onChange({ mobile: v })}
-          placeholder="10-digit mobile" maxLength={10} type="tel" />
+          placeholder="10-digit mobile" maxLength={10} minLength={10}
+          type="tel" inputMode="numeric" pattern="\d{10}" digitsOnly />
       </FormGroup>
 
       <FormGroup label="PAN Card Number" required error={errors.pan}>
-        <TextInput value={data.pan} onChange={v => onChange({ pan: v.toUpperCase() })}
-          placeholder="ABCDE1234F" maxLength={10} className="uppercase font-mono" />
+        <TextInput value={data.pan} onChange={v => onChange({ pan: v.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
+          placeholder="ABCDE1234F" maxLength={10} minLength={10}
+          pattern="[A-Z]{5}[0-9]{4}[A-Z]" className="uppercase font-mono" />
       </FormGroup>
 
       <FormGroup label="Location" required error={errors.location}>
@@ -209,17 +269,32 @@ function Step1({ data, onChange, errors }: {
       </FormGroup>
 
       <FormGroup label="Channel">
-        <SelectInput value={data.channel} onChange={v => onChange({ channel: v, dsaName: '' })}
+        <SelectInput value={data.channel}
+          onChange={v => onChange({ channel: v, dsaName: '', dsaId: '', partnerId: '' })}
           options={CHANNELS} />
       </FormGroup>
 
       {data.channel === 'dsa' && (
-        <FormGroup label="DSA Name">
+        <FormGroup label="DSA Name" required error={errors.dsaId}>
           <SelectInput
-            value={data.dsaName}
-            onChange={v => onChange({ dsaName: v })}
-            options={(dsaList ?? []).map(d => ({ value: d.name, label: `${d.name} (${d.code})` }))}
+            value={data.dsaId}
+            onChange={v => {
+              const selected = dsaList.find(d => String(d.id) === v)
+              onChange({ dsaId: v, dsaName: selected?.name ?? '' })
+            }}
+            options={dsaList.map(d => ({ value: String(d.id), label: `${d.name} (${d.code})` }))}
             placeholder="— Select DSA —"
+          />
+        </FormGroup>
+      )}
+
+      {data.channel === 'agent' && (
+        <FormGroup label="Partner Name" required error={errors.partnerId}>
+          <SelectInput
+            value={data.partnerId}
+            onChange={v => onChange({ partnerId: v })}
+            options={partnerList.map(p => ({ value: String(p.id), label: `${p.name} (${p.code})` }))}
+            placeholder="— Select Partner —"
           />
         </FormGroup>
       )}
@@ -227,7 +302,9 @@ function Step1({ data, onChange, errors }: {
   )
 }
 
-function Step2({ data, onChange }: { data: WizardData; onChange: (f: Partial<WizardData>) => void }) {
+function Step2({ data, onChange, errors }: {
+  data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
+}) {
   const [panImages, setPanImages] = useState<File[]>([])
   const [aadhaarImages, setAadhaarImages] = useState<File[]>([])
   const [extractionStatus, setExtractionStatus] = useState<{
@@ -459,7 +536,7 @@ Extract exactly what is on the card. Be accurate.`,
 
         {/* PAN Fields */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-4 mt-4">
-          <FormGroup label="First Name (from PAN)">
+          <FormGroup label="First Name (from PAN)" error={errors.kycFirstName}>
             <TextInput value={data.kycFirstName} onChange={v => onChange({ kycFirstName: v, firstName: v })}
               placeholder="—" />
           </FormGroup>
@@ -547,10 +624,11 @@ Extract exactly what is on the card. Be accurate.`,
 
         {/* Aadhaar Fields */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-4 mt-4">
-          <FormGroup label="Aadhaar Number">
+          <FormGroup label="Aadhaar Number" required error={errors.kycAadhar}>
             <TextInput value={data.kycAadhar}
-              onChange={v => onChange({ kycAadhar: v.replace(/\s/g,''), aadhar: v.replace(/\s/g,'') })}
-              placeholder="XXXX XXXX XXXX" maxLength={12}
+              onChange={v => onChange({ kycAadhar: v, aadhar: v })}
+              placeholder="XXXXXXXXXXXX" maxLength={12} minLength={12}
+              inputMode="numeric" pattern="\d{12}" digitsOnly
               className="font-mono" />
           </FormGroup>
           <FormGroup label="Date of Birth">
@@ -570,9 +648,10 @@ Extract exactly what is on the card. Be accurate.`,
             <TextInput value={data.kycState} onChange={v => onChange({ kycState: v, state: v })}
               placeholder="—" />
           </FormGroup>
-          <FormGroup label="PIN Code">
+          <FormGroup label="PIN Code" error={errors.kycPin}>
             <TextInput value={data.kycPin} onChange={v => onChange({ kycPin: v, zip: v })}
-              placeholder="—" maxLength={6} />
+              placeholder="6-digit PIN" maxLength={6} minLength={6}
+              inputMode="numeric" pattern="\d{6}" digitsOnly />
           </FormGroup>
         </div>
       </div>
@@ -601,17 +680,19 @@ function Step3({ data, onChange, errors }: {
         <SelectInput value={data.gender} onChange={v => onChange({ gender: v })}
           options={['Male', 'Female', 'Other']} placeholder="— Select —" />
       </FormGroup>
-      <FormGroup label="Aadhaar Number">
+      <FormGroup label="Aadhaar Number" error={errors.aadhar}>
         <TextInput value={data.aadhar} onChange={v => onChange({ aadhar: v })}
-          placeholder="12-digit Aadhaar" maxLength={12} className="font-mono" />
+          placeholder="12-digit Aadhaar" maxLength={12} minLength={12}
+          inputMode="numeric" pattern="\d{12}" digitsOnly className="font-mono" />
       </FormGroup>
-      <FormGroup label="Email Address">
+      <FormGroup label="Email Address" error={errors.email}>
         <TextInput value={data.email} onChange={v => onChange({ email: v })}
-          type="email" placeholder="email@example.com" />
+          type="email" inputMode="email" placeholder="email@example.com" />
       </FormGroup>
-      <FormGroup label="Alternate Phone">
+      <FormGroup label="Alternate Phone" error={errors.phone}>
         <TextInput value={data.phone} onChange={v => onChange({ phone: v })}
-          type="tel" placeholder="Alternate number" maxLength={10} />
+          type="tel" inputMode="numeric" pattern="\d{10}" digitsOnly
+          placeholder="10-digit alternate number" maxLength={10} minLength={10} />
       </FormGroup>
       <FormGroup label="Father's Name">
         <TextInput value={data.father} onChange={v => onChange({ father: v })}
@@ -621,7 +702,9 @@ function Step3({ data, onChange, errors }: {
   )
 }
 
-function Step4({ data, onChange }: { data: WizardData; onChange: (f: Partial<WizardData>) => void }) {
+function Step4({ data, onChange, errors }: {
+  data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
+}) {
   const handleSameAddr = (checked: boolean) => {
     if (checked) {
       onChange({
@@ -638,23 +721,25 @@ function Step4({ data, onChange }: { data: WizardData; onChange: (f: Partial<Wiz
     <div>
       <p className="text-xs font-semibold text-gray-500 uppercase mb-4">Current Address</p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
-        <FormGroup label="House / Flat No.">
+        <FormGroup label="House / Flat No." required error={errors.street1}>
           <TextInput value={data.street1} onChange={v => onChange({ street1: v })} placeholder="Flat no, Floor" />
         </FormGroup>
         <FormGroup label="Street & Locality">
           <TextInput value={data.street2} onChange={v => onChange({ street2: v })} placeholder="Road, Area, Colony" />
         </FormGroup>
-        <FormGroup label="City">
+        <FormGroup label="City" required error={errors.city}>
           <TextInput value={data.city} onChange={v => onChange({ city: v })} placeholder="City" />
         </FormGroup>
-        <FormGroup label="Pin Code">
-          <TextInput value={data.zip} onChange={v => onChange({ zip: v })} placeholder="6-digit pin" maxLength={6} />
+        <FormGroup label="Pin Code" required error={errors.zip}>
+          <TextInput value={data.zip} onChange={v => onChange({ zip: v })}
+            placeholder="6-digit pin" maxLength={6} minLength={6}
+            inputMode="numeric" pattern="\d{6}" digitsOnly />
         </FormGroup>
-        <FormGroup label="State">
+        <FormGroup label="State" required error={errors.state}>
           <SelectInput value={data.state} onChange={v => onChange({ state: v })}
             options={STATES} placeholder="— Select State —" />
         </FormGroup>
-        <FormGroup label="Home Type">
+        <FormGroup label="Home Type" required error={errors.homeType}>
           <SelectInput value={data.homeType} onChange={v => onChange({ homeType: v })}
             options={HOME_TYPES} placeholder="— Select —" />
         </FormGroup>
@@ -682,8 +767,10 @@ function Step4({ data, onChange }: { data: WizardData; onChange: (f: Partial<Wiz
             <FormGroup label="City">
               <TextInput value={data.pCity} onChange={v => onChange({ pCity: v })} placeholder="City" />
             </FormGroup>
-            <FormGroup label="Pin Code">
-              <TextInput value={data.pZip} onChange={v => onChange({ pZip: v })} placeholder="6-digit pin" maxLength={6} />
+            <FormGroup label="Pin Code" error={errors.pZip}>
+              <TextInput value={data.pZip} onChange={v => onChange({ pZip: v })}
+                placeholder="6-digit pin" maxLength={6} minLength={6}
+                inputMode="numeric" pattern="\d{6}" digitsOnly />
             </FormGroup>
             <FormGroup label="State">
               <SelectInput value={data.pState} onChange={v => onChange({ pState: v })}
@@ -712,11 +799,11 @@ function Step5({ data, onChange, errors }: {
         </FormGroup>
         <FormGroup label="Gross Monthly Income (₹)" required error={errors.salary}>
           <TextInput value={data.salary} onChange={v => onChange({ salary: v })}
-            type="number" placeholder="e.g. 50000" />
+            inputMode="decimal" decimalOnly placeholder="e.g. 50000" />
         </FormGroup>
-        <FormGroup label="Existing Monthly EMI Obligations (₹)">
+        <FormGroup label="Existing Monthly EMI Obligations (₹)" error={errors.obligations}>
           <TextInput value={data.obligations} onChange={v => onChange({ obligations: v })}
-            type="number" placeholder="0 if none" />
+            inputMode="decimal" decimalOnly placeholder="0 if none" />
         </FormGroup>
         <FormGroup label="Designation">
           <TextInput value={data.desig} onChange={v => onChange({ desig: v })} placeholder="e.g. Manager" />
@@ -735,7 +822,7 @@ function Step5({ data, onChange, errors }: {
           </FormGroup>
           <FormGroup label="Official Email ID" required error={errors.officeEmail}>
             <TextInput value={data.officeEmail} onChange={v => onChange({ officeEmail: v })}
-              type="email" placeholder="e.g. name@company.com" />
+              type="email" inputMode="email" placeholder="e.g. name@company.com" />
           </FormGroup>
         </div>
       )}
@@ -770,21 +857,23 @@ function Step6({ data, onChange, errors }: {
         <FormGroup label="Loan Type" required>
           <SelectInput value={data.loanType} onChange={v => onChange({ loanType: v })} options={LOAN_TYPES} />
         </FormGroup>
-        <FormGroup label="CIBIL Score">
+        <FormGroup label="CIBIL Score" error={errors.cibil}>
           <TextInput value={data.cibil} onChange={v => onChange({ cibil: v })}
-            type="number" placeholder="e.g. 750" />
+            inputMode="numeric" pattern="\d{3}" digitsOnly maxLength={3}
+            placeholder="e.g. 750" />
         </FormGroup>
         <FormGroup label="Loan Amount (₹)" required error={errors.amount}>
           <TextInput value={data.amount} onChange={v => onChange({ amount: v })}
-            type="number" placeholder="e.g. 500000" />
+            inputMode="decimal" decimalOnly placeholder="e.g. 500000" />
         </FormGroup>
         <FormGroup label="Interest Rate (% p.a.)" required error={errors.loanRate}>
           <TextInput value={data.loanRate} onChange={v => onChange({ loanRate: v })}
-            type="number" placeholder="e.g. 12.5" />
+            inputMode="decimal" decimalOnly placeholder="e.g. 12.5" />
         </FormGroup>
         <FormGroup label="Tenure (months)" required error={errors.tenure}>
           <TextInput value={data.tenure} onChange={v => onChange({ tenure: v })}
-            type="number" placeholder="e.g. 24" />
+            inputMode="numeric" pattern="\d+" digitsOnly maxLength={3}
+            placeholder="e.g. 24" />
         </FormGroup>
         <FormGroup label="Purpose / Remarks">
           <TextInput value={data.purpose} onChange={v => onChange({ purpose: v })}
@@ -819,18 +908,26 @@ function Step6({ data, onChange, errors }: {
   )
 }
 
-function Step7({ data, onChange }: { data: WizardData; onChange: (f: Partial<WizardData>) => void }) {
+function Step7({ data, onChange, errors }: {
+  data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
+}) {
   return (
     <div>
+      {errors.references && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
+          <AlertCircle size={16} />{errors.references}
+        </div>
+      )}
       <div className="mb-6">
         <p className="text-xs font-semibold text-gray-500 uppercase mb-4">Reference 1</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-4">
           <FormGroup label="Name">
             <TextInput value={data.r1Name} onChange={v => onChange({ r1Name: v })} placeholder="Full name" />
           </FormGroup>
-          <FormGroup label="Mobile">
+          <FormGroup label="Mobile" error={errors.r1Mobile}>
             <TextInput value={data.r1Mobile} onChange={v => onChange({ r1Mobile: v })}
-              type="tel" placeholder="10-digit mobile" maxLength={10} />
+              type="tel" inputMode="numeric" pattern="\d{10}" digitsOnly
+              placeholder="10-digit mobile" maxLength={10} minLength={10} />
           </FormGroup>
           <FormGroup label="Relationship">
             <SelectInput value={data.r1Relation} onChange={v => onChange({ r1Relation: v })}
@@ -844,9 +941,10 @@ function Step7({ data, onChange }: { data: WizardData; onChange: (f: Partial<Wiz
           <FormGroup label="Name">
             <TextInput value={data.r2Name} onChange={v => onChange({ r2Name: v })} placeholder="Full name" />
           </FormGroup>
-          <FormGroup label="Mobile">
+          <FormGroup label="Mobile" error={errors.r2Mobile}>
             <TextInput value={data.r2Mobile} onChange={v => onChange({ r2Mobile: v })}
-              type="tel" placeholder="10-digit mobile" maxLength={10} />
+              type="tel" inputMode="numeric" pattern="\d{10}" digitsOnly
+              placeholder="10-digit mobile" maxLength={10} minLength={10} />
           </FormGroup>
           <FormGroup label="Relationship">
             <SelectInput value={data.r2Relation} onChange={v => onChange({ r2Relation: v })}
@@ -1027,20 +1125,104 @@ export default function NewApplicationPage() {
   const [stepErrors, setStepErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState('')
   const [documents, setDocuments] = useState<Record<string, File | null>>({})
+  const [docUploadWarning, setDocUploadWarning] = useState('')
+  // The id of the backend Draft Loan record this wizard session is tied to
+  // (see wizardApi.saveDraft). Once set, every subsequent draft-save,
+  // validate, and final submit call reuses this same record instead of the
+  // final submit accidentally creating a brand-new, duplicate Loan.
+  const [serverLoanId, setServerLoanId] = useState<number | undefined>(resumedDraft?.loanId)
+  // Set once submission succeeds. Its presence gates the wizard body off the
+  // screen in favour of a confirmation screen — which is also what actually
+  // prevents a duplicate submission (there's no longer a Submit button to
+  // click again).
+  const [submissionResult, setSubmissionResult] = useState<{
+    applicationId: number; eFinId: string; loanNumber: string; monthlyEmi: number
+  } | null>(null)
 
-  // Autosave the in-progress wizard as a Draft so it can be resumed later
-  // from Applications → Drafts. Debounced to avoid writing on every keystroke.
-  // File uploads (Stage 8) are intentionally excluded — they cannot be
+  // Builds the API payload from the current wizard state. Shared by the
+  // backend draft autosave, the pre-submit duplicate-application validation,
+  // and the final submit so all three always agree on what "the application"
+  // currently looks like.
+  const buildPayload = useCallback((): WizardSubmitPayload => ({
+    loanId:      serverLoanId,
+    mobile:      data.mobile,
+    pan:         data.pan,
+    fullName:    [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' '),
+    email:       data.email,
+    dob:         data.dob,
+    gender:      data.gender,
+    aadhar:      data.aadhar || data.kycAadhar,
+    fatherName:  data.father || data.kycFather,
+    street1:     data.street1,
+    street2:     data.street2,
+    city:        data.city || data.kycCity,
+    state:       data.state || data.kycState,
+    zip:         data.zip || data.kycPin,
+    homeType:    data.homeType,
+    empType:     data.empType === 'salaried' ? 'SALARIED'
+                : data.empType === 'self_employed' ? 'SELFEMP'
+                : data.empType === 'professional' ? 'PROFESSIONAL'
+                : data.empType,
+    compName:    data.compName,
+    compType:    data.compType,
+    salary:      parseFloat(data.salary) || 0,
+    desig:       data.desig,
+    officeEmail: data.officeEmail,
+    loanType:    data.loanType,
+    amount:      parseFloat(data.amount) || 0,
+    loanRate:    parseFloat(data.loanRate) || 12,
+    tenure:      parseInt(data.tenure) || 24,
+    purpose:     data.purpose,
+    cibil:       data.cibil ? parseInt(data.cibil) : undefined,
+    r1Name:      data.r1Name,
+    r1Mobile:    data.r1Mobile,
+    r1Relation:  data.r1Relation,
+    r2Name:      data.r2Name,
+    r2Mobile:    data.r2Mobile,
+    r2Relation:  data.r2Relation,
+    salesPerson: data.salesPerson,
+    channel:     data.channel,
+    dsaName:     data.dsaName,
+    location:    data.location,
+    dsaId:       data.channel === 'dsa'   && data.dsaId     ? parseInt(data.dsaId)     : undefined,
+    partnerId:   data.channel === 'agent' && data.partnerId ? parseInt(data.partnerId) : undefined,
+    locationId:  data.location ? parseInt(data.location) : undefined,
+  }), [data, serverLoanId])
+
+  // Autosave the in-progress wizard so it can be resumed later from
+  // Applications → Drafts. Debounced to avoid writing on every keystroke.
+  // File uploads (Step 8) are intentionally excluded — they cannot be
   // serialized to local storage and are re-attached on resume.
+  //
+  // Two layers: localStorage always (instant, offline-safe), plus a
+  // backend-integrated Draft Loan record once there's enough to save
+  // (mobile or name) — this is what lets a draft be resumed from the same
+  // database record rather than only from this browser's storage.
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       const label = [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ')
         || data.mobile || 'Untitled application'
-      saveDraft(draftId, step, data, label, data.loanType)
-    }, 500)
+      saveDraft(draftId, step, data, label, data.loanType, serverLoanId)
+
+      const fullName = [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ')
+      if (data.mobile || fullName) {
+        wizardApi.saveDraft(buildPayload()).then(res => {
+          const loanId = res.data.data?.loanId
+          if (loanId) {
+            setServerLoanId(loanId)
+            saveDraft(draftId, step, data, label, data.loanType, loanId)
+          }
+        }).catch(() => {
+          // Autosave to the backend is best-effort — localStorage above
+          // already has this progress, so a failed sync here never loses
+          // the user's work.
+        })
+      }
+    }, 800)
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId, step, data])
 
   const setDocument = useCallback((key: string, file: File | null) => {
@@ -1068,46 +1250,57 @@ export default function NewApplicationPage() {
     const errs: Record<string, string> = {}
 
     if (step === 1) {
-      if (!data.mobile || data.mobile.length !== 10) errs.mobile = 'Enter valid 10-digit mobile number'
-      if (!data.pan || data.pan.length !== 10 || !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(data.pan))
-        errs.pan = 'Enter valid PAN (e.g. ABCDE1234F)'
+      if (!MOBILE_RE.test(data.mobile)) errs.mobile = 'Enter a valid 10-digit mobile number (numbers only)'
+      if (!PAN_RE.test(data.pan)) errs.pan = 'Enter valid PAN (e.g. ABCDE1234F)'
       if (!data.location) errs.location = 'Please select a Location'
       if (!data.salesPerson) errs.salesPerson = 'Please select a Sales Person'
-      if (data.channel === 'dsa' && !data.dsaName) errs.dsaName = 'DSA name is required for DSA channel'
+      if (data.channel === 'dsa' && !data.dsaId) errs.dsaId = 'DSA name is required for DSA channel'
+      if (data.channel === 'agent' && !data.partnerId) errs.partnerId = 'Partner name is required for Partner/Agent channel'
     }
     if (step === 2) {
-      if (!data.kycAadhar || data.kycAadhar.length !== 12) errs.kycAadhar = 'Aadhaar number (12 digits) is required'
+      if (!AADHAR_RE.test(data.kycAadhar)) errs.kycAadhar = 'Enter a valid 12-digit Aadhaar number'
       if (!data.kycFirstName && !data.firstName) errs.kycFirstName = 'Name is required from KYC'
+      if (data.kycPin && !PIN_RE.test(data.kycPin)) errs.kycPin = 'Enter a valid 6-digit PIN code'
     }
     if (step === 3) {
       if (!data.firstName) errs.firstName = 'First Name is required'
       if (!data.lastName) errs.lastName = 'Last Name is required'
       if (!data.gender) errs.gender = 'Gender is required'
       if (!data.dob) errs.dob = 'Date of Birth is required'
+      if (data.aadhar && !AADHAR_RE.test(data.aadhar)) errs.aadhar = 'Enter a valid 12-digit Aadhaar number'
+      if (data.email && !EMAIL_RE.test(data.email)) errs.email = 'Enter a valid email address (e.g. name@example.com)'
+      if (data.phone && !MOBILE_RE.test(data.phone)) errs.phone = 'Enter a valid 10-digit mobile number (numbers only)'
     }
     if (step === 4) {
       // Address step validation
       if (!data.street1) errs.street1 = 'Current street address is required'
       if (!data.city) errs.city = 'Current city is required'
       if (!data.state) errs.state = 'Current state is required'
-      if (!data.zip || data.zip.length !== 6) errs.zip = 'Valid 6-digit PIN code is required'
+      if (!PIN_RE.test(data.zip)) errs.zip = 'Enter a valid 6-digit PIN code (numbers only)'
       if (!data.homeType) errs.homeType = 'Home type is required'
+      if (!data.sameAddr && data.pZip && !PIN_RE.test(data.pZip))
+        errs.pZip = 'Enter a valid 6-digit PIN code (numbers only)'
     }
     if (step === 5) {
       if (!data.empType) errs.empType = 'Employment Type is required'
       if (!data.salary || parseFloat(data.salary) <= 0) errs.salary = 'Monthly income is required'
+      if (data.obligations && parseFloat(data.obligations) < 0) errs.obligations = 'Obligations cannot be negative'
       if (data.empType !== 'self_employed') {
         if (!data.compName) errs.compName = 'Company name is required'
         if (!data.desig) errs.desig = 'Designation is required'
         if (!data.officeEmail) errs.officeEmail = 'Official Email ID is required'
+        else if (!EMAIL_RE.test(data.officeEmail)) errs.officeEmail = 'Enter a valid email address (e.g. name@company.com)'
       }
     }
     if (step === 6) {
       if (!data.loanType) errs.loanType = 'Loan type is required'
-      if (!data.amount || parseFloat(data.amount) <= 0) errs.amount = 'Loan amount is required'
-      if (!data.loanRate || parseFloat(data.loanRate) <= 0) errs.loanRate = 'Interest rate is required'
-      if (!data.tenure || parseInt(data.tenure) <= 0) errs.tenure = 'Tenure (months) is required'
+      if (!data.amount || parseFloat(data.amount) <= 0) errs.amount = 'Loan amount must be greater than 0'
+      if (!data.loanRate || parseFloat(data.loanRate) <= 0) errs.loanRate = 'Interest rate must be greater than 0'
+      if (!data.tenure || !/^\d+$/.test(data.tenure) || parseInt(data.tenure) <= 0 || parseInt(data.tenure) > 360)
+        errs.tenure = 'Tenure must be a whole number between 1 and 360 months'
       if (!data.purpose) errs.purpose = 'Loan purpose is required'
+      if (data.cibil && (parseInt(data.cibil) < 300 || parseInt(data.cibil) > 900))
+        errs.cibil = 'CIBIL score must be between 300 and 900'
     }
     if (step === 7) {
       // References - at least one reference required
@@ -1117,7 +1310,9 @@ export default function NewApplicationPage() {
         errs.references = 'At least one reference is required'
       }
       if (data.r1Name && !data.r1Mobile) errs.r1Mobile = 'Reference 1 mobile is required'
+      else if (data.r1Mobile && !MOBILE_RE.test(data.r1Mobile)) errs.r1Mobile = 'Enter a valid 10-digit mobile number'
       if (data.r2Name && !data.r2Mobile) errs.r2Mobile = 'Reference 2 mobile is required'
+      else if (data.r2Mobile && !MOBILE_RE.test(data.r2Mobile)) errs.r2Mobile = 'Enter a valid 10-digit mobile number'
     }
     if (step === 8) {
       // Mandatory documents - application cannot proceed/submit without these
@@ -1134,73 +1329,67 @@ export default function NewApplicationPage() {
   }
 
   const submit = useMutation({
-    mutationFn: () => {
-      const payload: WizardSubmitPayload = {
-        mobile:      data.mobile,
-        pan:         data.pan,
-        fullName:    [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' '),
-        email:       data.email,
-        dob:         data.dob,
-        gender:      data.gender,
-        aadhar:      data.aadhar || data.kycAadhar,
-        fatherName:  data.father || data.kycFather,
-        street1:     data.street1,
-        street2:     data.street2,
-        city:        data.city || data.kycCity,
-        state:       data.state || data.kycState,
-        zip:         data.zip || data.kycPin,
-        homeType:    data.homeType,
-        empType:     data.empType === 'salaried' ? 'SALARIED' 
-                    : data.empType === 'self_employed' ? 'SELFEMP'
-                    : data.empType === 'professional' ? 'PROFESSIONAL'
-                    : data.empType,
-        compName:    data.compName,
-        compType:    data.compType,
-        salary:      parseFloat(data.salary) || 0,
-        desig:       data.desig,
-        officeEmail: data.officeEmail,
-        loanType:    data.loanType,
-        amount:      parseFloat(data.amount) || 0,
-        loanRate:    parseFloat(data.loanRate) || 12,
-        tenure:      parseInt(data.tenure) || 24,
-        purpose:     data.purpose,
-        cibil:       data.cibil ? parseInt(data.cibil) : undefined,
-        r1Name:      data.r1Name,
-        r1Mobile:    data.r1Mobile,
-        r1Relation:  data.r1Relation,
-        r2Name:      data.r2Name,
-        r2Mobile:    data.r2Mobile,
-        r2Relation:  data.r2Relation,
-        salesPerson: data.salesPerson,
-        channel:     data.channel,
-        dsaName:     data.dsaName,
-        location:    data.location,
+    mutationFn: async () => {
+      const res = await wizardApi.submit(buildPayload())
+      const result = res.data.data
+
+      // Upload the mandatory documents now that the loan record exists.
+      // Best-effort: the application itself has already been created
+      // successfully at this point, so a document upload hiccup is
+      // surfaced as a warning rather than failing the whole submission.
+      if (result?.loanId) {
+        const uploads: Array<Promise<unknown>> = []
+        if (documents.salarySlip3mo)
+          uploads.push(loansApi.uploadDocument(result.loanId, documents.salarySlip3mo, 'salary_slip'))
+        if (documents.bankStatement6mo)
+          uploads.push(loansApi.uploadDocument(result.loanId, documents.bankStatement6mo, 'bank_statement'))
+
+        if (uploads.length) {
+          const outcomes = await Promise.allSettled(uploads)
+          if (outcomes.some(o => o.status === 'rejected')) {
+            setDocUploadWarning(
+              'Application submitted, but one or more documents failed to upload. ' +
+              'Please retry the upload from the application details page.'
+            )
+          }
+        }
       }
-      return wizardApi.submit(payload)
+
+      return res
     },
     onSuccess: (res) => {
       const result = res.data.data
       deleteDraft(draftId) // completed application — no longer a draft
-      if (result?.loanId) {
-        navigate(`/loans/${result.loanId}`, {
-          state: { newApplication: true, eFinId: result.eFinId, loanNumber: result.loanNumber }
+      if (result) {
+        setSubmissionResult({
+          applicationId: result.loanId, eFinId: result.eFinId,
+          loanNumber: result.loanNumber, monthlyEmi: result.monthlyEmi
         })
       }
     },
     onError: (error) => {
-      let message = 'Failed to submit application. Please check all fields and try again.'
-      if (error instanceof Error) {
-        message = error.message
-      }
-      setSubmitError(message)
+      setSubmitError(getApiErrorMessage(error, 'Failed to submit application. Please check all fields and try again.'))
+    },
+  })
+
+  // Duplicate-application check — calls the existing /api/wizard/validate
+  // endpoint (which flags an existing active application for the same PAN)
+  // before the wizard is allowed to submit. Runs as its own step so a
+  // rejected duplicate never reaches submit.mutate() at all.
+  const validateMutation = useMutation({
+    mutationFn: () => wizardApi.validate(buildPayload()),
+    onSuccess: () => submit.mutate(),
+    onError: (error) => {
+      setSubmitError(getApiErrorMessage(error, 'Please review the application before submitting.'))
     },
   })
 
   const handleNext = () => {
     if (step === TOTAL_STEPS) {
       if (!validateCurrentStep()) return
-      if (submit.isPending) return  // ✅ Prevent multiple clicks
-      submit.mutate()
+      if (submit.isPending || validateMutation.isPending) return  // ✅ Prevent multiple clicks
+      setSubmitError('')
+      validateMutation.mutate()
       return
     }
     if (!validateCurrentStep()) return
@@ -1213,6 +1402,72 @@ export default function NewApplicationPage() {
   }
 
   const progress = Math.round((step / TOTAL_STEPS) * 100)
+
+  if (submissionResult) {
+    return (
+      <div className="max-w-2xl mx-auto py-16">
+        <div className="text-center mb-8">
+          <CheckCircle2 size={56} className="mx-auto text-green-500 mb-4" />
+          <h1 className="text-xl font-bold text-gray-900 mb-1">Application Submitted Successfully</h1>
+          <p className="text-sm text-gray-500">The application has been created and is now in the pipeline.</p>
+        </div>
+
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6">
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+            <div>
+              <dt className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Application ID</dt>
+              <dd className="text-gray-900 font-semibold mt-0.5">{submissionResult.applicationId || '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Loan Number</dt>
+              <dd className="text-gray-900 font-semibold mt-0.5">{submissionResult.loanNumber}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-gray-500 uppercase tracking-wide">EFIN ID</dt>
+              <dd className="text-gray-900 font-semibold mt-0.5">{submissionResult.eFinId}</dd>
+            </div>
+            {submissionResult.monthlyEmi > 0 && (
+              <div>
+                <dt className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Estimated EMI</dt>
+                <dd className="text-gray-900 font-semibold mt-0.5">{fmtINR(submissionResult.monthlyEmi)}</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+
+        {docUploadWarning && (
+          <div className="mb-6 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700 flex items-center gap-2">
+            <AlertCircle size={16} className="shrink-0" />{docUploadWarning}
+          </div>
+        )}
+
+        <div className="flex items-center justify-center gap-3">
+          {submissionResult.applicationId > 0 && (
+            <button
+              onClick={() => navigate(`/loans/${submissionResult.applicationId}`)}
+              className="px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
+            >
+              View Application
+            </button>
+          )}
+          <button
+            onClick={() => navigate('/loans')}
+            className={submissionResult.applicationId > 0
+              ? 'px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors'
+              : 'px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors'}
+          >
+            Go to Applications
+          </button>
+          <button
+            onClick={() => { window.location.href = '/loans/new' }}
+            className="px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            Start New Application
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -1261,12 +1516,12 @@ export default function NewApplicationPage() {
         </h2>
 
         {step === 1 && <Step1 data={data} onChange={update} errors={stepErrors} />}
-        {step === 2 && <Step2 data={data} onChange={update} />}
+        {step === 2 && <Step2 data={data} onChange={update} errors={stepErrors} />}
         {step === 3 && <Step3 data={data} onChange={update} errors={stepErrors} />}
-        {step === 4 && <Step4 data={data} onChange={update} />}
+        {step === 4 && <Step4 data={data} onChange={update} errors={stepErrors} />}
         {step === 5 && <Step5 data={data} onChange={update} errors={stepErrors} />}
         {step === 6 && <Step6 data={data} onChange={update} errors={stepErrors} />}
-        {step === 7 && <Step7 data={data} onChange={update} />}
+        {step === 7 && <Step7 data={data} onChange={update} errors={stepErrors} />}
         {step === 8 && <Step8 documents={documents} onDocumentChange={setDocument} errors={stepErrors} />}
         {step === 9 && <Step9 data={data} />}
       </div>
@@ -1290,14 +1545,16 @@ export default function NewApplicationPage() {
 
         <button
           onClick={handleNext}
-          disabled={submit.isPending || (step === TOTAL_STEPS && Object.keys(stepErrors).length > 0)}
+          disabled={submit.isPending || validateMutation.isPending || (step === TOTAL_STEPS && Object.keys(stepErrors).length > 0)}
           className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
         >
-          {submit.isPending
-            ? <><Loader size={16} className="animate-spin" /> Submitting...</>
-            : step === TOTAL_STEPS
-              ? '✓ Submit Application'
-              : <>Continue <ChevronRight size={16} /></>
+          {validateMutation.isPending
+            ? <><Loader size={16} className="animate-spin" /> Checking...</>
+            : submit.isPending
+              ? <><Loader size={16} className="animate-spin" /> Submitting...</>
+              : step === TOTAL_STEPS
+                ? '✓ Submit Application'
+                : <>Continue <ChevronRight size={16} /></>
           }
         </button>
       </div>

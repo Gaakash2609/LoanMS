@@ -21,6 +21,16 @@ public class UsersController : BaseController
         return ApiResult(result);
     }
 
+    /// <summary>Get minimal active-user list (id, name, role) for dropdowns like the wizard's
+    /// Sales Person selector. Available to any authenticated role — does not expose email,
+    /// active status, or other Admin user-management fields.</summary>
+    [HttpGet("lookup")]
+    public async Task<IActionResult> GetLookup()
+    {
+        var result = await _userService.GetLookupAsync();
+        return ApiResult(result);
+    }
+
     /// <summary>Get user by ID [Admin only]</summary>
     [HttpGet("{id:int}")]
     [Authorize(Roles = "Admin")]

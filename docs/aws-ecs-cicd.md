@@ -1,5 +1,15 @@
 # AWS ECS Fargate CI/CD — Step-by-step
 
+> **Note (see `docs/DEPLOYMENT.md`):** the GitHub OIDC role described in Step 3c
+> did not work on this repo's plan (`id-token: write` requires a paid private-repo
+> plan), so the workflows in `.github/workflows/` authenticate with a long-lived
+> IAM user (`github-actions-deploy`) instead, using the `AWS_ACCESS_KEY_ID` /
+> `AWS_SECRET_ACCESS_KEY` repository secrets. Steps 1, 2, 3a, 3b, 4, 5, 6, 8, and 9
+> below are unchanged; skip Step 3c and use an IAM access key pair with the same
+> ECR + ECS permissions instead, stored as the two secrets above plus the
+> `AWS_REGION` / `ECR_REPOSITORY` / `ECS_CLUSTER` / `ECS_SERVICE` variables from
+> Step 7.
+
 ## Why ECS Fargate
 
 - Docker-native: runs your `Dockerfile` exactly as-is

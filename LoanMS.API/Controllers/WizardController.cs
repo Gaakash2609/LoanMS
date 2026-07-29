@@ -5,6 +5,7 @@ using LoanMS.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 
 namespace LoanMS.API.Controllers;
 
@@ -23,15 +24,24 @@ public class WizardController : BaseController
         _logger = logger;
     }
 
+    // NOTE: the wizard frontend sends short keys (new_car, used_car, education, lap)
+    // while some legacy callers send the longer *_loan form (new_car_loan,
+    // used_car_loan, education_loan, loan_against_property). Both are mapped here
+    // so neither one silently falls back to LoanType.Personal.
     private static readonly Dictionary<string, LoanType> _loanTypeMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["personal_loan"]  = LoanType.Personal,
-        ["business_loan"]  = LoanType.Business,
-        ["home_loan"]      = LoanType.Home,
-        ["new_car_loan"]   = LoanType.Car,
-        ["used_car_loan"]  = LoanType.Car,
-        ["education_loan"] = LoanType.Education,
-        ["insurance"]      = LoanType.Personal,
+        ["personal_loan"]         = LoanType.Personal,
+        ["business_loan"]         = LoanType.Business,
+        ["home_loan"]             = LoanType.Home,
+        ["new_car_loan"]          = LoanType.Car,
+        ["new_car"]               = LoanType.Car,
+        ["used_car_loan"]         = LoanType.Car,
+        ["used_car"]              = LoanType.Car,
+        ["education_loan"]        = LoanType.Education,
+        ["education"]             = LoanType.Education,
+        ["loan_against_property"] = LoanType.LAP,
+        ["lap"]                   = LoanType.LAP,
+        ["insurance"]             = LoanType.Personal,
     };
 
     private static decimal CalcEmi(decimal principal, decimal ratePercent, int months)
@@ -42,17 +52,200 @@ public class WizardController : BaseController
         return Math.Round(principal * r * pow / (pow - 1), 2);
     }
 
+    // ── Field-format validation ──────────────────────────────────────────────
+    // Mirrors the frontend's input rules exactly, so a request that bypasses
+    // the UI (curl/Postman/a modified client) can never slip malformed data
+    // past the API. Digits-only, exact-length patterns for mobile/PIN/Aadhaar;
+    // a standard local@domain.tld shape for email; the usual PAN format.
+    private static readonly Regex MobileRegex = new(@"^\d{10}$", RegexOptions.Compiled);
+    private static readonly Regex ZipRegex    = new(@"^\d{6}$", RegexOptions.Compiled);
+    private static readonly Regex AadharRegex = new(@"^\d{12}$", RegexOptions.Compiled);
+    private static readonly Regex EmailRegex  = new(@"^[^\s@]+@[^\s@]+\.[^\s@]+$", RegexOptions.Compiled);
+    private static readonly Regex PanRegex    = new(@"^[A-Z]{5}\d{4}[A-Z]$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Validates the *format* of whichever fields were actually supplied —
+    /// it never enforces required-ness (that differs by wizard step and by
+    /// whether this is a draft autosave or a final submit; callers add their
+    /// own required-field checks on top of this). Shared by Submit and
+    /// Validate so the two can never drift apart on what counts as valid.
+    /// </summary>
+    private static List<string> ValidateFieldFormats(WizardSubmitDto dto)
+    {
+        var errors = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(dto.Mobile) && !MobileRegex.IsMatch(dto.Mobile.Trim()))
+            errors.Add("Mobile number must be exactly 10 digits.");
+
+        if (!string.IsNullOrWhiteSpace(dto.Pan) && !PanRegex.IsMatch(dto.Pan.Trim().ToUpperInvariant()))
+            errors.Add("PAN number format is invalid (expected format: ABCDE1234F).");
+
+        if (!string.IsNullOrWhiteSpace(dto.Email) && !EmailRegex.IsMatch(dto.Email.Trim()))
+            errors.Add("Email address format is invalid.");
+
+        if (!string.IsNullOrWhiteSpace(dto.OfficeEmail) && !EmailRegex.IsMatch(dto.OfficeEmail.Trim()))
+            errors.Add("Official email address format is invalid.");
+
+        if (!string.IsNullOrWhiteSpace(dto.Aadhar) && !AadharRegex.IsMatch(dto.Aadhar.Trim()))
+            errors.Add("Aadhaar number must be exactly 12 digits.");
+
+        if (!string.IsNullOrWhiteSpace(dto.Zip) && !ZipRegex.IsMatch(dto.Zip.Trim()))
+            errors.Add("PIN code must be exactly 6 digits.");
+
+        if (!string.IsNullOrWhiteSpace(dto.R1Mobile) && !MobileRegex.IsMatch(dto.R1Mobile.Trim()))
+            errors.Add("Reference 1 mobile number must be exactly 10 digits.");
+
+        if (!string.IsNullOrWhiteSpace(dto.R2Mobile) && !MobileRegex.IsMatch(dto.R2Mobile.Trim()))
+            errors.Add("Reference 2 mobile number must be exactly 10 digits.");
+
+        return errors;
+    }
+
+    /// <summary>
+    /// Validates DsaId / PartnerId / LocationId mapping (Phase 2A). Ownership,
+    /// visibility, and document-security checks are explicitly out of scope for
+    /// this phase — this only confirms the ids exist, are not deleted, and point
+    /// at the correct record type:
+    ///   - DsaId must reference a DsaPartner with PartnerType = Dsa.
+    ///   - PartnerId must reference a DsaPartner with PartnerType = Partner.
+    ///   - LocationId must reference an existing, non-deleted Location.
+    /// Shared by Submit, SaveDraft and Validate so all three enforce the same rule.
+    /// </summary>
+    private async Task<List<string>> ValidateMappingAsync(WizardSubmitDto dto)
+    {
+        var errors = new List<string>();
+
+        if (dto.DsaId.HasValue)
+        {
+            var dsa = await _db.DsaPartners.FirstOrDefaultAsync(d => d.Id == dto.DsaId.Value && !d.IsDeleted);
+            if (dsa == null)
+                errors.Add("Selected DSA was not found.");
+            else if (dsa.PartnerType != PartnerType.Dsa)
+                errors.Add("Selected DSA is not a valid DSA record.");
+        }
+
+        if (dto.PartnerId.HasValue)
+        {
+            var partner = await _db.DsaPartners.FirstOrDefaultAsync(p => p.Id == dto.PartnerId.Value && !p.IsDeleted);
+            if (partner == null)
+                errors.Add("Selected Partner was not found.");
+            else if (partner.PartnerType != PartnerType.Partner)
+                errors.Add("Selected Partner is not a valid Partner record.");
+        }
+
+        if (dto.LocationId.HasValue)
+        {
+            var locationExists = await _db.Locations.AnyAsync(l => l.Id == dto.LocationId.Value && !l.IsDeleted);
+            if (!locationExists)
+                errors.Add("Selected Location was not found.");
+        }
+
+        return errors;
+    }
+
+    /// <summary>
+    /// Applies DsaId / PartnerId / LocationId onto a Loan. Each field is only
+    /// overwritten when the incoming dto actually supplied a value — an
+    /// autosave/resume call that omits one of these must never null out or
+    /// clobber a mapping that was already saved on a draft.
+    /// </summary>
+    private static void ApplyMapping(Loan loan, WizardSubmitDto dto)
+    {
+        if (dto.DsaId.HasValue)      loan.DsaId      = dto.DsaId;
+        if (dto.PartnerId.HasValue)  loan.PartnerId  = dto.PartnerId;
+        if (dto.LocationId.HasValue) loan.LocationId = dto.LocationId;
+    }
+
+    /// <summary>
+    /// Find the customer this application belongs to (by existing loan, PAN, then
+    /// mobile) or create a new one. Shared by Submit and SaveDraft so both follow
+    /// the exact same matching rules instead of drifting apart.
+    /// </summary>
+    private async Task<Customer> FindOrCreateCustomerAsync(WizardSubmitDto dto, Loan? existingLoan)
+    {
+        Customer? customer = null;
+
+        if (existingLoan != null)
+            customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == existingLoan.CustomerId);
+
+        if (customer == null && !string.IsNullOrWhiteSpace(dto.Pan))
+            customer = await _db.Customers.FirstOrDefaultAsync(c =>
+                c.PanNumber == dto.Pan.ToUpper().Trim() && !c.IsDeleted);
+
+        if (customer == null && !string.IsNullOrWhiteSpace(dto.Mobile))
+            customer = await _db.Customers.FirstOrDefaultAsync(c =>
+                c.Phone == dto.Mobile.Trim() && !c.IsDeleted);
+
+        if (customer == null)
+        {
+            customer = new Customer
+            {
+                FullName       = (dto.FullName ?? string.Empty).Trim(),
+                Email          = string.IsNullOrWhiteSpace(dto.Email)
+                                 ? $"{(dto.Mobile ?? "draft").Trim()}@efin.auto"
+                                 : dto.Email.ToLower().Trim(),
+                Phone          = (dto.Mobile ?? string.Empty).Trim(),
+                PanNumber      = dto.Pan?.ToUpper().Trim(),
+                AadhaarNumber  = dto.Aadhar?.Trim(),
+                DateOfBirth    = string.IsNullOrWhiteSpace(dto.Dob) ? null : DateTime.TryParse(dto.Dob, out var dob) ? dob : null,
+                Address        = dto.Street1,
+                City           = dto.City,
+                State          = dto.State,
+                PinCode        = dto.Zip,
+                MonthlyIncome  = dto.Salary > 0 ? dto.Salary : null,
+                EmploymentType = dto.EmpType == "SALARIED" ? "Salaried"
+                               : dto.EmpType == "SELFEMP" ? "Self-Employed"
+                               : dto.EmpType == "PROFESSIONAL" ? "Professional" : dto.EmpType,
+                CompanyName    = dto.CompName,
+                CibilScore     = dto.Cibil > 0 ? dto.Cibil : null,
+                Gender         = dto.Gender?.Trim(),
+                FatherName     = dto.FatherName?.Trim(),
+                ResidenceType  = dto.HomeType,
+                CreatedAt      = DateTime.UtcNow
+            };
+            _db.Customers.Add(customer);
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(dto.FullName)) customer.FullName = dto.FullName.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.City))   customer.City   = dto.City;
+            if (!string.IsNullOrWhiteSpace(dto.State))  customer.State  = dto.State;
+            if (dto.Salary > 0)  customer.MonthlyIncome = dto.Salary;
+            if (dto.Cibil > 0)   customer.CibilScore    = dto.Cibil;
+            if (!string.IsNullOrWhiteSpace(dto.CompName)) customer.CompanyName = dto.CompName;
+            if (!string.IsNullOrWhiteSpace(dto.Gender))     customer.Gender        = dto.Gender.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.FatherName)) customer.FatherName    = dto.FatherName.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.HomeType))   customer.ResidenceType = dto.HomeType;
+            customer.UpdatedAt = DateTime.UtcNow;
+        }
+
+        return customer;
+    }
+
     /// <summary>Submit full loan application from wizard.</summary>
     [HttpPost("submit")]
     public async Task<IActionResult> Submit([FromBody] WizardSubmitDto dto)
     {
+        var errors = ValidateFieldFormats(dto);
         if (dto.Amount <= 0)
-            return BadRequest(ApiResponseDto<WizardSubmitResponseDto>.Fail("Loan amount must be greater than 0."));
+            errors.Add("Loan amount must be greater than 0.");
         if (string.IsNullOrWhiteSpace(dto.FullName))
-            return BadRequest(ApiResponseDto<WizardSubmitResponseDto>.Fail("Applicant name is required."));
+            errors.Add("Applicant name is required.");
         if (string.IsNullOrWhiteSpace(dto.Mobile))
-            return BadRequest(ApiResponseDto<WizardSubmitResponseDto>.Fail("Mobile number is required."));
+            errors.Add("Mobile number is required.");
+        errors.AddRange(await ValidateMappingAsync(dto));
+        if (errors.Count > 0)
+            return BadRequest(ApiResponseDto<WizardSubmitResponseDto>.Fail(errors));
 
+        // NpgsqlRetryingExecutionStrategy (from EnableRetryOnFailure) does not allow a
+        // manually-opened transaction to span retries on its own — the transaction and
+        // every operation inside it must be run through CreateExecutionStrategy().ExecuteAsync
+        // so that if a transient failure occurs, the whole unit (including opening a fresh
+        // transaction) is retried atomically instead of throwing
+        // "does not support user-initiated transactions".
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
         await using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
@@ -64,64 +257,22 @@ public class WizardController : BaseController
                     .FirstOrDefaultAsync(l => l.Id == dto.LoanId.Value && !l.IsDeleted);
 
                 if (existingLoan == null)
+                {
+                    await tx.RollbackAsync();
                     return NotFound(ApiResponseDto<WizardSubmitResponseDto>.Fail("Draft application not found."));
+                }
 
                 if (existingLoan.Status != LoanStatus.Draft)
+                {
+                    await tx.RollbackAsync();
                     return BadRequest(ApiResponseDto<WizardSubmitResponseDto>.Fail(
                         "This application has already been submitted."));
+                }
             }
 
             // ── 1. Find or create customer ────────────────────────────────────
-            Customer? customer = null;
-
-            if (existingLoan != null)
-                customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == existingLoan.CustomerId);
-
-            if (customer == null && !string.IsNullOrWhiteSpace(dto.Pan))
-                customer = await _db.Customers.FirstOrDefaultAsync(c =>
-                    c.PanNumber == dto.Pan.ToUpper().Trim() && !c.IsDeleted);
-
-            if (customer == null && !string.IsNullOrWhiteSpace(dto.Mobile))
-                customer = await _db.Customers.FirstOrDefaultAsync(c =>
-                    c.Phone == dto.Mobile.Trim() && !c.IsDeleted);
-
-            if (customer == null)
-            {
-                customer = new Customer
-                {
-                    FullName       = dto.FullName.Trim(),
-                    Email          = string.IsNullOrWhiteSpace(dto.Email)
-                                     ? $"{dto.Mobile.Trim()}@efin.auto"
-                                     : dto.Email.ToLower().Trim(),
-                    Phone          = dto.Mobile.Trim(),
-                    PanNumber      = dto.Pan?.ToUpper().Trim(),
-                    AadhaarNumber  = dto.Aadhar?.Trim(),
-                    DateOfBirth    = string.IsNullOrWhiteSpace(dto.Dob) ? null : DateTime.TryParse(dto.Dob, out var dob) ? dob : null,
-                    Address        = dto.Street1,
-                    City           = dto.City,
-                    State          = dto.State,
-                    PinCode        = dto.Zip,
-                    MonthlyIncome  = dto.Salary > 0 ? dto.Salary : null,
-                    EmploymentType = dto.EmpType == "SALARIED" ? "Salaried"
-                                   : dto.EmpType == "SELFEMP" ? "Self-Employed"
-                                   : dto.EmpType == "PROFESSIONAL" ? "Professional" : dto.EmpType,
-                    CompanyName    = dto.CompName,
-                    CibilScore     = dto.Cibil > 0 ? dto.Cibil : null,
-                    CreatedAt      = DateTime.UtcNow
-                };
-                _db.Customers.Add(customer);
-                await _db.SaveChangesAsync();
-            }
-            else
-            {
-                if (!string.IsNullOrWhiteSpace(dto.City))   customer.City   = dto.City;
-                if (!string.IsNullOrWhiteSpace(dto.State))  customer.State  = dto.State;
-                if (dto.Salary > 0)  customer.MonthlyIncome = dto.Salary;
-                if (dto.Cibil > 0)   customer.CibilScore    = dto.Cibil;
-                if (!string.IsNullOrWhiteSpace(dto.CompName)) customer.CompanyName = dto.CompName;
-                customer.UpdatedAt = DateTime.UtcNow;
-                await _db.SaveChangesAsync();
-            }
+            var customer = await FindOrCreateCustomerAsync(dto, existingLoan);
+            await _db.SaveChangesAsync();
 
             // ── 2. Generate loan number (reuse existing one when resuming a draft) ──
             string loanNum;
@@ -165,6 +316,7 @@ public class WizardController : BaseController
                                       + (dto.LenderName != null ? $" | Lender: {dto.LenderName}" : "");
                 loan.Status          = LoanStatus.Submitted;
                 loan.UpdatedAt       = DateTime.UtcNow;
+                ApplyMapping(loan, dto);
             }
             else
             {
@@ -184,7 +336,12 @@ public class WizardController : BaseController
                     Remarks         = $"Source: {dto.Source ?? "Direct"} | Channel: {dto.Channel ?? "walk-in"}"
                                     + (dto.LenderName != null ? $" | Lender: {dto.LenderName}" : ""),
                     CustomerId      = customer.Id,
+                    // CreatedByUserId always comes from the authenticated JWT identity —
+                    // never from the request body — so the request cannot spoof authorship.
                     CreatedByUserId = CurrentUserId,
+                    DsaId           = dto.DsaId,
+                    PartnerId       = dto.PartnerId,
+                    LocationId      = dto.LocationId,
                     CreatedAt       = DateTime.UtcNow
                 };
                 _db.Loans.Add(loan);
@@ -260,14 +417,15 @@ public class WizardController : BaseController
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
 
-            // Return only the opaque loan number — no internal DB IDs for external callers.
-            // Internal roles (Admin/Manager) additionally receive LoanId for navigation.
-            var isInternal = CurrentUserRole is "Admin" or "Manager";
+            // The loan/customer a user just created is theirs to know about —
+            // returning its id here is what lets the wizard show a proper
+            // "Application ID" confirmation and upload mandatory documents to
+            // it immediately afterward, for every role (Admin/Manager/Sales).
             return Ok(ApiResponseDto<WizardSubmitResponseDto>.Ok(new WizardSubmitResponseDto
             {
                 EfinId     = dto.EfinId ?? loanNum,
-                LoanId     = isInternal ? loan.Id : 0,       // 0 = not disclosed
-                CustomerId = isInternal ? customer.Id : 0,   // 0 = not disclosed
+                LoanId     = loan.Id,
+                CustomerId = customer.Id,
                 LoanNumber = loanNum,
                 MonthlyEmi = emi,
                 Status     = loan.Status.ToString()
@@ -281,19 +439,132 @@ public class WizardController : BaseController
             return StatusCode(500, ApiResponseDto<WizardSubmitResponseDto>.Fail(
                 "Application submission failed. Please try again or contact support."));
         }
+        });
+    }
+
+    /// <summary>
+    /// Persist wizard progress as a Draft-status Loan (+ Customer) so it can be
+    /// resumed from the same database record rather than only from browser
+    /// localStorage. Safe to call repeatedly while the user is filling out the
+    /// wizard — pass the returned loanId back in on later calls (and in the
+    /// final Submit) so they all keep updating the same record instead of
+    /// creating duplicates.
+    /// </summary>
+    [HttpPost("draft")]
+    public async Task<IActionResult> SaveDraft([FromBody] WizardSubmitDto dto)
+    {
+        // Not enough entered yet to be worth persisting.
+        if (string.IsNullOrWhiteSpace(dto.Mobile) && string.IsNullOrWhiteSpace(dto.FullName))
+            return Ok(ApiResponseDto<WizardSubmitResponseDto>.Ok(new WizardSubmitResponseDto(), "Nothing to save yet."));
+
+        var mappingErrors = await ValidateMappingAsync(dto);
+        if (mappingErrors.Count > 0)
+            return BadRequest(ApiResponseDto<WizardSubmitResponseDto>.Fail(mappingErrors));
+
+        // See Submit() above — same NpgsqlRetryingExecutionStrategy compatibility fix:
+        // the transaction must be opened and committed inside the strategy's retry
+        // delegate, not around it.
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            Loan? existingLoan = null;
+            if (dto.LoanId.HasValue && dto.LoanId.Value > 0)
+            {
+                existingLoan = await _db.Loans.FirstOrDefaultAsync(l => l.Id == dto.LoanId.Value && !l.IsDeleted);
+                // Only ever autosave into a record that's still a Draft — a
+                // submitted application must never be silently rewritten by a
+                // stale/late autosave call.
+                if (existingLoan != null && existingLoan.Status != LoanStatus.Draft)
+                    existingLoan = null;
+            }
+
+            var customer = await FindOrCreateCustomerAsync(dto, existingLoan);
+            await _db.SaveChangesAsync();
+
+            var loanType = _loanTypeMap.TryGetValue(dto.LoanType ?? "personal_loan", out var lt) ? lt : LoanType.Personal;
+
+            Loan loan;
+            if (existingLoan != null)
+            {
+                loan = existingLoan;
+                loan.LoanType        = loanType;
+                loan.RequestedAmount = dto.Amount;
+                loan.InterestRate    = dto.LoanRate > 0 ? dto.LoanRate : 12;
+                loan.TenureMonths    = dto.Tenure > 0 ? dto.Tenure : 24;
+                loan.Purpose         = dto.Purpose;
+                loan.UpdatedAt       = DateTime.UtcNow;
+                ApplyMapping(loan, dto);
+            }
+            else
+            {
+                var year = DateTime.UtcNow.Year;
+                string loanNum;
+                do
+                {
+                    var suffix = System.Security.Cryptography.RandomNumberGenerator.GetInt32(1000000, 10000000).ToString();
+                    loanNum = $"EFIN{year}{suffix}";
+                }
+                while (await _db.Loans.AnyAsync(l => l.LoanNumber == loanNum));
+
+                loan = new Loan
+                {
+                    LoanNumber      = loanNum,
+                    LoanType        = loanType,
+                    Status          = LoanStatus.Draft,
+                    RequestedAmount = dto.Amount,
+                    InterestRate    = dto.LoanRate > 0 ? dto.LoanRate : 12,
+                    TenureMonths    = dto.Tenure > 0 ? dto.Tenure : 24,
+                    Purpose         = dto.Purpose,
+                    CustomerId      = customer.Id,
+                    // CreatedByUserId always comes from the authenticated JWT identity —
+                    // never from the request body — so the request cannot spoof authorship.
+                    CreatedByUserId = CurrentUserId,
+                    DsaId           = dto.DsaId,
+                    PartnerId       = dto.PartnerId,
+                    LocationId      = dto.LocationId,
+                    CreatedAt       = DateTime.UtcNow
+                };
+                _db.Loans.Add(loan);
+            }
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            return Ok(ApiResponseDto<WizardSubmitResponseDto>.Ok(new WizardSubmitResponseDto
+            {
+                EfinId     = dto.EfinId ?? loan.LoanNumber,
+                LoanId     = loan.Id,
+                CustomerId = customer.Id,
+                LoanNumber = loan.LoanNumber,
+                MonthlyEmi = 0,
+                Status     = loan.Status.ToString()
+            }, "Draft saved."));
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            _logger.LogError(ex, "Wizard draft save failed for user {UserId}", CurrentUserId);
+            return StatusCode(500, ApiResponseDto<WizardSubmitResponseDto>.Fail("Could not save draft."));
+        }
+        });
     }
 
     /// <summary>Validate wizard data before final submit.</summary>
     [HttpPost("validate")]
     public async Task<IActionResult> Validate([FromBody] WizardSubmitDto dto)
     {
-        var errors = new List<string>();
+        var errors = ValidateFieldFormats(dto);
 
         if (string.IsNullOrWhiteSpace(dto.FullName)) errors.Add("Full name is required.");
-        if (string.IsNullOrWhiteSpace(dto.Mobile) || dto.Mobile.Length < 10) errors.Add("Valid mobile number is required.");
+        if (string.IsNullOrWhiteSpace(dto.Mobile)) errors.Add("Mobile number is required.");
         if (dto.Amount <= 0) errors.Add("Loan amount must be greater than 0.");
         if (dto.Tenure <= 0 || dto.Tenure > 360) errors.Add("Tenure must be between 1-360 months.");
         if (dto.LoanRate <= 0) errors.Add("Interest rate must be greater than 0.");
+
+        errors.AddRange(await ValidateMappingAsync(dto));
 
         // PAN duplicate check — message is intentionally vague for external roles
         if (!string.IsNullOrWhiteSpace(dto.Pan) && dto.Pan.Length == 10)
@@ -308,6 +579,7 @@ public class WizardController : BaseController
                     c.PanNumber == dto.Pan.ToUpper().Trim() && !c.IsDeleted);
                 var activeLoans = await _db.Loans.CountAsync(l =>
                     l.CustomerId == existingCustomer.Id &&
+                    l.Id != (dto.LoanId ?? 0) &&   // exclude the draft being resumed/completed right now
                     l.Status != LoanStatus.Rejected &&
                     l.Status != LoanStatus.Closed && !l.IsDeleted);
 

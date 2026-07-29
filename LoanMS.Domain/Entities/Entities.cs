@@ -53,6 +53,14 @@ public class Customer : BaseEntity
     public string? CompanyName { get; set; }
     public int? CibilScore { get; set; }
 
+    // ── KYC fields needed for InCred's application/init API ──────────────────
+    /// <summary>"M" or "F" — InCred's application/init API requires this exact format.</summary>
+    public string? Gender { get; set; }
+    /// <summary>Optional on InCred's side (MNAME) but useful KYC data generally.</summary>
+    public string? FatherName { get; set; }
+    /// <summary>One of InCred's RESIDENCE_TYPE enum values (optional on their side).</summary>
+    public string? ResidenceType { get; set; }
+
     // Navigation
     public ICollection<Loan> Loans { get; set; } = new List<Loan>();
 }
@@ -79,12 +87,53 @@ public class Loan : BaseEntity
     public int CreatedByUserId { get; set; }
     public int? AssignedToUserId { get; set; }
 
+    // ── DSA / Partner / Location linkage (Phase 1 — data model only; no
+    // wizard mapping, visibility, authorization, or assignment logic yet) ────
+    public int? DsaId { get; set; }
+    public int? PartnerId { get; set; }
+    public int? LocationId { get; set; }
+
+    // ── InCred Integration (mirrors incred.integration.mixin) ────────────────────
+    /// <summary>Set to "incred" once this loan has been pushed to InCred's digital-partner API.</summary>
+    public string? ApplicationSource { get; set; }
+    public string? IncredApplicationId { get; set; }
+    public string? IncredCustomerId { get; set; }
+    public string? IncredRequestId { get; set; }
+    /// <summary>pending / completed / rejected / error</summary>
+    public string? IncredOfferStatus { get; set; }
+    /// <summary>Raw JSON of InCred's last offer/status response — kept for audit/debug.</summary>
+    public string? IncredOfferJson { get; set; }
+    public string? IncredErrorMessage { get; set; }
+    public string? IncredRejectReason { get; set; }
+    public string? IncredLastWebhookEvent { get; set; }
+    public string? IncredLastWebhookStatus { get; set; }
+    public DateTime? IncredLastSyncedAt { get; set; }
+
     // Navigation
     public Customer Customer { get; set; } = null!;
     public User CreatedBy { get; set; } = null!;
     public User? AssignedTo { get; set; }
+    public DsaPartner? Dsa { get; set; }
+    public DsaPartner? Partner { get; set; }
+    public Location? Location { get; set; }
     public ICollection<LoanDocument> Documents { get; set; } = new List<LoanDocument>();
     public ICollection<LoanStatusHistory> StatusHistory { get; set; } = new List<LoanStatusHistory>();
+    public ICollection<LoanOffer> IncredOffers { get; set; } = new List<LoanOffer>();
+}
+
+// ── InCred Loan Offer (mirrors loan.application.offer) ─────────────────────────
+public class LoanOffer : BaseEntity
+{
+    public int LoanId { get; set; }
+    /// <summary>PREAPPROVED / BANKING</summary>
+    public string? OfferType { get; set; }
+    public decimal LoanAmount { get; set; }
+    public int LoanMaxTenure { get; set; }
+    public decimal LoanRate { get; set; }
+    public decimal ProcessingFee { get; set; }
+
+    // Navigation
+    public Loan Loan { get; set; } = null!;
 }
 
 // ── Loan Document ─────────────────────────────────────────────────────────────
@@ -228,7 +277,15 @@ public class DsaPartner : BaseEntity
     public bool IsActive { get; set; } = true;
     public int? MappedSalesUserId { get; set; }
 
+    /// <summary>Whether this record represents a DSA or a Partner.</summary>
+    public PartnerType PartnerType { get; set; } = PartnerType.Dsa;
+    /// <summary>Optional link to the real User account (role Dsa/Partner) that this
+    /// DSA/Partner record logs in as. Nullable — a DSA/Partner can exist without
+    /// a linked login.</summary>
+    public int? LinkedUserId { get; set; }
+
     public User? MappedSalesUser { get; set; }
+    public User? LinkedUser { get; set; }
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

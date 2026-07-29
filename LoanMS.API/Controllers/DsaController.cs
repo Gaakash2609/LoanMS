@@ -16,11 +16,14 @@ public class DsaController : BaseController
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var dsa = await _db.DsaPartners.Include(d => d.MappedSalesUser)
+        var dsa = await _db.DsaPartners.Include(d => d.MappedSalesUser).Include(d => d.LinkedUser)
             .OrderBy(d => d.Name)
             .Select(d => new {
                 d.Id, d.Name, d.Code, d.Email, d.Phone,
                 d.City, d.IsActive,
+                PartnerType = d.PartnerType.ToString(),
+                d.LinkedUserId,
+                LinkedUser = d.LinkedUser != null ? d.LinkedUser.FullName : null,
                 MappedSalesUser = d.MappedSalesUser != null ? d.MappedSalesUser.FullName : null
             }).ToListAsync();
         return Ok(ApiResponseDto<object>.Ok(dsa));
@@ -33,6 +36,7 @@ public class DsaController : BaseController
         var dsa = new DsaPartner {
             Name = dto.Name, Code = dto.Code, Email = dto.Email,
             Phone = dto.Phone, City = dto.City, MappedSalesUserId = dto.MappedSalesUserId,
+            PartnerType = dto.PartnerType, LinkedUserId = dto.LinkedUserId,
             CreatedAt = DateTime.UtcNow
         };
         _db.DsaPartners.Add(dsa);
@@ -49,6 +53,7 @@ public class DsaController : BaseController
         dsa.Name = dto.Name; dsa.Code = dto.Code; dsa.Email = dto.Email;
         dsa.Phone = dto.Phone; dsa.City = dto.City;
         dsa.MappedSalesUserId = dto.MappedSalesUserId;
+        dsa.PartnerType = dto.PartnerType; dsa.LinkedUserId = dto.LinkedUserId;
         dsa.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<bool>.Ok(true, "Updated."));
@@ -73,4 +78,6 @@ public class DsaDto {
     public string? Phone { get; set; }
     public string? City { get; set; }
     public int? MappedSalesUserId { get; set; }
+    public LoanMS.Domain.Enums.PartnerType PartnerType { get; set; } = LoanMS.Domain.Enums.PartnerType.Dsa;
+    public int? LinkedUserId { get; set; }
 }

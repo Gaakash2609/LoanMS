@@ -1,9 +1,12 @@
 using LoanMS.Application.DTOs;
 using LoanMS.Application.Interfaces;
+using LoanMS.Domain.Entities;
 using LoanMS.Domain.Enums;
+using LoanMS.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.EntityFrameworkCore;
 
 namespace LoanMS.API.Controllers;
 
@@ -11,11 +14,16 @@ namespace LoanMS.API.Controllers;
 public class LoansController : BaseController
 {
     private readonly ILoanService _loanService;
+    private readonly AppDbContext _db;
     // Documents stored OUTSIDE wwwroot — never served as static files
     private static readonly string _uploadRoot =
         Path.Combine(AppContext.BaseDirectory, "secure_uploads", "loans");
 
-    public LoansController(ILoanService loanService) => _loanService = loanService;
+    public LoansController(ILoanService loanService, AppDbContext db)
+    {
+        _loanService = loanService;
+        _db          = db;
+    }
 
     /// <summary>Get dashboard statistics</summary>
     [HttpGet("dashboard")]
@@ -36,11 +44,15 @@ public class LoansController : BaseController
         return Ok(result);
     }
 
-    /// <summary>Get loan by ID</summary>
+    /// <summary>
+    /// Get loan by ID. Role-based visibility is enforced server-side (see
+    /// ILoanRepository.ApplyVisibilityScope) — passing someone else's loanId
+    /// here returns 404, not the loan's data.
+    /// </summary>
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
-        var result = await _loanService.GetByIdAsync(id, CurrentUserRole);
+        var result = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
         if (!result.Success) return NotFound(result);
         return Ok(result);
     }
@@ -58,19 +70,30 @@ public class LoansController : BaseController
         return CreatedAtAction(nameof(GetById), new { id = result.Data!.Id }, result);
     }
 
-    /// <summary>Update loan details (Draft/Submitted only)</summary>
+    /// <summary>
+    /// Update loan details (Draft/Submitted only).
+    /// [Admin/Manager/Sales only] — DSA/Partner never get automatic edit rights.
+    /// Ownership/location scope is verified server-side before the write
+    /// (see ILoanRepository.HasAccessAsync) — a loanId outside the caller's
+    /// scope returns "not found", it does not execute the update.
+    /// </summary>
     [HttpPut("{id:int}")]
+    [Authorize(Roles = "Admin,Manager,Sales")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateLoanRequestDto request)
     {
         if (!ModelState.IsValid)
             return BadRequest(ApiResponseDto<LoanDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
 
-        var result = await _loanService.UpdateAsync(id, request);
+        var result = await _loanService.UpdateAsync(id, request, CurrentUserId, CurrentUserRole);
         return ApiResult(result);
     }
 
-    /// <summary>Update loan status [Manager/Admin only]</summary>
+    /// <summary>
+    /// Update loan status [Manager/Admin only]. Manager's existing location
+    /// restriction is enforced here too — approving/rejecting a loan outside
+    /// their authorized location now fails the same access check as viewing it.
+    /// </summary>
     [HttpPatch("{id:int}/status")]
     [Authorize(Roles = "Admin,Manager")]
     public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdateLoanStatusRequestDto request)
@@ -79,17 +102,21 @@ public class LoansController : BaseController
             return BadRequest(ApiResponseDto<LoanDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
 
-        var result = await _loanService.UpdateStatusAsync(id, request, CurrentUserId);
+        var result = await _loanService.UpdateStatusAsync(id, request, CurrentUserId, CurrentUserRole);
         return ApiResult(result);
     }
 
-    /// <summary>Submit loan (Draft → Submitted)</summary>
+    /// <summary>
+    /// Submit loan (Draft → Submitted). Access (own/assigned/linked/authorized-
+    /// location loan) is verified before the transition — no role list is
+    /// added beyond what already existed, only the missing ownership check.
+    /// </summary>
     [HttpPatch("{id:int}/submit")]
     public async Task<IActionResult> Submit(int id)
     {
         var result = await _loanService.UpdateStatusAsync(id,
             new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Submitted, Comment = "Submitted for review." },
-            CurrentUserId);
+            CurrentUserId, CurrentUserRole);
         return ApiResult(result);
     }
 
@@ -105,7 +132,7 @@ public class LoansController : BaseController
                 ApprovedAmount = request.ApprovedAmount,
                 Comment        = request.Comment ?? "Loan approved."
             },
-            CurrentUserId);
+            CurrentUserId, CurrentUserRole);
         return ApiResult(result);
     }
 
@@ -120,7 +147,7 @@ public class LoansController : BaseController
                 NewStatus = LoanStatus.Rejected,
                 Comment   = request.Reason ?? "Loan rejected."
             },
-            CurrentUserId);
+            CurrentUserId, CurrentUserRole);
         return ApiResult(result);
     }
 
@@ -131,7 +158,7 @@ public class LoansController : BaseController
     {
         var result = await _loanService.UpdateStatusAsync(id,
             new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Disbursed, Comment = "Loan disbursed." },
-            CurrentUserId);
+            CurrentUserId, CurrentUserRole);
         return ApiResult(result);
     }
 
@@ -140,7 +167,7 @@ public class LoansController : BaseController
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)
     {
-        var result = await _loanService.DeleteAsync(id);
+        var result = await _loanService.DeleteAsync(id, CurrentUserId, CurrentUserRole);
         return ApiResult(result);
     }
 
@@ -193,7 +220,7 @@ public class LoansController : BaseController
     [RequestSizeLimit(20 * 1024 * 1024)]
     public async Task<IActionResult> UploadDocument(int id, IFormFile file, [FromForm] string? documentType)
     {
-        var loan = await _loanService.GetByIdAsync(id, CurrentUserRole);
+        var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(loan);
         if (file == null || file.Length == 0)
             return BadRequest(ApiResponseDto<object>.Fail("No file provided."));
@@ -232,13 +259,30 @@ public class LoansController : BaseController
         await using (var stream = new FileStream(filePath, FileMode.Create))
             await file.CopyToAsync(stream);
 
+        // Link the upload to the loan in the database — this is what makes it
+        // show up under the loan record (and in GetDocuments below) rather
+        // than existing only as an orphaned file on disk.
+        var docRecord = new LoanDocument
+        {
+            LoanId           = id,
+            DocumentName     = Path.GetFileNameWithoutExtension(file.FileName),
+            DocumentType     = docType,
+            FilePath         = $"{id}/{fileName}",   // opaque ref — no on-disk path
+            FileSizeBytes    = file.Length,
+            UploadedByUserId = CurrentUserId.ToString(),
+            CreatedAt        = DateTime.UtcNow
+        };
+        _db.Set<LoanDocument>().Add(docRecord);
+        await _db.SaveChangesAsync();
+
         // Return a reference token — not a raw file path
         return Ok(ApiResponseDto<object>.Ok(new {
-            documentName  = Path.GetFileNameWithoutExtension(file.FileName),
-            documentType  = docType,
-            fileRef       = $"{id}/{fileName}",       // opaque ref — no /uploads/ path
-            fileSizeBytes = file.Length,
-            uploadedAt    = DateTime.UtcNow
+            id            = docRecord.Id,
+            documentName  = docRecord.DocumentName,
+            documentType  = docRecord.DocumentType,
+            fileRef       = docRecord.FilePath,
+            fileSizeBytes = docRecord.FileSizeBytes,
+            uploadedAt    = docRecord.CreatedAt
         }, "Document uploaded successfully."));
     }
 
@@ -254,7 +298,7 @@ public class LoansController : BaseController
             return BadRequest(ApiResponseDto<object>.Fail("Invalid file reference."));
 
         // Verify caller has access to this loan
-        var loan = await _loanService.GetByIdAsync(id, CurrentUserRole);
+        var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(ApiResponseDto<object>.Fail("Loan not found."));
 
         var filePath = Path.Combine(_uploadRoot, id.ToString(), fileName);
@@ -270,26 +314,27 @@ public class LoansController : BaseController
         return File(bytes, contentType, fileName);
     }
 
-    /// <summary>List document references for a loan (no raw paths).</summary>
+    /// <summary>List documents for a loan, sourced from the database (name, type, uploader).</summary>
     [HttpGet("{id:int}/documents")]
     public async Task<IActionResult> GetDocuments(int id)
     {
-        var loan = await _loanService.GetByIdAsync(id, CurrentUserRole);
+        var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(loan);
 
-        var uploadDir = Path.Combine(_uploadRoot, id.ToString());
-        if (!Directory.Exists(uploadDir))
-            return Ok(ApiResponseDto<object>.Ok(new List<object>()));
+        var docs = await _db.Set<LoanDocument>()
+            .Where(d => d.LoanId == id && !d.IsDeleted)
+            .OrderByDescending(d => d.CreatedAt)
+            .Select(d => new {
+                id            = d.Id,
+                documentName  = d.DocumentName,
+                documentType  = d.DocumentType,
+                fileRef       = d.FilePath,
+                fileSizeBytes = d.FileSizeBytes,
+                uploadedAt    = d.CreatedAt
+            })
+            .ToListAsync();
 
-        var files = Directory.GetFiles(uploadDir)
-            .Select(f => new {
-                fileName  = Path.GetFileName(f),
-                fileRef   = $"{id}/{Path.GetFileName(f)}",
-                sizeBytes = new FileInfo(f).Length,
-                uploadedAt = new FileInfo(f).CreationTime
-            }).ToList();
-
-        return Ok(ApiResponseDto<object>.Ok(files));
+        return Ok(ApiResponseDto<object>.Ok(docs));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -42,9 +42,9 @@ public class LoanServiceTests
     [Fact]
     public async Task GetByIdAsync_WhenLoanNotFound_ReturnsFail()
     {
-        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(99)).ReturnsAsync((Loan?)null);
+        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(99, It.IsAny<int?>(), It.IsAny<string?>())).ReturnsAsync((Loan?)null);
         var svc    = CreateService();
-        var result = await svc.GetByIdAsync(99);
+        var result = await svc.GetByIdAsync(99, 1, "Admin");
         result.Success.Should().BeFalse();
         result.Message.Should().Contain("not found");
     }
@@ -53,9 +53,9 @@ public class LoanServiceTests
     public async Task GetByIdAsync_WhenLoanExists_ReturnsSuccess()
     {
         var loan = CreateTestLoan();
-        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(1)).ReturnsAsync(loan);
+        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(1, It.IsAny<int?>(), It.IsAny<string?>())).ReturnsAsync(loan);
         var svc    = CreateService();
-        var result = await svc.GetByIdAsync(1, "Admin");
+        var result = await svc.GetByIdAsync(1, 1, "Admin");
         result.Success.Should().BeTrue();
         result.Data!.LoanNumber.Should().Be("LMS-2024-0001");
     }
@@ -118,10 +118,11 @@ public class LoanServiceTests
         var loan = CreateTestLoan();
         loan.Status = LoanStatus.Closed;
         _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string?>())).ReturnsAsync(true);
 
         var svc    = CreateService();
         var result = await svc.UpdateStatusAsync(1,
-            new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Approved, Comment = "Test" }, 1);
+            new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Approved, Comment = "Test" }, 1, "Admin");
 
         result.Success.Should().BeFalse();
         result.Message.Should().Contain("Cannot move");
@@ -133,13 +134,14 @@ public class LoanServiceTests
         var loan = CreateTestLoan();
         loan.Status = LoanStatus.Draft;
         _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string?>())).ReturnsAsync(true);
         _histRepoMock.Setup(r => r.AddAsync(It.IsAny<LoanStatusHistory>())).ReturnsAsync(new LoanStatusHistory());
         _loanRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Loan>())).ReturnsAsync((Loan l) => l);
         _loanRepoMock.Setup(r => r.GetWithDetailsAsync(1)).ReturnsAsync(loan);
 
         var svc    = CreateService();
         var result = await svc.UpdateStatusAsync(1,
-            new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Submitted, Comment = "Submitting" }, 1);
+            new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Submitted, Comment = "Submitting" }, 1, "Admin");
 
         result.Success.Should().BeTrue();
         // Verify cache invalidation was called

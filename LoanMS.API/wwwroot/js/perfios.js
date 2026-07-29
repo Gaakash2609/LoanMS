@@ -3174,14 +3174,6 @@ function updateStats(first, last, days, total, selected, staledays) {
 }
 
 // ─── Excel Export (Full Perfios Format — All Sheets) ───
-function exportExcel() {
-  if (!monthOrder.length) return;
-  showLoader('Building Excel workbook...');
-  setTimeout(() => {
-    try { _doExport(); hideLoader(); toast('✅ Excel exported successfully!'); }
-    catch(e) { hideLoader(); toast('⚠ Export error: ' + e.message); }
-  }, 50);
-}
 
 function _doExport() {
   const wb = XLSX.utils.book_new();
@@ -3761,36 +3753,6 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('show'), 4000);
 }
 
-function resetAll() {
-  _processLog = [];
-  allTxns=[]; filtered90=[]; targetRows=[]; abbData={}; monthOrder=[]; pendingFiles=[]; currentFileIdx=0; accountInfo={};
-  salaryTxns=[]; achTxns=[]; ecsTxns=[]; neftTxns=[]; upiTxns=[]; chequeTxns=[]; bounceTxns=[]; overdraftTxns=[]; validChecks=[]; pwdAttempts=0; perFileData=[]; _txnFilterAccount='ALL';
-  document.getElementById('fileInput').value = '';
-  document.getElementById('bulkPwdPanel').classList.remove('show'); // FIX: hide pre-set panel on reset
-  document.getElementById('logCard').classList.remove('show');
-  document.getElementById('logInner').innerHTML = '';
-  const _sRow = document.getElementById('statsRow'); if (_sRow) _sRow.classList.remove('show');
-  const _tRow = document.getElementById('tabsRow'); if (_tRow) _tRow.style.display = 'none';
-  ['secTxn','secPerfios','secTarget','secSalary','secACH','secECS','secNEFT','secUPI','secCheque','secBounce','secAccounts','secValidation','secFinOne','secAnalysis','secBreakup','secEOD'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.remove('show');
-  });
-  const _ab=document.getElementById('actionBar'); if(_ab) _ab.classList.remove('show');
-  const _vb=document.getElementById('valBanner'); if(_vb) _vb.className='banner';
-  salaryTxns = []; achTxns = []; ecsTxns = []; neftTxns = []; validChecks = []; pwdAttempts = 0;
-  ['tbodyTxn','tbodyTarget','tbodySalary','tbodyACH','tbodyECS','tbodyNEFT','tbodyUPI','tbodyCheque','tbodyBounce','tbodyOverdraft','tbodyAccounts',
-   'pfHead','pfBody','finOneHead','finOneBody',
-   'analysisHead','analysisBody','incomeHead','incomeBody','expenseHead','expenseBody',
-   'eodHead','eodBody','infoGrid','summaryGrid','salarySummary','achSummary','ecsSummary','neftSummary',
-   'upiSummary','chequeSummary','bounceSummary','overdraftSummary','accountsGrid','validationGrid'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = '';
-  });
-  ['sFirstDate','sLastDate','sDays','sStaleness','sTxnCount','sSelected','sABB','sACH','sECS','sNEFT'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent='—';});
-  const acctBar = document.getElementById('txnAcctBar');
-  if (acctBar) { acctBar.style.display='none'; acctBar.innerHTML='<label>Account:</label><button class="acct-btn active" onclick="setTxnAccount(\'ALL\',this)">All</button>'; }
-  setStep(1);
-}
 
 // ─── Formatters ───
 function fmtDate(d) {

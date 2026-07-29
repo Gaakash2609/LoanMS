@@ -13,9 +13,13 @@ public class PayoutController : BaseController
     private readonly AppDbContext _db;
     public PayoutController(AppDbContext db) => _db = db;
 
-    // Roles whose payout view is automatically scoped to their own claims only
+    // Roles whose payout view is automatically scoped to their own claims only.
+    // Phase 3B fix: was ["Sales", "partner", "dsa_user"] — those two never matched
+    // the actual role claim value (User.Role.ToString() == "Dsa" / "Partner"), so
+    // Dsa/Partner users were silently NOT scoped to their own claims unless the
+    // caller happened to pass myOnly=true. Comparer is already OrdinalIgnoreCase.
     private static readonly HashSet<string> _selfOnlyRoles =
-        new(StringComparer.OrdinalIgnoreCase) { "Sales", "partner", "dsa_user" };
+        new(StringComparer.OrdinalIgnoreCase) { "Sales", "Dsa", "Partner" };
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] bool myOnly = false)

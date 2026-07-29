@@ -63,7 +63,10 @@ public class CustomerService : ICustomerService
             MonthlyIncome  = request.MonthlyIncome,
             EmploymentType = request.EmploymentType,
             CompanyName    = request.CompanyName,
-            CibilScore     = request.CibilScore
+            CibilScore     = request.CibilScore,
+            Gender         = request.Gender?.Trim(),
+            FatherName     = request.FatherName?.Trim(),
+            ResidenceType  = request.ResidenceType
         };
 
         await _uow.Customers.AddAsync(customer);
@@ -94,6 +97,9 @@ public class CustomerService : ICustomerService
         customer.EmploymentType = request.EmploymentType;
         customer.CompanyName    = request.CompanyName;
         customer.CibilScore     = request.CibilScore;
+        customer.Gender         = request.Gender?.Trim();
+        customer.FatherName     = request.FatherName?.Trim();
+        customer.ResidenceType  = request.ResidenceType;
         customer.UpdatedAt      = DateTime.UtcNow;
 
         await _uow.Customers.UpdateAsync(customer);
@@ -157,6 +163,9 @@ public class CustomerService : ICustomerService
             EmploymentType = c.EmploymentType,
             CompanyName    = c.CompanyName,
             CibilScore     = c.CibilScore,
+            Gender         = c.Gender,
+            FatherName     = c.FatherName,
+            ResidenceType  = c.ResidenceType,
             TotalLoans     = c.Loans?.Count ?? 0,
             CreatedAt      = c.CreatedAt
         };

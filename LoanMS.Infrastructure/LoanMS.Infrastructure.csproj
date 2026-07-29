@@ -14,6 +14,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools"  Version="10.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <!-- Data Protection (IDataProtector/IDataProtectionProvider) — needed for AiKeyStore encryption; not implicitly available in a plain class-library SDK project -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.7" />
     <!-- HTTP Client (IHttpClientFactory for AI providers) -->
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
     <!-- Caching -->

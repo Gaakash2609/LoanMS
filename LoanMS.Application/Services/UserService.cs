@@ -28,6 +28,17 @@ public class UserService : IUserService
         return ApiResponseDto<IEnumerable<UserDto>>.Ok(users.Select(MapToDto));
     }
 
+    public async Task<ApiResponseDto<IEnumerable<UserLookupDto>>> GetLookupAsync()
+    {
+        var users = await _uow.Users.GetAllActiveUsersAsync();
+        return ApiResponseDto<IEnumerable<UserLookupDto>>.Ok(users.Select(u => new UserLookupDto
+        {
+            Id       = u.Id,
+            FullName = u.FullName,
+            Role     = u.Role.ToString()
+        }));
+    }
+
     public async Task<ApiResponseDto<UserDto>> CreateAsync(CreateUserRequestDto request)
     {
         if (await _uow.Users.EmailExistsAsync(request.Email))

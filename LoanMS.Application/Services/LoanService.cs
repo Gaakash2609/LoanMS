@@ -24,9 +24,14 @@ public class LoanService : ILoanService
     private static readonly HashSet<string> _elevatedRoles =
         new(StringComparer.OrdinalIgnoreCase) { "Admin", "Manager" };
 
-    public async Task<ApiResponseDto<LoanDto>> GetByIdAsync(int id, string callerRole = "Sales")
+    public async Task<ApiResponseDto<LoanDto>> GetByIdAsync(int id, int currentUserId, string callerRole = "Sales")
     {
-        var loan = await _uow.Loans.GetWithDetailsAsync(id);
+        // Phase 2B — role-based visibility is enforced at the repository query
+        // level, not after the fact. If the loan exists but falls outside the
+        // caller's scope (e.g. someone swaps the loanId in the URL), this comes
+        // back null the same way a genuinely missing loan would — no distinction
+        // is leaked between "doesn't exist" and "not yours to see".
+        var loan = await _uow.Loans.GetWithDetailsAsync(id, currentUserId, callerRole);
         if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
         return ApiResponseDto<LoanDto>.Ok(MapToDto(loan, callerRole));
     }
@@ -100,8 +105,15 @@ public class LoanService : ILoanService
         return ApiResponseDto<LoanDto>.Ok(MapToDto(created!, "Admin"), "Loan created successfully.");
     }
 
-    public async Task<ApiResponseDto<LoanDto>> UpdateAsync(int id, UpdateLoanRequestDto request)
+    public async Task<ApiResponseDto<LoanDto>> UpdateAsync(int id, UpdateLoanRequestDto request, int currentUserId, string currentUserRole)
     {
+        // Phase 3A — verify the caller can act on this loan BEFORE touching it.
+        // Same rule set as read visibility (Phase 2B): reused via HasAccessAsync,
+        // not re-implemented here. "Not found" (not "forbidden") is returned for
+        // an out-of-scope loan too, so a loanId swap doesn't confirm existence.
+        if (!await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
         var loan = await _uow.Loans.GetByIdAsync(id);
         if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
 
@@ -125,8 +137,17 @@ public class LoanService : ILoanService
         return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), "Loan updated.");
     }
 
-    public async Task<ApiResponseDto<LoanDto>> UpdateStatusAsync(int id, UpdateLoanStatusRequestDto request, int changedByUserId)
+    public async Task<ApiResponseDto<LoanDto>> UpdateStatusAsync(int id, UpdateLoanStatusRequestDto request, int changedByUserId, string changedByUserRole)
     {
+        // Phase 3A — same access check before Submit/Approve/Reject/Disburse/Close
+        // transitions. For Manager this also enforces the existing location
+        // restriction (ApplyVisibilityScope scopes Manager to their Team's
+        // Location) — a Manager can no longer approve/reject a loan outside
+        // their authorized location just because the Role attribute let them
+        // reach the endpoint.
+        if (!await _uow.Loans.HasAccessAsync(id, changedByUserId, changedByUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
         var loan = await _uow.Loans.GetByIdAsync(id);
         if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
 
@@ -171,8 +192,16 @@ public class LoanService : ILoanService
         return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), $"Loan status updated to {request.NewStatus}.");
     }
 
-    public async Task<ApiResponseDto<bool>> DeleteAsync(int id)
+    public async Task<ApiResponseDto<bool>> DeleteAsync(int id, int currentUserId, string currentUserRole)
     {
+        // Phase 3A — Delete is already Admin-only at the controller (Role
+        // attribute), and Admin is unrestricted in ApplyVisibilityScope, so this
+        // check is a no-op for Admin today. Kept here for defense-in-depth and so
+        // Delete follows the same "verify access before acting" pattern as every
+        // other action, in case the allowed-roles list ever changes.
+        if (!await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
+            return ApiResponseDto<bool>.Fail("Loan not found.");
+
         var loan = await _uow.Loans.GetByIdAsync(id);
         if (loan == null) return ApiResponseDto<bool>.Fail("Loan not found.");
         if (loan.Status != LoanStatus.Draft)

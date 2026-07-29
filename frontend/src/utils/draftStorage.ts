@@ -21,6 +21,10 @@ export interface WizardDraft<T = unknown> {
   // need to deserialize/inspect `data` just to render a table row.
   label: string
   loanType?: string
+  // Links this local draft to its backend Draft Loan record (see
+  // wizardApi.saveDraft) so resuming completes/updates that same database
+  // row instead of only ever reading from localStorage.
+  loanId?: number
   createdAt: number
   updatedAt: number
 }
@@ -40,13 +44,18 @@ function isExpired(draft: WizardDraft): boolean {
   return Date.now() - draft.updatedAt > DRAFT_TTL_MS
 }
 
-export function saveDraft<T>(id: string, step: number, data: T, label: string, loanType?: string): void {
+export function saveDraft<T>(
+  id: string, step: number, data: T, label: string, loanType?: string, loanId?: number
+): void {
   try {
     const existingRaw = localStorage.getItem(key(id))
-    const createdAt = existingRaw ? (JSON.parse(existingRaw) as WizardDraft<T>).createdAt : Date.now()
+    const existing = existingRaw ? (JSON.parse(existingRaw) as WizardDraft<T>) : null
     const draft: WizardDraft<T> = {
       id, step, data, label, loanType,
-      createdAt,
+      // Keep whichever loanId we already know about if this particular call
+      // doesn't have a fresher one to report.
+      loanId: loanId ?? existing?.loanId,
+      createdAt: existing?.createdAt ?? Date.now(),
       updatedAt: Date.now(),
     }
     localStorage.setItem(key(id), JSON.stringify(draft))

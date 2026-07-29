@@ -12,6 +12,11 @@ export interface WizardSubmitPayload {
   salesPerson?: string
   channel?: string
   dsaName?: string
+  // Phase 2A — ids actually persisted onto the Loan record. `location`/`dsaName`
+  // above stay as-is (display/legacy fields); these carry the real FKs.
+  dsaId?: number
+  partnerId?: number
+  locationId?: number
   // Step 3 — Personal
   fullName: string
   email?: string
@@ -66,17 +71,30 @@ export const wizardApi = {
   submit: (data: WizardSubmitPayload) =>
     api.post<ApiResponse<WizardSubmitResponse>>('/api/wizard/submit', data),
 
+  // Persists in-progress wizard data as a real Draft Loan+Customer record so
+  // it can be resumed from the database, not just from browser localStorage.
+  // Pass back the loanId this returns on subsequent calls (and in the final
+  // submit) to keep updating the same record instead of creating duplicates.
+  saveDraft: (data: Partial<WizardSubmitPayload>) =>
+    api.post<ApiResponse<WizardSubmitResponse>>('/api/wizard/draft', data),
+
+  // On failure the backend returns { success: false, errors: string[] } (no
+  // `data` payload) rather than `{ valid, errors }` — ApiResponse already
+  // models that shape via `errors`/`success`.
   validate: (data: Partial<WizardSubmitPayload>) =>
-    api.post<ApiResponse<{ valid: boolean; errors: string[] }>>('/api/wizard/validate', data),
+    api.post<ApiResponse<{ valid: boolean; emi: number; totalPayable: number; totalInterest: number }>>(
+      '/api/wizard/validate', data
+    ),
 
   getLocations: () =>
     api.get<ApiResponse<Array<{ id: number; name: string; city: string; state: string }>>>('/api/locations'),
 
-  getUsers: (role?: string) =>
-    api.get<ApiResponse<Array<{ id: number; fullName: string; role: string }>>>('/api/users', {
-      params: { role, pageSize: 200 },
-    }),
+  // Uses the non-Admin-only lookup endpoint (id/fullName/role only) so Sales and
+  // Manager users can populate the Sales Person dropdown — GET /api/users is
+  // Admin-only and used to 403 for everyone else.
+  getUsers: () =>
+    api.get<ApiResponse<Array<{ id: number; fullName: string; role: string }>>>('/api/users/lookup'),
 
   getDsaPartners: () =>
-    api.get<ApiResponse<Array<{ id: number; name: string; code: string }>>>('/api/dsa'),
+    api.get<ApiResponse<Array<{ id: number; name: string; code: string; partnerType: string }>>>('/api/dsa'),
 }

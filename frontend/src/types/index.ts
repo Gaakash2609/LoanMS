@@ -17,7 +17,8 @@ export interface Customer {
   panNumber?: string; aadhaarNumber?: string; dateOfBirth?: string
   address?: string; city?: string; state?: string; pinCode?: string
   monthlyIncome?: number; employmentType?: string; companyName?: string
-  cibilScore?: number; totalLoans: number; createdAt: string
+  cibilScore?: number; gender?: string; fatherName?: string; residenceType?: string
+  totalLoans: number; createdAt: string
 }
 
 export interface LoanStatusHistory {
@@ -39,6 +40,19 @@ export interface LoanListItem {
   requestedAmount: number; approvedAmount?: number; interestRate: number
   tenureMonths: number; monthlyEmi?: number; customerName: string
   customerPhone: string; createdByName: string; assignedToName?: string; createdAt: string
+}
+
+export interface LoanOffer {
+  id: number; offerType?: string; loanAmount: number
+  loanMaxTenure: number; loanRate: number; processingFee: number
+}
+
+export interface IncredLoanInfo {
+  loanId: number; isIncredApplication: boolean; applicationSource?: string
+  incredApplicationId?: string; incredCustomerId?: string; incredRequestId?: string
+  incredOfferStatus?: string; incredErrorMessage?: string; incredRejectReason?: string
+  incredLastWebhookEvent?: string; incredLastWebhookStatus?: string
+  incredLastSyncedAt?: string; offers: LoanOffer[]
 }
 
 export interface DashboardStats {

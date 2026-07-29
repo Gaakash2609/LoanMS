@@ -461,7 +461,7 @@ Required JSON format:
         method: 'POST',
         headers: {
           'Content-Type':  'application/json',
-          'Authorization': 'Bearer ' + (sess.token || ''),
+          'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || ''),
         },
         body: JSON.stringify({
           systemPrompt: BANK_REPLY_SYSTEM_PROMPT,

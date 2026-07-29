@@ -1,6 +1,7 @@
 using BCrypt.Net;
 using System.Text;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.DataProtection;
 using LoanMS.Application.AI;
 using LoanMS.Application.Interfaces;
 using LoanMS.Application.Mappings;
@@ -66,7 +67,30 @@ try
     );
 
     // ── Data Protection ───────────────────────────────────────────────────────
-    builder.Services.AddDataProtection();
+    // MUST persist keys to disk, in the same place the SQLite DB already lives
+    // (so it survives every restart/redeploy exactly as reliably as the DB does).
+    // Without this, ASP.NET Core generates a brand-new, ephemeral key ring on
+    // every process start — every secret encrypted with the OLD ring (Gmail SMTP
+    // password, InCred client secret, and the Gemini/OpenAI AI keys saved via
+    // Settings) silently fails to decrypt after that. AiKeyStore/EmailConfigStore
+    // catch that failure quietly and fall back to appsettings.json, which has no
+    // OpenAI key at all — so "the key saves fine but extraction still doesn't
+    // work" kept happening after every restart, no matter how many times a key
+    // was re-saved.
+    var dataProtectionBuilder = builder.Services.AddDataProtection()
+        .SetApplicationName("LoanMS")
+        .PersistKeysToFileSystem(new DirectoryInfo(
+            Path.Combine(builder.Environment.ContentRootPath, "dataprotection-keys")));
+
+    // Encrypt the key ring at rest so it isn't stored as plain XML on disk.
+    // DPAPI ties encryption to the current Windows user/machine — fine for a
+    // single-machine dev/IIS deployment. On Linux/Docker (no DPAPI), keys stay
+    // unencrypted on disk unless a certificate is configured separately, so
+    // this only silences/fixes the warning on Windows.
+    if (OperatingSystem.IsWindows())
+    {
+        dataProtectionBuilder.ProtectKeysWithDpapi();
+    }
 
     // ── Database — SQLite (dev) or PostgreSQL (production) ───────────────────
     var dbProvider = (builder.Configuration["Database:Provider"] ?? "sqlite").ToLower();
@@ -106,6 +130,7 @@ try
     builder.Services.AddScoped<ICustomerService, CustomerService>();
     builder.Services.AddScoped<ILoanService, LoanService>();
     builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
+    builder.Services.AddScoped<LoanMS.Infrastructure.Services.IEmailConfigStore, LoanMS.Infrastructure.Services.EmailConfigStore>();
     builder.Services.AddScoped<IEmailService, LoanMS.Infrastructure.Services.EmailService>();
     builder.Services.AddScoped<ICibilAnalysisService, CibilAnalysisService>();
 
@@ -149,6 +174,7 @@ try
     var aiProvider = (builder.Configuration["AI:Provider"] ?? "claude").ToLower();
 
     builder.Services.AddSingleton<IPromptService, PromptService>();
+    builder.Services.AddScoped<IAiKeyStore, LoanMS.Infrastructure.AI.AiKeyStore>();
     builder.Services.AddTransient<AiResilienceHandler>();
     builder.Services.AddHttpClient("ai", c =>
     {
@@ -169,18 +195,21 @@ try
                 // deprecated/404/410/429/5xx/timeout/unavailable), requests
                 // automatically retry on OpenAI, and automatically switch back
                 // to Gemini once it's healthy again. See FailoverAIProvider.
-                // Falls back to plain Gemini (today's exact behavior) if no
-                // OpenAI key is configured, so this never introduces a hard
-                // dependency on a provider that hasn't been set up.
+                // OpenAI is always included in the chain — its key may live in
+                // appsettings/env OR be saved later by an Admin through
+                // Settings → AI Provider Keys (IAiKeyStore checks the database
+                // first, at request time). If no key exists anywhere yet,
+                // OpenAIProvider.IsAvailableAsync()/CompleteAsync() report
+                // "not configured" and FailoverAIProvider just skips it — so
+                // this never introduces a hard dependency on a provider that
+                // hasn't been set up.
                 builder.Services.AddScoped<IAIProvider>(sp =>
                 {
                     var gemini = ActivatorUtilities.CreateInstance<GeminiAIProvider>(sp);
-                    var hasOpenAiKey = !string.IsNullOrEmpty(builder.Configuration["AI:OpenAIApiKey"]);
+                    var openai = ActivatorUtilities.CreateInstance<OpenAIProvider>(sp);
                     var hasClaudeKey = !string.IsNullOrEmpty(builder.Configuration["AI:ClaudeApiKey"]);
-                    if (!hasOpenAiKey && !hasClaudeKey) return gemini;
 
-                    var chain = new List<IAIProvider> { gemini };
-                    if (hasOpenAiKey) chain.Add(ActivatorUtilities.CreateInstance<OpenAIProvider>(sp));
+                    var chain = new List<IAIProvider> { gemini, openai };
                     if (hasClaudeKey) chain.Add(ActivatorUtilities.CreateInstance<ClaudeAIProvider>(sp));
                     return ActivatorUtilities.CreateInstance<FailoverAIProvider>(
                         sp, (IReadOnlyList<IAIProvider>)chain);
@@ -229,7 +258,14 @@ try
                 ValidIssuer              = builder.Configuration["Jwt:Issuer"]   ?? "LoanMS.API",
                 ValidAudience            = builder.Configuration["Jwt:Audience"] ?? "LoanMS.Client",
                 IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-                ClockSkew                = TimeSpan.Zero
+                // A small tolerance (30s) absorbs normal clock drift between the
+                // machine/container that issued the token and the one validating
+                // it (common on ECS/Docker). Zero skew was causing freshly-issued,
+                // still-valid tokens to be rejected as "expired" — the false
+                // "session expired" error on KYC Vision → Settings even right
+                // after a fresh login. 30s is negligible from a security standpoint
+                // (still far stricter than the framework default of 5 minutes).
+                ClockSkew                = TimeSpan.FromSeconds(30)
             };
         });
 
@@ -255,22 +291,57 @@ try
     });
 
     // ── Rate Limiting ─────────────────────────────────────────────────────────
+    // IMPORTANT: AddFixedWindowLimiter(name, ...) with no partition key creates a
+    // single GLOBAL bucket shared by every caller. "LoginPolicy" was previously
+    // wired up that way and applied to BOTH /api/auth/login (deliberate sign-in
+    // attempts — should be tightly capped per client to slow brute force) AND
+    // /api/auth/refresh (silent, automatic background token renewal that every
+    // logged-in tab performs). Because the two were sharing one un-partitioned
+    // 5-requests-per-15-minutes bucket, a handful of routine background refresh
+    // calls from any user could exhaust the ENTIRE app's login budget — after
+    // which /api/auth/login and /api/auth/refresh returned 429 for every user,
+    // site-wide, for up to 15 minutes. That is what produced the "session has
+    // expired" message that didn't go away even after logging out and back in:
+    // the fresh login attempt was itself being silently rate-limited, so the
+    // frontend fell back to its offline/local login path instead of getting a
+    // real token. Fixed by (1) partitioning both policies per client IP so one
+    // client can never exhaust another's budget, and (2) giving token refresh
+    // its own, more generous policy separate from deliberate login attempts.
     builder.Services.AddRateLimiter(options =>
     {
-        options.AddFixedWindowLimiter("LoginPolicy", opt =>
-        {
-            opt.PermitLimit          = 5;
-            opt.Window               = TimeSpan.FromMinutes(15);
-            opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-            opt.QueueLimit           = 0;
-        });
-        options.AddFixedWindowLimiter("GlobalPolicy", opt =>
-        {
-            opt.PermitLimit          = 200;
-            opt.Window               = TimeSpan.FromMinutes(1);
-            opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-            opt.QueueLimit           = 0;
-        });
+        options.AddPolicy("LoginPolicy", httpContext =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit          = 5,
+                    Window                = TimeSpan.FromMinutes(15),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit           = 0
+                }));
+
+        options.AddPolicy("RefreshPolicy", httpContext =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit          = 60,
+                    Window                = TimeSpan.FromMinutes(15),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit           = 0
+                }));
+
+        options.AddPolicy("GlobalPolicy", httpContext =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit          = 200,
+                    Window                = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit           = 0
+                }));
+
         options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     });
 
@@ -343,7 +414,11 @@ try
             }
             else
             {
-                db.Database.EnsureDeleted();
+                // IMPORTANT: do NOT EnsureDeleted() here — that wipes the entire
+                // SQLite DB (including Admin-saved AI keys, users, loans, everything)
+                // on every single restart. EnsureCreated() is idempotent: it only
+                // creates the file/schema if it doesn't already exist, and is a
+                // no-op otherwise, so existing data now survives restarts.
                 db.Database.EnsureCreated();
                 await Task.Delay(200); // let SQLite settle
             }

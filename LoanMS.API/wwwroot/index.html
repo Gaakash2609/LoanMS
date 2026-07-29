@@ -13,14 +13,14 @@
        X-Frame-Options: DENY
        X-Content-Type-Options: nosniff
        Strict-Transport-Security: max-age=31536000; includeSubDomains
-       Content-Security-Policy: default-src 'self' https:; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.emailjs.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://api.emailjs.com https://api.brevo.com https://api.incred.com https://unpkg.com https://generativelanguage.googleapis.com;
+       Content-Security-Policy: default-src 'self' https:; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://api.incred.com https://unpkg.com https://generativelanguage.googleapis.com;
        Cache-Control: public, max-age=86400
   -->
 
   <!-- Application Styles -->
   <link rel="stylesheet" href="/css/app.css">
   <link rel="stylesheet" href="/css/efin-improvements.css">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231a4fa3'/><text x='50%25' y='54%25' font-size='18' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle' dominant-baseline='middle'>E</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231a4fa3'/><text x='50%25' y='54%25' font-size='18' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle' dominant-baseline='middle'>M</text></svg>">
   <title>Mudrahub</title>
   <link
     href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap"
@@ -1619,7 +1619,7 @@
             <div style="margin-top:8px;font-size:11.5px;color:var(--text3)" id="kyc-hint-text">AI-powered OCR • Works with images &amp; PDFs</div>
             <div id="kyc-api-status-banner" style="display:none;margin-top:10px;font-size:11.5px;padding:8px 14px;border-radius:8px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;text-align:center">
               ⚠️ KYC AI Vision not configured — extraction will use basic OCR mode.
-              <a href="#" onclick="event.preventDefault();showPage('settings',document.getElementById('nav-settings-item'));setTimeout(function(){settingsSwitchTab('branding',document.getElementById('settings-tab-branding-btn'));document.getElementById('stg-kyc-proxy-folder').classList.add('open');document.getElementById('stg-kyc-proxy-folder').scrollIntoView({behavior:'smooth'});},300)" style="color:#b45309;font-weight:700;text-decoration:underline">Configure in Settings →</a>
+              <a href="#" onclick="event.preventDefault();showPage('settings',document.getElementById('nav-settings-item'));setTimeout(function(){settingsSwitchTab('ai',document.getElementById('settings-tab-ai-btn'));document.getElementById('stg-kyc-proxy-folder').classList.add('open');document.getElementById('stg-kyc-proxy-folder').scrollIntoView({behavior:'smooth'});},300)" style="color:#b45309;font-weight:700;text-decoration:underline">Configure in Settings →</a>
             </div>
           </div>
 
@@ -7860,6 +7860,7 @@
         <div class="tab"        id="settings-tab-access-btn"    onclick="settingsSwitchTab('access',this)">🔐 Roles &amp; Permissions</div>
         <div class="tab"        id="settings-tab-system-btn"    onclick="settingsSwitchTab('system',this)">🛠 System &amp; Data</div>
         <div class="tab"        id="settings-tab-branding-btn"  onclick="settingsSwitchTab('branding',this)">🎨 Logo &amp; Branding</div>
+        <div class="tab"        id="settings-tab-ai-btn"        onclick="settingsSwitchTab('ai',this)">🤖 AI &amp; KYC Vision</div>
       </div>
 
       <!-- ═══════════════════════════════════════════════════════════════
@@ -7952,7 +7953,7 @@
             <div class="stg-folder-icon" style="background:linear-gradient(135deg,#ea4335,#fbbc04)">📧</div>
             <div>
               <div class="stg-folder-title">Gmail SMTP Setup <span id="stg-gmail-status-chip" style="font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(26,79,163,.08);color:var(--text3);margin-left:8px">Not configured</span></div>
-              <div class="stg-folder-sub">Uses EmailJS as a secure browser relay — complete Steps A → D below</div>
+              <div class="stg-folder-sub">Sent directly from the EFIN server via SMTP — complete Steps A → B below</div>
             </div>
             <div class="stg-folder-chevron">▼</div>
           </div>
@@ -7960,7 +7961,7 @@
 
             <!-- Step-by-step guide -->
             <div style="background:linear-gradient(135deg,rgba(26,79,163,.03),rgba(26,115,64,.03));border:1px solid rgba(26,79,163,.12);border-radius:14px;padding:18px 20px;margin-bottom:20px">
-              <div style="font-family:var(--font-head);font-size:13.5px;font-weight:800;color:var(--accent);margin-bottom:14px">🔧 One-Time Setup — Steps A → D</div>
+              <div style="font-family:var(--font-head);font-size:13.5px;font-weight:800;color:var(--accent);margin-bottom:14px">🔧 One-Time Setup — Steps A → B</div>
               <div style="display:flex;flex-direction:column;gap:10px">
                 <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 16px">
                   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -7976,29 +7977,10 @@
                 <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 16px">
                   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
                     <span style="background:var(--accent);color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">B</span>
-                    <span style="font-weight:700;font-size:13px">Create a free EmailJS account</span>
+                    <span style="font-weight:700;font-size:13px">Paste your Gmail address + App Password below and Save</span>
                   </div>
                   <div style="font-size:12.5px;color:var(--text2);line-height:1.8;padding-left:34px">
-                    1 · <a href="https://www.emailjs.com" target="_blank" style="color:var(--accent);font-weight:700">emailjs.com</a> → Sign up free (200 emails/month)<br>
-                    2 · Dashboard → <strong>Email Services</strong> → <strong>Add New Service</strong> → choose <strong>Gmail</strong> → Connect → copy <strong>Service ID</strong>
-                  </div>
-                </div>
-                <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 16px">
-                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-                    <span style="background:var(--accent);color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">C</span>
-                    <span style="font-weight:700;font-size:13px">Create an Email Template</span>
-                  </div>
-                  <div style="font-size:12.5px;color:var(--text2);line-height:1.8;padding-left:34px">
-                    Dashboard → <strong>Email Templates</strong> → <strong>Create New</strong> → Set To: <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">{{to_email}}</code>, Subject: <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">{{subject}}</code>, Content: <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">{{message}}</code> → Save → copy <strong>Template ID</strong>
-                  </div>
-                </div>
-                <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 16px">
-                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-                    <span style="background:var(--accent);color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">D</span>
-                    <span style="font-weight:700;font-size:13px">Get your Public Key &amp; paste all credentials below</span>
-                  </div>
-                  <div style="font-size:12.5px;color:var(--text2);line-height:1.8;padding-left:34px">
-                    Dashboard → <strong>Account</strong> → <strong>General</strong> → copy <strong>Public Key</strong> → paste all three IDs + App Password in the fields below
+                    That's it — no third-party account needed. The server connects to <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">smtp.gmail.com</code> directly and sends every email itself.
                   </div>
                 </div>
               </div>
@@ -8016,32 +7998,14 @@
                   <input type="password" id="stg-smtp-pass" class="form-control" placeholder="xxxx xxxx xxxx xxxx" style="font-family:monospace;letter-spacing:2px;padding-right:40px" oninput="stgCheckGmailReady()">
                   <button type="button" onclick="stgToggle('stg-smtp-pass')" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px">👁</button>
                 </div>
-              </div>
-              <div class="form-group">
-                <label>EmailJS Service ID *</label>
-                <input type="text" id="stg-ejs-service" class="form-control" placeholder="service_xxxxxxx" style="font-family:monospace" oninput="stgCheckGmailReady()">
-              </div>
-              <div class="form-group">
-                <label>EmailJS Template ID *</label>
-                <input type="text" id="stg-ejs-template" class="form-control" placeholder="template_xxxxxxx" style="font-family:monospace" oninput="stgCheckGmailReady()">
-              </div>
-              <div class="form-group" style="grid-column:1/-1">
-                <label>EmailJS Public Key *</label>
-                <div style="position:relative">
-                  <input type="password" id="stg-ejs-pubkey" class="form-control" placeholder="xxxxxxxxxxxxxxxxxxxxxxx" style="font-family:monospace;padding-right:40px" oninput="stgCheckGmailReady()">
-                  <button type="button" onclick="stgToggle('stg-ejs-pubkey')" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px">👁</button>
-                </div>
-                <div style="font-size:11px;color:var(--text3);margin-top:4px">All credentials stored locally on this device only — never sent anywhere except EmailJS servers</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:4px">Stored encrypted on the server — never exposed to the browser once saved</div>
               </div>
             </div>
 
             <!-- Live readiness checklist -->
-            <div style="margin-top:14px;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+            <div style="margin-top:14px;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
               <div id="stgc-smtp-user"    style="font-size:12px;color:var(--text3)">○ Gmail address</div>
               <div id="stgc-smtp-pass"    style="font-size:12px;color:var(--text3)">○ App Password</div>
-              <div id="stgc-ejs-service"  style="font-size:12px;color:var(--text3)">○ Service ID</div>
-              <div id="stgc-ejs-template" style="font-size:12px;color:var(--text3)">○ Template ID</div>
-              <div id="stgc-ejs-pubkey"   style="font-size:12px;color:var(--text3)">○ Public Key</div>
             </div>
           </div>
         </div>
@@ -8177,7 +8141,7 @@ Please log in and change your password immediately.
         <!-- ╔══════════════════════════════════════════════════════════╗
              ║  FOLDER B — Role Permission Cards (full detail view)     ║
              ╚══════════════════════════════════════════════════════════╝ -->
-        <div class="stg-folder" id="folder-access-cards">
+        <div class="stg-folder" id="folder-access-cards" style="display:none">
           <div class="stg-folder-head" onclick="stgToggleFolder('folder-access-cards')">
             <div class="stg-folder-icon" style="background:linear-gradient(135deg,#7c3aed,#a78bfa)">📋</div>
             <div>
@@ -8201,9 +8165,10 @@ Please log in and change your password immediately.
             <div class="stg-folder-icon" style="background:linear-gradient(135deg,#0ea5e9,#38bdf8)">🗂</div>
             <div>
               <div class="stg-folder-title">Menu Access Control</div>
-              <div class="stg-folder-sub">Control which roles can see each sidebar menu item. Core items are always locked.</div>
+              <div class="stg-folder-sub">Control which roles can see each sidebar menu item. Core items are always locked. Changes are saved centrally and apply for every admin.</div>
             </div>
-            <span class="stg-badge stg-badge-admin" style="margin-left:auto;margin-right:10px">ADMIN ONLY</span>
+            <span class="stg-badge" style="margin-left:auto;margin-right:6px;background:rgba(16,185,129,.1);color:var(--success)" title="Saved to the server — visible to every admin, on every device">☁ Synced</span>
+            <span class="stg-badge stg-badge-admin" style="margin-right:10px">ADMIN ONLY</span>
             <div class="stg-folder-chevron">▼</div>
           </div>
           <div class="stg-folder-body">
@@ -8286,71 +8251,6 @@ Please log in and change your password immediately.
           </div>
         </div>
 
-      </div><!-- end settings-tab-access -->
-
-      <!-- ═══════════════════════════════════════════════════════════════
-           TAB 3 — SYSTEM & DATA
-           Folders: Loan Form Dropdowns · First Offer Matrix ·
-                    Webhook Logs · App Branding
-      ═══════════════════════════════════════════════════════════════════ -->
-      <div id="settings-tab-system" style="display:none">
-
-        <!-- ╔══════════════════════════════════════╗
-             ║  FOLDER 11 — Loan Form Dropdowns     ║
-             ╚══════════════════════════════════════╝ -->
-        <div class="stg-folder open" id="folder-dropdowns">
-          <div class="stg-folder-head" onclick="stgToggleFolder('folder-dropdowns')">
-            <div class="stg-folder-icon" style="background:linear-gradient(135deg,#1a4fa3,#2d68cc)">📋</div>
-            <div>
-              <div class="stg-folder-title">Loan Form Dropdown Lists</div>
-              <div class="stg-folder-sub">Manage options for Location, Sales Person, Home Type, Designation and Company Type in the New Application wizard</div>
-            </div>
-            <span class="stg-badge stg-badge-admin" style="margin-left:auto;margin-right:10px">ADMIN ONLY</span>
-            <div class="stg-folder-chevron">▼</div>
-          </div>
-          <div class="stg-folder-body">
-            <!-- List selector tabs -->
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px" id="stg-ml-list-tabs"></div>
-            <!-- Active list editor -->
-            <div id="stg-ml-editor" style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:18px">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
-                <div>
-                  <div style="font-family:var(--font-head);font-size:14px;font-weight:700" id="stg-ml-editor-title">Select a list above to edit</div>
-                  <div style="font-size:11.5px;color:var(--text3);margin-top:2px" id="stg-ml-editor-desc"></div>
-                </div>
-                <div style="display:flex;gap:8px;align-items:center">
-                  <input type="text" id="stg-ml-new-input" placeholder="New item label…" style="padding:7px 12px;border:1px solid var(--border2);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);width:190px;outline:none" onkeydown="if(event.key==='Enter') stgMlAddItem()">
-                  <button class="btn btn-primary btn-sm" onclick="stgMlAddItem()">+ Add</button>
-                </div>
-              </div>
-              <div id="stg-ml-items-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
-                <div style="color:var(--text3);font-size:13px;grid-column:1/-1;text-align:center;padding:20px">Select a list above to manage its options.</div>
-              </div>
-            </div>
-            <div style="margin-top:12px;font-size:12px;color:var(--text3)">💡 Changes take effect immediately in the New Application wizard.</div>
-          </div>
-        </div>
-
-        <!-- ╔══════════════════════════════════════╗
-             ║  FOLDER 13 — Webhook Logs            ║
-             ╚══════════════════════════════════════╝ -->
-        <div class="stg-folder" id="folder-webhooks">
-          <div class="stg-folder-head" onclick="stgToggleFolder('folder-webhooks')">
-            <div class="stg-folder-icon" style="background:linear-gradient(135deg,#7c3aed,#a78bfa)">⚡</div>
-            <div>
-              <div class="stg-folder-title">Webhook Logs</div>
-              <div class="stg-folder-sub">Recent InCred integration webhook events — POST /incred/loan/webhook</div>
-            </div>
-            <div class="stg-folder-chevron">▼</div>
-          </div>
-          <div class="stg-folder-body" id="stg-webhook-body">
-            <div id="stg-wh-logs"><div class="efin-section-loader"><div class="esl-track"><div class="esl-fill"></div></div><div class="esl-dots"><div class="esl-dot"></div><div class="esl-dot"></div><div class="esl-dot"></div></div></div></div>
-            <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
-              <button class="btn btn-ghost btn-sm" onclick="stgRefreshWebhooks()">↻ Refresh</button>
-            </div>
-          </div>
-        </div>
-
         <!-- ╔══════════════════════════════════════════════════════════════╗
              ║  ADMIN MASTER CONTROL — single source of truth for all    ║
              ║  tabs · menus · buttons · permissions across every role    ║
@@ -8360,9 +8260,10 @@ Please log in and change your password immediately.
             <div class="stg-folder-icon" style="background:linear-gradient(135deg,var(--accent),var(--accent-light))">🎛️</div>
             <div>
               <div class="stg-folder-title">Admin Master Control</div>
-              <div class="stg-folder-sub">Control every tab, menu item, button, and permission for every role. Toggle individual permissions or flip all at once per role. Admin is always locked to full access.</div>
+              <div class="stg-folder-sub">Control every tab, menu item, button, and permission for every role. Toggle individual permissions or flip all at once per role. Admin is always locked to full access. Changes are saved centrally and apply for every admin.</div>
             </div>
-            <span class="stg-badge stg-badge-admin" style="margin-left:auto;margin-right:10px">ADMIN ONLY</span>
+            <span class="stg-badge" style="margin-left:auto;margin-right:6px;background:rgba(16,185,129,.1);color:var(--success)" title="Saved to the server — visible to every admin, on every device">☁ Synced</span>
+            <span class="stg-badge stg-badge-admin" style="margin-right:10px">ADMIN ONLY</span>
             <div class="stg-folder-chevron">▼</div>
           </div>
           <div class="stg-folder-body">
@@ -8418,6 +8319,96 @@ Please log in and change your password immediately.
                 </thead>
                 <tbody id="perm-matrix-body"></tbody>
               </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ╔══════════════════════════════════════════════════════════╗
+             ║  FOLDER E — Permission Change History (NEW)               ║
+             ║  Read-only view over the existing DB-backed Audit Log,    ║
+             ║  filtered to permission-related changes. Answers "who     ║
+             ║  changed what, and when" for compliance / accountability. ║
+             ╚══════════════════════════════════════════════════════════╝ -->
+        <div class="stg-folder" id="folder-perm-history">
+          <div class="stg-folder-head" onclick="stgToggleFolder('folder-perm-history')">
+            <div class="stg-folder-icon" style="background:linear-gradient(135deg,#334155,#64748b)">🕘</div>
+            <div>
+              <div class="stg-folder-title">Permission Change History</div>
+              <div class="stg-folder-sub">Who changed role permissions, menu access, or export rights — and when. Backed by the system Audit Log.</div>
+            </div>
+            <span class="stg-badge stg-badge-admin" style="margin-left:auto;margin-right:10px">ADMIN ONLY</span>
+            <div class="stg-folder-chevron">▼</div>
+          </div>
+          <div class="stg-folder-body">
+            <div id="stg-perm-history-list" style="border:1px solid var(--border);border-radius:12px;overflow:hidden">
+              <div class="efin-section-loader"><div class="esl-track"><div class="esl-fill"></div></div><div class="esl-dots"><div class="esl-dot"></div><div class="esl-dot"></div><div class="esl-dot"></div></div></div>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" onclick="stgRenderPermissionHistory()">↻ Refresh</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- end settings-tab-access -->
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           TAB 3 — SYSTEM & DATA
+           Folders: Loan Form Dropdowns · Webhook Logs
+      ═══════════════════════════════════════════════════════════════════ -->
+      <div id="settings-tab-system" style="display:none">
+
+        <!-- ╔══════════════════════════════════════╗
+             ║  FOLDER 11 — Loan Form Dropdowns     ║
+             ╚══════════════════════════════════════╝ -->
+        <div class="stg-folder open" id="folder-dropdowns">
+          <div class="stg-folder-head" onclick="stgToggleFolder('folder-dropdowns')">
+            <div class="stg-folder-icon" style="background:linear-gradient(135deg,#1a4fa3,#2d68cc)">📋</div>
+            <div>
+              <div class="stg-folder-title">Loan Form Dropdown Lists</div>
+              <div class="stg-folder-sub">Manage options for Location, Sales Person, Home Type, Designation and Company Type in the New Application wizard</div>
+            </div>
+            <span class="stg-badge stg-badge-admin" style="margin-left:auto;margin-right:10px">ADMIN ONLY</span>
+            <div class="stg-folder-chevron">▼</div>
+          </div>
+          <div class="stg-folder-body">
+            <!-- List selector tabs -->
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px" id="stg-ml-list-tabs"></div>
+            <!-- Active list editor -->
+            <div id="stg-ml-editor" style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:18px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+                <div>
+                  <div style="font-family:var(--font-head);font-size:14px;font-weight:700" id="stg-ml-editor-title">Select a list above to edit</div>
+                  <div style="font-size:11.5px;color:var(--text3);margin-top:2px" id="stg-ml-editor-desc"></div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input type="text" id="stg-ml-new-input" placeholder="New item label…" style="padding:7px 12px;border:1px solid var(--border2);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);width:190px;outline:none" onkeydown="if(event.key==='Enter') stgMlAddItem()">
+                  <button class="btn btn-primary btn-sm" onclick="stgMlAddItem()">+ Add</button>
+                </div>
+              </div>
+              <div id="stg-ml-items-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+                <div style="color:var(--text3);font-size:13px;grid-column:1/-1;text-align:center;padding:20px">Select a list above to manage its options.</div>
+              </div>
+            </div>
+            <div style="margin-top:12px;font-size:12px;color:var(--text3)">💡 Changes take effect immediately in the New Application wizard.</div>
+          </div>
+        </div>
+
+        <!-- ╔══════════════════════════════════════╗
+             ║  FOLDER 13 — Webhook Logs            ║
+             ╚══════════════════════════════════════╝ -->
+        <div class="stg-folder" id="folder-webhooks">
+          <div class="stg-folder-head" onclick="stgToggleFolder('folder-webhooks')">
+            <div class="stg-folder-icon" style="background:linear-gradient(135deg,#7c3aed,#a78bfa)">⚡</div>
+            <div>
+              <div class="stg-folder-title">Webhook Logs</div>
+              <div class="stg-folder-sub">Recent InCred integration webhook events — POST /incred/loan/webhook</div>
+            </div>
+            <div class="stg-folder-chevron">▼</div>
+          </div>
+          <div class="stg-folder-body" id="stg-webhook-body">
+            <div id="stg-wh-logs"><div class="efin-section-loader"><div class="esl-track"><div class="esl-fill"></div></div><div class="esl-dots"><div class="esl-dot"></div><div class="esl-dot"></div><div class="esl-dot"></div></div></div></div>
+            <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" onclick="stgRefreshWebhooks()">↻ Refresh</button>
             </div>
           </div>
         </div>
@@ -8692,8 +8683,17 @@ Please log in and change your password immediately.
           </div>
         </div>
 
+      </div><!-- end settings-tab-branding -->
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           TAB 5 — AI & KYC VISION
+           Folders: AI Provider Keys (Gemini / OpenAI) for KYC Vision
+                    auto-fill and other AI-assisted features
+      ═══════════════════════════════════════════════════════════════════ -->
+      <div id="settings-tab-ai" style="display:none">
+
         <!-- ── KYC Vision — server-configured (provider-neutral) ── -->
-        <div class="stg-folder" id="stg-kyc-proxy-folder">
+        <div class="stg-folder open" id="stg-kyc-proxy-folder">
           <div class="stg-folder-head" onclick="this.parentElement.classList.toggle('open')">
             <div class="stg-folder-icon" style="background:rgba(26,79,163,.1)">🔒</div>
             <div>
@@ -8711,7 +8711,7 @@ Please log in and change your password immediately.
           </div>
         </div>
 
-      </div><!-- end settings-tab-branding -->
+      </div><!-- end settings-tab-ai -->
 
     </div><!-- end page-settings -->
 
@@ -9357,8 +9357,8 @@ Please log in and change your password immediately.
   <!-- credential-seed.js: must run before efin-app.js -->
   <script src="/js/credential-seed.js"></script>
   <script src="/js/login-helpers.js"></script>
-  <script src="/js/efin-app.js?v=54"></script>
-  <script src="/js/kyc.js?v=41"></script>
+  <script src="/js/efin-app.js?v=56"></script>
+  <script src="/js/kyc.js?v=42"></script>
   <script src="/js/tasks.js"></script>
   <script src="/js/user-profile.js"></script>
   <script src="/js/efin-improvements.js"></script>

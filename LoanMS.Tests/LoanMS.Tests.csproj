@@ -21,5 +21,6 @@
     <ProjectReference Include="..\LoanMS.Application\LoanMS.Application.csproj" />
     <ProjectReference Include="..\LoanMS.Infrastructure\LoanMS.Infrastructure.csproj" />
     <ProjectReference Include="..\LoanMS.Domain\LoanMS.Domain.csproj" />
+    <ProjectReference Include="..\LoanMS.API\LoanMS.API.csproj" />
   </ItemGroup>
 </Project>

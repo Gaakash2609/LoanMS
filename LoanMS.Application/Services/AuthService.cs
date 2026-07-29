@@ -105,9 +105,26 @@ public class AuthService : IAuthService
 
     public bool VerifyPassword(string password, string hash)
     {
-        // Try standard verify first, then enhanced — handles $2a$, $2b$, $2y$ variants
-        try { if (BCrypt.Net.BCrypt.Verify(password, hash)) return true; } catch { }
-        try { if (BCrypt.Net.BCrypt.EnhancedVerify(password, hash)) return true; } catch { }
-        return false;
+        // Try standard verify first ($2a$/$2b$/$2y$ hashes — this covers every
+        // hash this app actually issues, since HashPassword() above always uses
+        // BCrypt.HashPassword). EnhancedVerify is only a fallback for a
+        // different (SHA-384 pre-hashed) scheme this app never generates.
+        //
+        // IMPORTANT: only fall through to EnhancedVerify when Verify() *throws*
+        // (i.e. the hash format itself wasn't understood) — not merely when it
+        // returns false for a wrong password. Previously both calls ran on every
+        // wrong-password attempt, silently doubling the (already CPU-heavy,
+        // workFactor=12) bcrypt cost and pushing /api/auth/login well past the
+        // 1000ms "slow request" threshold (the WRN log lines). A wrong password
+        // now costs one bcrypt round instead of two.
+        try
+        {
+            return BCrypt.Net.BCrypt.Verify(password, hash);
+        }
+        catch
+        {
+            try { return BCrypt.Net.BCrypt.EnhancedVerify(password, hash); }
+            catch { return false; }
+        }
     }
 }

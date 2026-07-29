@@ -936,12 +936,6 @@
       return true;
     }
 
-    async function _verifyPassword(email, password) {
-      const map = _loadCredentials();
-      if (!map || !map[email]) return false;
-      const hash = await _sha256(password);
-      return hash === map[email];
-    }
 
     async function _setPassword(email, password) {
       const hash = await _sha256(password);
@@ -1399,38 +1393,18 @@
 
       if (!recipients.length) return false;
 
-      const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN') : '';
-      const amtLine = app.sanctionLoanAmt || app.amount ? `<strong>Amount:</strong> ${fmt(app.sanctionLoanAmt || app.amount)}` : '';
-
+      const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN') : '—';
       const stageColors = { approved:'#1a7340', disbursed:'#0a589a', rejected:'#e31e25', hold:'#e67e00', login:'#7c3aed', underwriting:'#0ea5e9', offer:'#f59e0b', acceptance:'#10b981' };
       const stageColor  = stageColors[newStatus] || '#1a4fa3';
 
-      const html = `
-<div style="font-family:Arial,sans-serif;background:#f0f4ff;padding:24px 12px">
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" width="100%" style="max-width:560px;margin:0 auto">
-  <tr><td style="background:#1a4fa3;padding:18px 28px;border-radius:12px 12px 0 0;text-align:center">
-    <div style="color:#fff;font-size:22px;font-weight:900;letter-spacing:-1px">EFIN</div>
-    <div style="color:rgba(255,255,255,.7);font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-top:2px">Loan Management System</div>
-  </td></tr>
-  <tr><td style="background:#fff;padding:28px;border-left:1px solid #dde3f0;border-right:1px solid #dde3f0">
-    <div style="font-size:13px;color:#5a7090;margin-bottom:14px">Application Update</div>
-    <div style="font-size:20px;font-weight:800;color:#0c1733;margin-bottom:8px">Status Changed → <span style="color:${stageColor}">${stageName}</span></div>
-    <div style="background:#f0f4ff;border:1px solid #dde3f0;border-radius:10px;padding:16px 20px;margin:16px 0">
-      <div style="font-size:13px;color:#0c1733;margin-bottom:6px"><strong>Application ID:</strong> ${app.id}</div>
-      <div style="font-size:13px;color:#0c1733;margin-bottom:6px"><strong>Applicant:</strong> ${app.name}</div>
-      ${amtLine ? `<div style="font-size:13px;color:#0c1733;margin-bottom:6px">${amtLine}</div>` : ''}
-      <div style="font-size:13px;color:#0c1733"><strong>New Stage:</strong> <span style="background:${stageColor}18;color:${stageColor};padding:2px 10px;border-radius:20px;font-weight:700">${stageName}</span></div>
-    </div>
-    <div style="font-size:12.5px;color:#7a8aaa;line-height:1.6">Please log in to EFIN for full details and next steps.</div>
-  </td></tr>
-  <tr><td style="background:#fff;padding:14px 28px 22px;border-left:1px solid #dde3f0;border-right:1px solid #dde3f0;border-bottom:1px solid #dde3f0;border-radius:0 0 12px 12px">
-    <div style="font-size:11px;color:#b0b8cc;text-align:center">Automated notification from EFIN · Ref: ${app.id} · ${new Date().toLocaleDateString('en-IN')}</div>
-  </td></tr>
-</table></div>`;
+      const { subject, html } = _tplRender('stage', {
+        name: app.name, app_id: app.id, stage: stageName,
+        amount: fmt(app.sanctionLoanAmt || app.amount), signature: cfg.signature || ''
+      }, stageColor, 'Status Changed → ' + stageName, null, app.id);
 
       try {
         for (const r of recipients) {
-          await sysmailSend({ to: r.email, toName: r.name, subject: `EFIN Update: ${app.id} ${app.name} → ${stageName}`, html });
+          await sysmailSend({ to: r.email, toName: r.name, subject, html });
         }
         return true;
       } catch(e) { console.warn('[EFIN Stage Email]', e); return false; }
@@ -1528,6 +1502,11 @@
       const profileBtn  = document.getElementById('topbar-profile-btn');
       if (allUsersBtn) allUsersBtn.style.display = (isAdmin || currentUser.role === 'product_team') ? 'flex' : 'none';
       if (profileBtn)  profileBtn.style.display  = 'flex';
+
+      // Settings nav item — Admin only (not part of ALL_MENU_ITEMS/canHide system,
+      // so it must be gated explicitly here or every role sees it).
+      const settingsNavItem = document.getElementById('nav-settings-item');
+      if (settingsNavItem) settingsNavItem.style.display = isAdmin ? '' : 'none';
 
       // Hide/show admin-controlled section headers if all items in that section are hidden
       applyNavSectionVisibility();
@@ -1699,19 +1678,6 @@
     ];
 
     // ─────────── UTILITY: Generate Concise System Comments ───────────
-    function generateShortComment(type, details = {}) {
-      const comments = {
-        'blocked_docs': `Missing: ${details.docs?.join(', ') || 'Required docs'}`,
-        'blocked_manual': 'Blocked. Manual action needed by: Admin User',
-        'login_blocked': `Login blocked: ${details.docs?.slice(0, 2).join(', ') || 'Documents required'}`,
-        'approved': 'Approved ✓',
-        'rejected': `Rejected: ${details.reason || 'Does not meet criteria'}`,
-        'docs_missing': `📋 ${details.missing || 'Documents pending'}`,
-        'kyc_required': 'KYC verification required',
-        'income_required': 'Income documents required',
-      };
-      return comments[type] || type;
-    }
 
     const LOAN_DOCS_MATRIX = {
 
@@ -2056,6 +2022,14 @@
           typeof _isPartnerMappedToDsa === 'function' && _isPartnerMappedToDsa(currentUser)) {
         if (typeof showToast === 'function') {
           showToast('Access Denied — your Payout is managed by your linked DSA', 'error');
+        }
+        name = 'dashboard';
+        navEl = null;
+      }
+      // Settings — Admin only. Block direct access even via URL hash / stale links.
+      if (name === 'settings' && !(currentUser && currentUser.role === 'admin')) {
+        if (typeof showToast === 'function') {
+          showToast('Access Denied — Settings is available to Admin only', 'error');
         }
         name = 'dashboard';
         navEl = null;
@@ -3105,10 +3079,25 @@
           ${app.incred_offer === 'rejected' ? `<button class="btn btn-danger btn-sm" onclick="incredViewReason('${app.id}')">View Reason</button>` : ''}
         </div>
       </div>` : `
-      <div style="text-align:center;padding:60px 20px;background:#f8faff;border-radius:18px;border:1.5px dashed #c8d8f8">
+      <div style="text-align:center;padding:36px 20px 32px;background:#f8faff;border-radius:18px;border:1.5px dashed #c8d8f8">
         <div style="font-size:48px;margin-bottom:14px;opacity:.5">⚡</div>
         <div style="font-family:var(--font-head);font-size:16px;font-weight:800;margin-bottom:8px;color:var(--text2)">Not an InCred Application</div>
         <div style="font-size:13px;color:var(--text3);margin-bottom:20px">This application was not sourced through InCred.</div>
+        <!-- RM Email must be selected BEFORE creating the InCred application (mirrors incred.rm.email Many2one) -->
+        <div style="max-width:420px;margin:0 auto 18px;text-align:left;background:rgba(255,255,255,.7);border:1.5px solid #d8dcf8;border-radius:12px;padding:14px 18px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:#8a96c4;font-weight:700;margin-bottom:8px">🧑‍💼 InCred RM (Relationship Manager)</div>
+          <select id="incred-rm-select-${app.id}" onchange="incredSetRM('${app.id}',this.value)"
+            style="width:100%;padding:8px 12px;border:1.5px solid #c8c8f8;border-radius:8px;font-size:13px;background:#fff;color:var(--text)">
+            <option value="">— Select RM Email —</option>
+            ${((typeof window.RM_EMAILS !== 'undefined' && window.RM_EMAILS.length) ? window.RM_EMAILS : (typeof RM_EMAILS !== 'undefined' ? RM_EMAILS : [])).map(rm =>
+              `<option value="${rm.id}" ${app.rm_email_id == rm.id ? 'selected' : ''}>${rm.name} (${rm.location}) — ${rm.email}</option>`
+            ).join('')}
+          </select>
+          ${app.rm_email_id ? (() => {
+            const rm = ((typeof window.RM_EMAILS !== 'undefined' && window.RM_EMAILS.length) ? window.RM_EMAILS : (typeof RM_EMAILS !== 'undefined' ? RM_EMAILS : [])).find(r => r.id == app.rm_email_id);
+            return rm ? `<div style="margin-top:6px;font-size:11.5px;color:#5a6490">📧 ${rm.email} &nbsp;|&nbsp; 📞 ${rm.contact_no || '—'}</div>` : '';
+          })() : '<div style="margin-top:6px;font-size:11.5px;color:#c05000">⚠ Select an RM before creating the InCred application</div>'}
+        </div>
         <button class="btn btn-primary btn-sm" onclick="incredCreateApp('${app.id}');openDetail('${app.id}')">＋ Create InCred App</button>
       </div>`;
       } else {
@@ -6084,6 +6073,7 @@
       // Refresh the master toggle state for this role
       refreshRoleMasterToggle(roleKey);
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+      if (typeof stgPushPermissionsToServer === 'function') stgPushPermissionsToServer();
     }
 
     function toggleMasterRole(roleKey, el) {
@@ -6107,6 +6097,7 @@
         }
       });
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+      if (typeof stgPushPermissionsToServer === 'function') stgPushPermissionsToServer();
     }
 
     function refreshRoleMasterToggle(roleKey) {
@@ -6184,6 +6175,7 @@
       const msg = document.getElementById('master-save-msg');
       if (msg) { msg.style.display = 'inline'; setTimeout(() => msg.style.display = 'none', 2500); }
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+      if (typeof stgPushPermissionsToServer === 'function') stgPushPermissionsToServer();
       showToast('Access permissions updated ✓', 'success');
     }
 
@@ -6195,6 +6187,7 @@
       // Re-apply nav and tab visibility after reset
       applyMasterToggles();
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+      if (typeof stgPushPermissionsToServer === 'function') stgPushPermissionsToServer();
       showToast('Permissions reset to defaults', 'info');
     }
 
@@ -6933,8 +6926,125 @@
       if (loginGroup) loginGroup.style.display = 'none';
     }
 
+    // ══════════════════════════════════════════════════════════
+    //  AUTO LOAN APPLICATION ASSIGNMENT ENGINE
+    //  Stage 1 (Sales Person + Location) drives two decisions:
+    //   1. Sales Team — decided by which team the Sales Person belongs to.
+    //   2. Login User — the least-active-workload, ACTIVE + ELIGIBLE user
+    //      from the Login/Operation Team(s) at the selected Location.
+    //  Ties are broken fairly (whoever was assigned least recently — or
+    //  never — goes next), and if nobody eligible is available the
+    //  application is left in the Assignment Queue (Unassigned) rather
+    //  than being handed to a random user. Every AUTOMATIC decision is
+    //  written to ASSIGNMENT_AUDIT_LOG (system-wide) and to the app's own
+    //  tracking timeline. Manual reassignment (updateLoginUser) marks the
+    //  app so this engine never silently overwrites it again.
+    // ══════════════════════════════════════════════════════════
+    let ASSIGNMENT_AUDIT_LOG = [];
+    const ASSIGN_TERMINAL_STATUSES = ['rejected','hold','cancelled','cancel','ni','disbursed'];
+
+    // Only active AND eligible (i.e. known, currently on a Login/Op Team) users are considered.
+    function twIsUserActive(userName) {
+      const u = (typeof twUsers !== 'undefined' ? twUsers : []).find(x => x.name === userName);
+      if (!u) return false;
+      return (u.status || 'active') === 'active';
+    }
+
+    // Pure decision function — safe to call repeatedly for live preview.
+    // Only commitAssignmentDecision() below has side effects (rotation + audit).
+    function computeLoginUserAssignment(location, loanType, excludeAppId) {
+      const result = { assignedUser: '', method: 'unassigned', workload: null, candidates: [], tieBreak: false, opTeam: null };
+      if (!location) return result;
+
+      // 1. Eligible Login/Operation Teams at this Location (+ loanType restriction if configured)
+      const opTeams = (typeof twLoginTeams !== 'undefined' ? twLoginTeams : [])
+        .filter(t => {
+          if (t.active === false) return false;
+          if (t.location !== location) return false;
+          if (loanType && Array.isArray(t.loanTypes) && t.loanTypes.length > 0) {
+            return t.loanTypes.includes(loanType);
+          }
+          return true;
+        });
+
+      // 2. Only ACTIVE users are eligible for auto-assignment
+      const memberNames = [...new Set(opTeams.flatMap(t => t.members || []))];
+      const eligible = memberNames.filter(m => twIsUserActive(m));
+
+      if (!eligible.length) {
+        return result; // → stays Unassigned / Assignment Queue, never a random pick
+      }
+
+      // 3. Current active workload per eligible Login User (this location, same loanType when known)
+      const activeApps = (typeof APPLICATIONS !== 'undefined' ? APPLICATIONS : [])
+        .filter(a => a.id !== excludeAppId
+          && a.location === location
+          && !ASSIGN_TERMINAL_STATUSES.includes(a.status));
+
+      const counts = eligible.map(name => ({
+        name,
+        count: activeApps.filter(a => a.loginUser === name &&
+          (!loanType || !a.loanType || a.loanType === loanType)).length
+      }));
+      result.candidates = counts;
+
+      const minCount = Math.min(...counts.map(c => c.count));
+      const tied = counts.filter(c => c.count === minCount);
+
+      let winner;
+      if (tied.length === 1) {
+        winner = tied[0].name;
+      } else {
+        // 4. Fair tie-breaker: whoever was assigned least recently (never
+        //    assigned = treated as oldest) gets priority — an auditable round-robin.
+        result.tieBreak = true;
+        winner = tied.reduce((best, c) => {
+          const u  = (typeof twUsers !== 'undefined' ? twUsers : []).find(x => x.name === c.name);
+          const bu = (typeof twUsers !== 'undefined' ? twUsers : []).find(x => x.name === best.name);
+          const t  = (u  && u.lastAssignedAt)  || 0;
+          const bt = (bu && bu.lastAssignedAt) || 0;
+          return t < bt ? c : best;
+        }, tied[0]).name;
+      }
+
+      result.assignedUser = winner;
+      result.workload      = minCount;
+      result.method        = 'auto';
+      result.opTeam         = opTeams.find(t => (t.members || []).includes(winner)) || null;
+      return result;
+    }
+
+    // Commits an AUTOMATIC decision: advances the tie-break rotation clock
+    // and writes a system-wide audit-log record. Call this only once per
+    // real application (at submit time), never on every keystroke/preview.
+    function commitAssignmentDecision(decision, ctx) {
+      ctx = ctx || {};
+      if (decision.assignedUser) {
+        const u = (typeof twUsers !== 'undefined' ? twUsers : []).find(x => x.name === decision.assignedUser);
+        if (u) u.lastAssignedAt = Date.now();
+      }
+      const entry = {
+        id: 'AAL-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        appId:       ctx.appId       || '',
+        location:    ctx.location    || '',
+        loanType:    ctx.loanType    || '',
+        salesPerson: ctx.salesPerson || '',
+        salesTeam:   ctx.salesTeam   || '',
+        candidates:  decision.candidates,
+        assignedUser: decision.assignedUser || null,
+        method:      decision.assignedUser ? 'auto' : 'unassigned',
+        tieBreak:    decision.tieBreak,
+        decidedBy:   'System',
+        timestamp:   new Date().toISOString()
+      };
+      (typeof ASSIGNMENT_AUDIT_LOG !== 'undefined' ? ASSIGNMENT_AUDIT_LOG : (window.ASSIGNMENT_AUDIT_LOG = [])).push(entry);
+      return entry;
+    }
+
     // When Sales Person changes → auto-assign Sales Team + Login User (least workload)
     // mirrors loan_application_inherit.py _assign_sales_team
+    // NOTE: this is a live wizard PREVIEW only — it must never commit a rotation
+    // slot or write an audit entry; that happens once, for real, in submitWizard().
     function wSalesPersonChange() {
       const loc       = document.getElementById('w-location')?.value || '';
       const salesName = document.getElementById('w-sales')?.value || '';
@@ -6949,45 +7059,14 @@
         .find(t => t.location === loc && (t.leader === salesName || (t.members || []).includes(salesName)));
       if (hint) hint.textContent = salesTeam ? `Sales Team: ${salesTeam.name}` : '';
 
-      // 2. Find Login User — least-workload operation team member at this location + loanType (Fix 2)
-      // Read loanType from wizard if already selected (Step 6 field or product selector)
+      // 2. Preview the Login User the engine would auto-assign (least workload,
+      //    active + eligible users only, fair tie-break) — read-only, no commit.
       const _wizLoanType = (document.getElementById('w-loantype')?.value || window._wizardLoanProduct || '').trim();
+      const preview = computeLoginUserAssignment(loc, _wizLoanType);
+      const bestUser = preview.assignedUser;
 
-      const opTeams = (typeof twLoginTeams !== 'undefined' ? twLoginTeams : [])
-        .filter(t => {
-          if (t.location !== loc) return false;
-          // If team has loanTypes restriction AND loanType is known, filter by it
-          if (_wizLoanType && Array.isArray(t.loanTypes) && t.loanTypes.length > 0) {
-            return t.loanTypes.includes(_wizLoanType);
-          }
-          return true; // no loanType restriction on team — include it
-        });
-      const loginMembers = opTeams.flatMap(t => t.members || []);
-
-      if (!loginMembers.length) {
-        if (loginGroup) loginGroup.style.display = 'none';
-        return;
-      }
-
-      const activeApps = (typeof APPLICATIONS !== 'undefined' ? APPLICATIONS : [])
-        .filter(a => !['rejected','hold','cancelled','cancel','ni','disbursed'].includes(a.status)
-          && a.location === loc);
-
-      // Count active apps per login user (also filter by loanType when available — Fix 2)
-      let bestUser = null, bestCount = Infinity;
-      for (const member of loginMembers) {
-        const cnt = activeApps.filter(a =>
-          a.loginUser === member &&
-          (!_wizLoanType || !a.loanType || a.loanType === _wizLoanType)
-        ).length;
-        if (cnt < bestCount) { bestCount = cnt; bestUser = member; }
-      }
-
-      // If nobody has any app, just pick first member
-      if (!bestUser) bestUser = loginMembers[0];
-
-      if (loginDisp) loginDisp.value = bestUser || '—';
-      if (loginGroup) loginGroup.style.display = bestUser ? '' : 'none';
+      if (loginDisp) loginDisp.value = bestUser || (preview.method === 'unassigned' ? '— Assignment Queue (no eligible user) —' : '—');
+      if (loginGroup) loginGroup.style.display = (bestUser || preview.method === 'unassigned') ? '' : 'none';
 
       // Live-update the Direct channel sales person chip if Direct is selected
       const channelVal = document.getElementById('w-channel')?.value || '';
@@ -7116,7 +7195,9 @@
             </select>
             <span style="font-size:10.5px;color:var(--text3)">is_change_login_user</span>
            </div>`
-        : (app.loginUser || '—');
+        : (app.loginUser || (app.assignmentStatus === 'unassigned'
+            ? '<span style="color:#d97706;font-weight:600">⏳ Unassigned — Assignment Queue</span>'
+            : '—'));
 
       // ── OPERATIONS MANAGER CELL ──
       // FIX: Show dropdown even when opsManagerId is empty so admin can assign one
@@ -7427,15 +7508,34 @@
     }
 
     // Update login user on app and re-render Other Info section
+    // MANUAL reassignment — marks the app so the auto-assignment engine
+    // never overwrites this again (requirement: manual overrides stick).
     function updateLoginUser(appId, userName) {
       const app = APPLICATIONS.find(a => a.id === appId); if (!app) return;
+      const oldUser = app.loginUser;
       app.loginUser = userName;
+      app.assignmentMethod = 'manual';
+      app.assignmentStatus = userName ? 'assigned' : 'unassigned';
       // Re-compute login team from twLoginTeams
       const opTeam = (typeof twLoginTeams !== 'undefined' ? twLoginTeams : [])
         .find(t => t.location === app.location && (t.members||[]).includes(userName));
       // Log to tracking
       addTrackingEntry(app, 'Login User Changed', 'System Comments',
         `Login User updated to: ${userName}${opTeam ? ' (Team: '+opTeam.name+')' : ''}`, '');
+      // Log manual override to the same audit trail as auto-assignments, so
+      // there is one place to see who assigned what and how.
+      if (typeof ASSIGNMENT_AUDIT_LOG !== 'undefined') {
+        ASSIGNMENT_AUDIT_LOG.push({
+          id: 'AAL-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          appId, location: app.location || '', loanType: app.loanType || '',
+          salesPerson: app.sales || '', salesTeam: app.salesTeam || '',
+          candidates: [], assignedUser: userName || null, method: 'manual',
+          tieBreak: false, previousUser: oldUser || null,
+          decidedBy: (typeof currentUser !== 'undefined' && currentUser?.name) || 'Admin',
+          timestamp: new Date().toISOString()
+        });
+      }
+      if (typeof persistSave === 'function') { try { persistSave(); } catch (_) {} }
       showToast(`Login User updated to ${userName}`, 'success');
     }
 
@@ -8294,36 +8394,16 @@
       if (channel === 'agent' && chipDsaId && !dsaId) dsaId = chipDsaId;
 
       const location = document.getElementById('w-location')?.value || '';
-      // Fix 2+4: Re-compute loginUser at submit time (field was removed from DOM)
-      // Uses least-workload logic filtered by location + loanType
-      const loginUserDisplay = (function() {
-        try {
-          var _lt = document.getElementById('w-loantype')?.value || window._wizardLoanProduct || '';
-          var _loc = document.getElementById('w-location')?.value || '';
-          if (!_loc) return '';
-          var _opTeams = (typeof twLoginTeams !== 'undefined' ? twLoginTeams : [])
-            .filter(function(t) {
-              if (t.location !== _loc) return false;
-              if (_lt && Array.isArray(t.loanTypes) && t.loanTypes.length > 0) return t.loanTypes.includes(_lt);
-              return true;
-            });
-          var _members = _opTeams.reduce(function(acc, t) { return acc.concat(t.members || []); }, []);
-          if (!_members.length) return '';
-          var _activeApps = (typeof APPLICATIONS !== 'undefined' ? APPLICATIONS : [])
-            .filter(function(a) {
-              return !['rejected','hold','cancelled','cancel','ni','disbursed'].includes(a.status) &&
-                     a.location === _loc;
-            });
-          var _best = null, _bestCnt = Infinity;
-          _members.forEach(function(m) {
-            var cnt = _activeApps.filter(function(a) {
-              return a.loginUser === m && (!_lt || !a.loanType || a.loanType === _lt);
-            }).length;
-            if (cnt < _bestCnt) { _bestCnt = cnt; _best = m; }
-          });
-          return _best || _members[0] || '';
-        } catch(e) { return ''; }
-      })();
+      // Auto Loan Application Assignment — final decision at submit time
+      // (the login-user field was removed from the DOM; this is computed,
+      // not read). Uses the shared engine: least-active-workload among
+      // ACTIVE + ELIGIBLE Login Users at this Location, fair tie-break,
+      // and Assignment Queue (unassigned) if nobody eligible is found —
+      // never a random pick. Committed (audit + rotation) further below,
+      // once the application record actually exists.
+      const _wizLoanTypeForAssign = document.getElementById('w-loantype')?.value || window._wizardLoanProduct || '';
+      const _assignDecision = computeLoginUserAssignment(location, _wizLoanTypeForAssign);
+      const loginUserDisplay = _assignDecision.assignedUser || '';
       const rmEmail = ''; // w-rm-email removed
       const companyNameId = parseInt(document.getElementById('w-company-name-id')?.value) || 0;
 
@@ -8562,23 +8642,15 @@
         } : null,
         source, leadsrc, channel, channelDSA, channelPartner, dsaId, partnerId,
         location, loginUser: loginUserDisplay,
+        // Auto Loan Application Assignment — carries the engine's decision
+        // forward so the UI/audit can tell auto vs manual vs still-unassigned apart.
+        assignmentMethod: _assignDecision.assignedUser ? 'auto' : null,
+        assignmentStatus: _assignDecision.assignedUser ? 'assigned' : 'unassigned',
         // Fix 4: Operations Manager auto-assignment based on location + loginUser + loanType
+        // (uses the engine's own decision, not a removed DOM field, so it's never empty)
         opsManagerId: (function() {
           try {
-            var _loc   = document.getElementById('w-location')?.value || '';
-            var _lt    = document.getElementById('w-loantype')?.value || window._wizardLoanProduct || '';
-            var _luDisp = document.getElementById('w-login-user-display')?.value || '';
-            // Find the login team whose member = assigned loginUser at this location
-            var _opTeams = (typeof twLoginTeams !== 'undefined' ? twLoginTeams : [])
-              .filter(function(t) {
-                if (t.location !== _loc) return false;
-                if (_lt && Array.isArray(t.loanTypes) && t.loanTypes.length > 0) return t.loanTypes.includes(_lt);
-                return true;
-              });
-            // The team leader of the matched op team is the "Operations Manager"
-            var _matchTeam = _opTeams.find(function(t) {
-              return (t.members || []).includes(_luDisp) || t.leader === _luDisp;
-            }) || _opTeams[0];
+            var _matchTeam = _assignDecision.opTeam;
             if (!_matchTeam) return '';
             // Find user with operation_manager or team_leader role who leads this op team
             var _omUser = (typeof twUsers !== 'undefined' ? twUsers : []).find(function(u) {
@@ -8634,6 +8706,23 @@
         channelDSA     ? `DSA: ${channelDSA}`         : null,
       ].filter(Boolean).join(' | ');
       addT('EFIN-Workflow Start', dept, currentUser.name, 'Complete', 'Openmarket Flow', ' ');
+
+      // ── Auto Loan Application Assignment — audit + tracking ──
+      // Commit the decision now that the application actually exists: advances
+      // the fair tie-break rotation clock and writes a system-wide audit record.
+      commitAssignmentDecision(_assignDecision, {
+        appId: id, location, loanType: _wizLoanTypeForAssign,
+        salesPerson: sales, salesTeam: newApp.salesTeam
+      });
+      if (_assignDecision.assignedUser) {
+        addT('EFIN-Login User Auto-Assigned', dept, sysUser, 'Complete',
+          `${_assignDecision.assignedUser} (active workload: ${_assignDecision.workload})` +
+          (_assignDecision.tieBreak ? ' — tie broken fairly (least-recently-assigned)' : ''),
+          'Auto-assigned by Location + least workload');
+      } else {
+        addT('EFIN-Assignment Queue', dept, sysUser, 'Pending',
+          'No active/eligible Login User at this location', 'Unassigned — added to Assignment Queue');
+      }
 
       // Fix 4: Log Operations Manager assignment if resolved
       if (newApp.opsManagerId) {
@@ -13275,7 +13364,7 @@ ${printContent}
         const sess = JSON.parse(localStorage.getItem('efin_session') || '{}');
         const saveRes = await fetch('/api/settings/incred-credentials', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (sess.token || '') },
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '') },
           body: JSON.stringify({ baseUrl: url, clientId, clientSecret: secret }),
           signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
         });
@@ -13296,7 +13385,7 @@ ${printContent}
         const sess = JSON.parse(localStorage.getItem('efin_session') || '{}');
         await fetch('/api/settings/incred-credentials', {
           method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + (sess.token || '') }
+          headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '') }
         });
       } catch(e) {}
       // Clear localStorage too (static mode)
@@ -13369,7 +13458,7 @@ ${printContent}
       <td><span class="badge ${statusBadge[st] || 'badge-hold'} badge-animate" id="incred-status-${a.id}">${statusLabel[st] || st}</span></td>
       <td onclick="event.stopPropagation()">
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${!a.incred_app_id ? `<button class="btn btn-primary btn-sm" onclick="incredCreateApp('${a.id}')">Create App</button>` : ''}
+          ${!a.incred_app_id ? `<button class="btn btn-primary btn-sm" onclick="${a.rm_email_id ? `incredCreateApp('${a.id}')` : `openDetail('${a.id}')`}" title="${a.rm_email_id ? 'Create InCred application' : 'Select an RM first — opens the application detail'}">Create App</button>` : ''}
           ${a.incred_app_id && st !== 'completed' && st !== 'rejected' ? `<button class="btn btn-ghost btn-sm" onclick="incredRequestOffer('${a.id}')">Request Offer</button>` : ''}
           ${a.incred_app_id ? `<button class="btn btn-ghost btn-sm" onclick="incredPoll('${a.id}')">Poll</button>` : ''}
           ${st === 'rejected' ? `<button class="btn btn-danger btn-sm" onclick="incredViewReason('${a.id}')">View Reason</button>` : ''}
@@ -13403,7 +13492,7 @@ ${printContent}
       try {
         const sess = JSON.parse(localStorage.getItem('efin_session') || '{}');
         const res = await fetch('/api/settings/incred-credentials', {
-          headers: { 'Authorization': 'Bearer ' + (sess.token || '') },
+          headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '') },
           signal: AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined,
         });
         if (res.ok) {
@@ -13500,6 +13589,16 @@ ${printContent}
         const lname      = app.lname || nameParts[nameParts.length - 1] || '';
         const mname      = app.father_name || (nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : '') || '';
 
+        // InCred's application/init API only accepts EMPLOYMENT_TYPE = SALARIED /
+        // SELFEMP / NOTEARNING. The app's own Employment Type field additionally
+        // offers "PROFESSIONAL" (doctor/CA/lawyer etc.), which has no InCred
+        // category of its own — mirrors the same mapping already used server-side
+        // in IncredController.cs (_mapEmploymentTypeForIncred) / incred_mixin.py
+        // convention: PROFESSIONAL is treated as self-employed for InCred purposes.
+        // SALARIED, SELFEMP and NOTEARNING already match InCred's enum as-is and
+        // pass through unchanged.
+        const incredEmploymentType = app.empType === 'PROFESSIONAL' ? 'SELFEMP' : (app.empType || '');
+
         const payload = {
           MOBILE:           app.mobile || '',
           FNAME:            fname,
@@ -13508,10 +13607,11 @@ ${printContent}
           PAN:              app.pan || '',
           DOB:              dobFormatted,
           GENDER:           app.gender || '',
-          EMPLOYMENT_TYPE:  app.empType || '',
+          EMPLOYMENT_TYPE:  incredEmploymentType,
           PARTNER_REFERENCE: String(app.id),
           EMPLOYMENT: [{ SALARY: { NET_MONTHLY: app.salary || 0 } }],
         };
+
 
         // ADDRESS block with optional RESIDENCE_TYPE (homeType on app record)
         const addr = { PINCODE: parseInt(app.zip || '0') || 0 };
@@ -14899,7 +14999,14 @@ ${printContent}
         return _expertExportAllowed;
       }
       try {
-        const res = await fetch('/api/expertexport/access', { headers: _expertExportAuthHeader() });
+        // Use the shared apiReqRaw() from api-bridge.js — it attaches the
+        // Bearer token and, on a 401 (expired access token), transparently
+        // refreshes and retries once via the same centralized mechanism the
+        // rest of the app uses. Fall back to a raw fetch only in the
+        // extremely unlikely case api-bridge.js hasn't defined it yet.
+        const res = (typeof window.apiReqRaw === 'function')
+          ? await window.apiReqRaw('GET', '/expertexport/access')
+          : await fetch('/api/expertexport/access', { headers: _expertExportAuthHeader() });
         if (!res.ok) { _expertExportAllowed = false; }
         else { const data = await res.json(); _expertExportAllowed = !!data.allowed; }
       } catch(e) { _expertExportAllowed = false; }
@@ -14918,11 +15025,24 @@ ${printContent}
       const orig = btn ? btn.innerHTML : '';
       if (btn) { btn.disabled = true; btn.innerHTML = '<span>⏳</span> Exporting…'; }
       try {
-        const res = await fetch('/api/expertexport/data', { headers: _expertExportAuthHeader() });
+        // Same centralized auth flow as the rest of the app: apiReqRaw()
+        // attaches the Bearer token and, on 401, refreshes + retries once
+        // before handing back the response. Response is a file (CSV blob),
+        // not JSON, so we use the raw-Response variant rather than apiReq().
+        const res = (typeof window.apiReqRaw === 'function')
+          ? await window.apiReqRaw('GET', '/expertexport/data')
+          : await fetch('/api/expertexport/data', { headers: _expertExportAuthHeader() });
         if (res.status === 403) {
           showToast('You do not have permission for Expert Export', 'error');
           _expertExportAllowed = false;
           _expertExportApplyVisibility(false);
+          return;
+        }
+        if (res.status === 401) {
+          // Still unauthorized even after apiReqRaw's built-in refresh+retry
+          // attempt (e.g. refresh token also expired) — surface this once,
+          // do not loop or retry again.
+          showToast('Session expired. Please log in again.', 'error');
           return;
         }
         if (!res.ok) { showToast('Expert Export failed', 'error'); return; }
@@ -19715,6 +19835,9 @@ ${printContent}
     window.skipDeviation = skipDeviation;
     // ── Core data stores — exposed so deviation/deal-confirm functions in later script blocks can access them ──
     window.APPLICATIONS  = APPLICATIONS;
+    window.ASSIGNMENT_AUDIT_LOG      = ASSIGNMENT_AUDIT_LOG;
+    window.computeLoginUserAssignment = computeLoginUserAssignment;
+    window.commitAssignmentDecision   = commitAssignmentDecision;
     window.ROLES         = ROLES;
     window.STATUSES      = STATUSES;
     window.currentUser   = currentUser;
@@ -20262,10 +20385,14 @@ ${printContent}
         // Apply to actual login page logo
         applyLogoToLogin(dataUrl);
         try { localStorage.setItem('efin_signin_logo', dataUrl); } catch(err) {}
-        // Save to server so logo persists across all browsers/sessions
+        // Save to server so logo persists across all browsers/sessions.
+        // NOTE: token key must match the one api-bridge.js actually stores
+        // ('loanms_token') — this previously read a non-existent
+        // 'efin_auth_token' key, so the Authorization header was always
+        // empty/invalid and this Admin-only save silently 401'd.
         fetch('/api/settings/signin-logo', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('efin_auth_token') || sessionStorage.getItem('efin_auth_token') || '' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '') },
           body: JSON.stringify({ logo: dataUrl })
         }).catch(function(){});
         // Update panel preview
@@ -20296,10 +20423,10 @@ ${printContent}
       if (removeBtn) removeBtn.style.display = 'none';
       document.getElementById('branding-signin-filename').textContent = '';
       try { localStorage.removeItem('efin_signin_logo'); } catch(e) {}
-      // Clear from server too
+      // Clear from server too (same token-key fix as brandingUpdateSignin above)
       fetch('/api/settings/signin-logo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (_lsGet('efin_auth_token') || sessionStorage.getItem('efin_auth_token') || '') },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '') },
         body: JSON.stringify({ logo: '' })
       }).catch(function(){});
       showToast('Sign-in logo removed', 'success');
@@ -20632,7 +20759,6 @@ ${printContent}
     }
 
     // Backward-compat alias
-    function _blBanks() { return _prBanks('business_loan'); }
 
     // ──────────────────────────────────────────────────────────────────────
     //  1. SERVICEABLE PIN CODES
@@ -23067,9 +23193,24 @@ ${printContent}
         (canManage ? `
         <button class="row-menu-item" onclick="closeAllRowMenus();${editFn}(${id})">✏️ Edit Team</button>
         <button class="row-menu-item" onclick="closeAllRowMenus();twDuplicateTeam('${type}',${id})">📋 Duplicate Team</button>
-        <button class="row-menu-item warn" onclick="closeAllRowMenus();twArchiveTeam('${type}',${id})">${t.active ? '🗄 Archive Team' : '♻️ Restore Team'}</button>` : '');
+        <button class="row-menu-item warn" onclick="closeAllRowMenus();twArchiveTeam('${type}',${id})">${t.active ? '🗄 Archive Team' : '♻️ Restore Team'}</button>
+        <button class="row-menu-item danger" onclick="closeAllRowMenus();twDeleteTeam('${type}',${id})">🗑 Delete Team</button>` : '');
       document.body.appendChild(dropdown);
       positionDropdownFixed(btn, dropdown, wrap);
+    }
+
+    // Permanently delete a Sales/Login team (Admin / Product Team only).
+    function twDeleteTeam(type, id) {
+      if (typeof twCanManageUsers === 'function' && !twCanManageUsers()) { showToast('Only Admin or Product Team can delete teams', 'error'); return; }
+      const arr = type === 'sales' ? twSalesTeams : twLoginTeams;
+      const t = arr.find(x => x.id === id); if (!t) return;
+      if (!confirm('Delete team "' + t.name + '"? This cannot be undone.')) return;
+      const idx = arr.indexOf(t);
+      if (idx >= 0) arr.splice(idx, 1);
+      if (type === 'sales') twRenderSalesTeams(); else twRenderLoginTeams();
+      twUpdateCounts();
+      showToast('Team "' + t.name + '" deleted', 'success');
+      if (typeof persistSave === 'function') { try { persistSave(); } catch (_) {} }
     }
 
     function twLocMenu(btn, id) {
@@ -23336,7 +23477,8 @@ ${printContent}
         <button class="row-menu-item" onclick="closeAllRowMenus();twEditUser(${idx})">✏️ Edit User</button>
         <button class="row-menu-item warn" onclick="closeAllRowMenus();twToggleUserStatus(${idx})">${isActive?'🔴 Deactivate':'🟢 Activate'}</button>
         <button class="row-menu-item warn" onclick="closeAllRowMenus();twSuspendUser(${idx})">${isSuspended?'🟢 Unsuspend':'⏸ Suspend'}</button>
-        <button class="row-menu-item" onclick="closeAllRowMenus();openResetPasswordForUser(${idx})">🔑 Reset Password</button>` : '');
+        <button class="row-menu-item" onclick="closeAllRowMenus();openResetPasswordForUser(${idx})">🔑 Reset Password</button>
+        <button class="row-menu-item danger" onclick="closeAllRowMenus();twDeleteUser(${idx})">🗑 Delete User</button>` : '');
       document.body.appendChild(dropdown);
       positionDropdownFixed(btn, dropdown, wrap);
     }
@@ -23397,6 +23539,41 @@ ${printContent}
       twApplyUserFilters();
       showToast('User "' + u.name + '" is now ' + u.status, u.status === 'active' ? 'success' : 'info');
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+    }
+
+    // Delete a user (Admin / Product Team only). Removes locally and, for DB-backed
+    // users (synced via api-bridge.js, marked with _apiId), calls DELETE /api/users/{id}.
+    function twDeleteUser(idx) {
+      const u = twUsers[idx]; if (!u) return;
+      if (!twCanManageUsers()) { showToast('Only Admin or Product Team can delete users', 'error'); return; }
+      if (typeof currentUser !== 'undefined' && currentUser.email && u.email && currentUser.email.toLowerCase() === u.email.toLowerCase()) {
+        showToast('You cannot delete your own account', 'error'); return;
+      }
+      if (!confirm('Delete user "' + u.name + '"? This cannot be undone.')) return;
+
+      const finishLocalRemoval = () => {
+        const pos = twUsers.indexOf(u);
+        if (pos >= 0) twUsers.splice(pos, 1);
+        twApplyUserFilters();
+        showToast('User "' + u.name + '" deleted', 'success');
+        if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+      };
+
+      if (u._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('DELETE', '/users/' + u._apiId).then(function(res) {
+          if (res && res.success) {
+            finishLocalRemoval();
+          } else {
+            var errMsg = (res && ((res.errors && res.errors[0]) || res.message)) || 'Failed to delete user from database';
+            showToast(errMsg, 'error');
+          }
+        }).catch(function() {
+          showToast('Failed to delete user — check connection and try again', 'error');
+        });
+      } else {
+        // Locally-added/demo user with no DB record yet — safe to just remove.
+        finishLocalRemoval();
+      }
     }
 
     function twCopyUID(uid, btn) {
@@ -24470,6 +24647,25 @@ ${printContent}
 
     function doLogout() {
       _lsRemove('efin_session');
+      // Also clear the REAL backend auth tokens (loanms_token / loanms_refresh /
+      // loanms_user). These are separate from efin_session (which only gates the
+      // UI) and are what actually authenticates real API calls like Settings →
+      // AI & KYC Vision. Previously only efin_session was cleared here, so a
+      // stale/invalid token could survive "logout → login" indefinitely if the
+      // next login happened to fall back to the offline/local login path instead
+      // of a real /api/auth/login call — the Settings panel would then keep
+      // showing "session expired" no matter how many times you logged out.
+      var _oldTok = localStorage.getItem('loanms_token');
+      _lsRemove('loanms_token');
+      _lsRemove('loanms_refresh');
+      _lsRemove('loanms_user');
+      // Best-effort: tell the server to invalidate the refresh token too (fire
+      // and forget — logout should not be blocked by this network call).
+      try {
+        if (_oldTok) {
+          fetch('/api/auth/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + _oldTok } }).catch(function(){});
+        }
+      } catch (e) {}
       // Remove has-session so CSS re-shows login screen
       document.documentElement.classList.remove('has-session');
       location.hash = '';
@@ -24522,53 +24718,157 @@ ${printContent}
     window.toggleTopbarProfileDropdown = toggleTopbarProfileDropdown;
     window.doLogout = doLogout;
 
-    // ── KYC Proxy / API Key Settings UI (injected into Settings page) ──
+    // ── AI Provider Keys Settings UI (injected into Settings page) ──
+    // Server-side keys only — the key is sent to the backend over HTTPS and
+    // stored encrypted in the database (see SettingsController.SaveAiKey /
+    // AiKeyStore). It is never kept in the browser (no localStorage), and it
+    // is what actually authenticates KYC Vision auto-fill + AI text features
+    // against Gemini / OpenAI. Admin role required (endpoint enforces this).
+    function _aiKeyRow(providerKey, providerLabel, docsUrl, docsLabel, status) {
+      var configured = status && status.configured;
+      return (
+        '<div style="margin-bottom:16px">' +
+          '<div style="font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:6px">' + providerLabel + ' API Key</div>' +
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">' +
+            '<input id="stg-aikey-' + providerKey + '" type="password" placeholder="' +
+              (configured ? 'Paste a new key to replace the saved one' : 'Paste your ' + providerLabel + ' API key') + '" ' +
+              'style="flex:1;min-width:240px;padding:10px 14px;border:1.5px solid var(--border2);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);outline:none">' +
+            '<button onclick="_aiKeySave(\'' + providerKey + '\')" style="padding:10px 18px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">💾 Save</button>' +
+            (configured ? '<button onclick="_aiKeyClear(\'' + providerKey + '\')" style="padding:10px 14px;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Remove</button>' : '') +
+          '</div>' +
+          (configured
+            ? '<div style="font-size:12px;color:#15803d;font-weight:600;background:rgba(26,115,64,.08);padding:8px 12px;border-radius:8px;border:1px solid rgba(26,115,64,.2)">✅ ' + providerLabel + ' key saved (' + status.masked + ') — used on the server for AI requests.</div>'
+            : '<div style="font-size:12px;color:#b45309;font-weight:600;background:rgba(245,158,11,.08);padding:8px 12px;border-radius:8px;border:1px solid rgba(245,158,11,.2)">⚠ No ' + providerLabel + ' key saved yet. Get one at <a href="' + docsUrl + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">' + docsLabel + '</a>.</div>') +
+        '</div>'
+      );
+    }
+
+    // Shared helper: fetch with the current admin token, and if the access
+    // token has expired (401), silently use the refresh token to get a new
+    // one (same /api/auth/refresh flow api-bridge.js already uses) and
+    // retry once — instead of forcing a manual logout/login.
+    async function _stgAuthFetch(url, opts) {
+      opts = opts || {};
+      var tok = localStorage.getItem('loanms_token') || '';
+      opts.headers = Object.assign({}, opts.headers, { 'Authorization': 'Bearer ' + tok });
+      var res = await fetch(url, opts);
+      if (res.status === 401 || res.status === 403) {
+        var rt = localStorage.getItem('loanms_refresh') || '';
+        if (rt) {
+          try {
+            var rres = await fetch('/api/auth/refresh', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refreshToken: rt })
+            });
+            var rjson = await rres.json();
+            if (rjson && rjson.success && rjson.data && rjson.data.accessToken) {
+              localStorage.setItem('loanms_token', rjson.data.accessToken);
+              if (rjson.data.refreshToken) localStorage.setItem('loanms_refresh', rjson.data.refreshToken);
+              opts.headers['Authorization'] = 'Bearer ' + rjson.data.accessToken;
+              res = await fetch(url, opts); // retry once with fresh token
+            }
+          } catch (e) { /* fall through — res stays the original 401 */ }
+        }
+      }
+      return res;
+    }
+
     async function _renderKycProxySettingsCard() {
       var container = document.getElementById('stg-kyc-proxy-container');
       if (!container) return;
 
-      var savedKey = '';
-      try { savedKey = localStorage.getItem('efin_gemini_key') || ''; } catch(_) {}
-      // Also check embedded default key
-      var embeddedKey = '';
-      var keyActive = !!savedKey;
-      var displayKey = savedKey || embeddedKey;
-      var isUsingEmbedded = !savedKey && !!embeddedKey;
-
       container.innerHTML =
-        '<div class="stg-section-label" style="margin-top:0">KYC Vision — Document Auto-Fill</div>' +
+        '<div class="stg-section-label" style="margin-top:0">AI Provider Keys — KYC Vision &amp; AI Features</div>' +
         '<div style="font-size:12px;color:var(--text3);margin-bottom:14px;line-height:1.7">' +
-          'PAN &amp; Aadhaar details are extracted automatically using <strong>Google Gemini Vision</strong>. ' +
-          'An API key is required — paste yours below (stored only in this browser). ' +
-          'Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">aistudio.google.com/apikey</a>.' +
+          'PAN &amp; Aadhaar auto-fill and other AI features run on <strong>Google Gemini</strong> (primary), ' +
+          'with automatic failover to <strong>OpenAI</strong> if Gemini is unavailable. Keys are saved securely on ' +
+          'the server (encrypted) and take effect immediately — no restart needed.' +
         '</div>' +
-        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
-          '<input id="stg-gemini-key" type="password" placeholder="Paste Gemini API key (AIza… or AQ.…)" value="' + savedKey.replace(/"/g,'&quot;') + '" ' +
-            'style="flex:1;min-width:240px;padding:10px 14px;border:1.5px solid var(--border2);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);outline:none">' +
-          '<button onclick="_kycSaveGeminiKey()" style="padding:10px 18px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">💾 Save Key</button>' +
-          (keyActive ? '<button onclick="_kycClearGeminiKey()" style="padding:10px 14px;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Remove</button>' : '') +
-        '</div>' +
-        (keyActive
-          ? '<div style="font-size:12px;color:#15803d;font-weight:600;background:rgba(26,115,64,.08);padding:8px 12px;border-radius:8px;border:1px solid rgba(26,115,64,.2)">✅ Custom Gemini key active — auto-fill enabled.</div>'
-          : isUsingEmbedded
-            ? '<div style="font-size:12px;color:#15803d;font-weight:600;background:rgba(26,115,64,.08);padding:8px 12px;border-radius:8px;border:1px solid rgba(26,115,64,.2)">✅ Default Gemini key active — PAN &amp; Aadhaar auto-fill is working. Paste your own key above to override.</div>'
-            : '<div style="font-size:12px;color:#b45309;font-weight:600;background:rgba(245,158,11,.08);padding:8px 12px;border-radius:8px;border:1px solid rgba(245,158,11,.2)">⚠ No key set — paste your Gemini key above to enable auto-fill.</div>');
+        '<div id="stg-aikey-body" style="color:var(--text3);font-size:12.5px">Loading…</div>';
+
+      try {
+        var res = await _stgAuthFetch('/api/settings/ai-keys', { cache: 'no-store' });
+        if (res.status === 401 || res.status === 403 || res.status === 429) {
+          var body401 = document.getElementById('stg-aikey-body');
+          var reason = res.status === 429
+            ? 'The server is temporarily rate-limiting auth requests (HTTP 429). This clears itself within a few minutes, or immediately on server restart.'
+            : 'Your login session token is invalid or expired (HTTP ' + res.status + ').';
+          if (body401) body401.innerHTML =
+            '<div style="color:var(--danger);margin-bottom:10px">⚠ Could not load AI key status — ' + reason + '</div>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+              '<button onclick="_renderKycProxySettingsCard()" style="padding:8px 14px;background:var(--surface2);color:var(--text);border:1px solid var(--border2);border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer">↻ Retry</button>' +
+              '<button onclick="_stgForceFreshLogin()" style="padding:8px 14px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">Force fresh login</button>' +
+            '</div>';
+          return;
+        }
+        var json = await res.json();
+        var data = (json && (json.data || json)) || {};
+        var body = document.getElementById('stg-aikey-body');
+        if (!body) return;
+        body.innerHTML =
+          _aiKeyRow('gemini', 'Gemini', 'https://aistudio.google.com/apikey', 'aistudio.google.com/apikey', data.gemini) +
+          _aiKeyRow('openai', 'OpenAI', 'https://platform.openai.com/api-keys', 'platform.openai.com/api-keys', data.openai);
+      } catch (e) {
+        var body = document.getElementById('stg-aikey-body');
+        if (body) body.innerHTML = '<div style="color:var(--danger)">Could not load AI key status. Try refreshing.</div>';
+      }
     }
     window._renderKycProxySettingsCard = _renderKycProxySettingsCard;
 
-    // Save / clear the browser-side Gemini key used for KYC auto-fill.
-    window._kycSaveGeminiKey = function() {
-      var el = document.getElementById('stg-gemini-key');
-      var k = (el && el.value || '').trim();
-      if (!k) { showToast('Please paste a Gemini API key first', 'warn'); return; }
-      try { localStorage.setItem('efin_gemini_key', k); } catch(_) {}
-      showToast('Gemini key saved — PAN/Aadhaar auto-fill is now active', 'success');
-      _renderKycProxySettingsCard();
+    // One-click recovery: wipe every auth-related localStorage key (both the
+    // real JWT pair and the UI-only session flag) and reload straight to the
+    // login screen, so the next login is guaranteed to be a real, fresh
+    // /api/auth/login call rather than reusing anything stale.
+    window._stgForceFreshLogin = function() {
+      try {
+        ['loanms_token', 'loanms_refresh', 'loanms_user', 'efin_session'].forEach(function(k) {
+          localStorage.removeItem(k);
+        });
+      } catch (e) {}
+      location.hash = '';
+      location.reload();
     };
-    window._kycClearGeminiKey = function() {
-      try { localStorage.removeItem('efin_gemini_key'); } catch(_) {}
-      showToast('Gemini key removed', 'info');
-      _renderKycProxySettingsCard();
+
+    // Save a provider key to the backend (encrypted at rest, Admin only).
+    window._aiKeySave = async function(providerKey) {
+      var el = document.getElementById('stg-aikey-' + providerKey);
+      var k = (el && el.value || '').trim();
+      if (!k) { showToast('Please paste an API key first', 'warn'); return; }
+      try {
+        var res = await _stgAuthFetch('/api/settings/ai-keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: providerKey, apiKey: k })
+        });
+        var json = await res.json();
+        if (!res.ok || (json && json.success === false)) {
+          showToast((json && json.message) || 'Could not save key', 'error');
+          return;
+        }
+        showToast((providerKey === 'gemini' ? 'Gemini' : 'OpenAI') + ' key saved ✓', 'success');
+        _renderKycProxySettingsCard();
+      } catch (e) {
+        showToast('Network error while saving key', 'error');
+      }
+    };
+
+    // Remove a saved provider key (falls back to server appsettings, if any).
+    window._aiKeyClear = async function(providerKey) {
+      try {
+        var res = await _stgAuthFetch('/api/settings/ai-keys/' + providerKey, {
+          method: 'DELETE'
+        });
+        var json = await res.json();
+        if (!res.ok || (json && json.success === false)) {
+          showToast((json && json.message) || 'Could not remove key', 'error');
+          return;
+        }
+        showToast((providerKey === 'gemini' ? 'Gemini' : 'OpenAI') + ' key removed', 'info');
+        _renderKycProxySettingsCard();
+      } catch (e) {
+        showToast('Network error while removing key', 'error');
+      }
     };
 
   
@@ -26666,7 +26966,7 @@ ${printContent}
       url: '/api/kyc/vision',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + (sess.token || '')
+        'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '')
       }
     };
   }
@@ -28306,9 +28606,7 @@ function dsaCanEdit() {
   if (!role) return true; // default allow if role not loaded yet
   return ['admin','team_leader','login_team','sales_executive','product_team'].includes(role);
 }
-function dsaAdminOnly()  { return currentUser?.role === 'admin' || currentUser?.role === 'product_team'; }
 
-function dsaIsPartnerRole() { return currentUser?.role === 'partner'; }
     // ── Insurance Premium Summary Refresh ────────────────────
     // Reads wizard fields from step 5 (Proposer Details) and populates
     // the step 6 Premium Summary panel. Called on entry to step 6 and
@@ -29531,43 +29829,8 @@ function laCheckDeviations() {
 }
 
 // ── Toggle raise deviation inline form ──
-function laToggleRaiseDevForm() {
-  const form = document.getElementById('la-raise-dev-form');
-  const btn  = document.getElementById('la-btn-raise-dev');
-  if (!form) return;
-  const isOpen = form.style.display !== 'none';
-  form.style.display = isOpen ? 'none' : 'block';
-  btn.textContent = isOpen ? '⚠️ Raise Deviation' : '✕ Cancel Deviation';
-  if (!isOpen) {
-    // Scroll to form
-    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    // Confirm button now submits as deviation
-    const btnConf = document.getElementById('la-btn-confirm');
-    if (btnConf) { btnConf.textContent = '📋 Submit Deviation'; btnConf.onclick = laConfirmRaiseDeviation; }
-  } else {
-    const btnConf = document.getElementById('la-btn-confirm');
-    if (btnConf) { btnConf.textContent = '✅ Confirm Approval'; btnConf.onclick = confirmLenderApproval; }
-  }
-}
 
 // ── Skip deviation → go straight to Sanction ──
-function laSkipDeviation() {
-  const appId = document.getElementById('la-app-id').value;
-  const app   = APPLICATIONS.find(a => a.id === appId);
-  if (!app) return;
-  const loanAmt = parseFloat(document.getElementById('la-loan-amt').value) || 0;
-  if (!loanAmt) { showToast('Please enter the sanctioned Loan Amount', 'warn'); document.getElementById('la-loan-amt').focus(); return; }
-  laSaveSanctionToApp(app);
-  const rd   = ROLES[currentUser.role] || {};
-  const dept = rd.dept || 'Admin';
-  addTrackingEntry(app, 'EFIN- SKIP Deviation', dept, 'Deviation skipped', ' ');
-  if (app.tracking.length > 0) app.tracking[app.tracking.length - 1]._subNoteOnly = true;
-  closeLenderApprovalModal();
-  app.status = 'approved_deviation';
-  if (typeof renderTable === 'function') renderTable();
-  if (typeof refreshDetailTimeline === 'function') refreshDetailTimeline(appId);
-  showToast('Deviation skipped — moved to Approved Deviation ✓', 'success');
-}
 
 // ── Raise deviation → post type+reason to Comment, save approver, move to Decision ──
 function laConfirmRaiseDeviation() {
@@ -29950,7 +30213,6 @@ function openSkipDeviationModal(appId) {
   confirmSkipDeviation(appId);
 }
 
-function closeSkipDeviationModal() {}
 
 function confirmSkipDeviation(appId) {
   const app = APPLICATIONS.find(a => a.id === appId);
@@ -31359,9 +31621,6 @@ function bkSetVerdict(v) {
 }
 
 // ── Name match live check ──
-function bkCheckNameMatch() {
-  // Name Match section removed
-}
 
 function openBankCheckModal(appId) {
   const app = APPLICATIONS.find(a => a.id === appId);
@@ -32372,64 +32631,6 @@ ${senderName}${senderDesig ? '\n' + senderDesig : ''}${senderMob ? '\nMobile: ' 
 }
 
 // ── Single button: Send via Gmail/Brevo + Mark as Accepted ──
-async function dcSendAndConfirm() {
-  const appId = document.getElementById('dc-app-id')?.value;
-  const app   = APPLICATIONS.find(a => a.id === appId);
-  if (!app) return;
-
-  // ── Prevent duplicate timeline entries on repeat clicks / retries ──
-  if (app._dealConfirmSent) { showToast('Deal confirmation already recorded for this application', 'info'); return; }
-
-  const to  = document.getElementById('dc-to')?.value.trim();
-  const cc  = document.getElementById('dc-cc')?.value.trim();
-  if (!to) { showToast('Please enter the customer email address', 'warn'); document.getElementById('dc-to').focus(); return; }
-
-  const btn  = document.getElementById('dc-btn-mailto');
-  const rd   = ROLES[currentUser.role] || {};
-  const dept = rd.dept || 'Admin';
-  const { subject, bodyText, bodyHtml } = dcBuildEmailContent(app);
-  const cfg  = sysmailGetConfig ? sysmailGetConfig() : {};
-
-  // ── Send via configured provider (Gmail or Brevo) ──
-  if (cfg.fromEmail) {
-    try {
-      if (btn) { btn.disabled = true; btn.textContent = '⏳ Sending…'; }
-      await sysmailSend({ to, toName: app.name, subject, html: bodyHtml, cc: cc || cfg.cc || '', replyTo: cfg.replyto || cfg.fromEmail });
-      // ── Only create the timeline entry after the email has actually been sent successfully ──
-      addTrackingEntry(app, 'EFIN-Deal Confirmation', dept,
-        `Deal confirmation sent from ${cfg.fromEmail} to ${to}`,
-        `Subject: ${subject}\nFrom: ${cfg.fromEmail}\nTo: ${to}${cc ? '\nCC: ' + cc : ''}\nProvider: ${cfg.provider || 'brevo'}`
-      );
-      app._dealConfirmSent = true;
-      _dcFinaliseAcceptance(app, appId, dept);
-      if (btn) { btn.disabled = false; btn.textContent = '📧 Send via Mail Client'; }
-      showToast('Deal confirmation sent via ' + (cfg.provider === 'gmail' ? 'Gmail' : 'Brevo') + ' ✓', 'success');
-      return;
-    } catch(err) {
-      // ── Email send failed: show the exact error and stop. Do NOT create a
-      //    timeline entry and do NOT mark the task Complete. ──
-      if (btn) { btn.disabled = false; btn.textContent = '📧 Send via Mail Client'; }
-      const msg = err.message === 'NO_KEY'         ? 'Brevo API key not configured'  :
-                  err.message === 'NO_FROM'        ? 'From address not configured'   :
-                  err.message === 'NO_EJS_CONFIG'  ? 'Gmail/EmailJS not configured'  :
-                  'Send failed: ' + err.message;
-      showToast(msg, 'error');
-      return;
-    }
-  }
-
-  // ── Fallback: open mail client + mark accepted ──
-  const mailtoStr = `mailto:${to}?${cc ? 'cc=' + encodeURIComponent(cc) + '&' : ''}subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
-  window.open(mailtoStr, '_blank');
-  addTrackingEntry(app, 'EFIN-Deal Confirmation', dept,
-    `Deal confirmation sent to ${to} via mail client`,
-    `Subject: ${subject}\nTo: ${to}${cc ? '\nCC: ' + cc : ''}`
-  );
-  app._dealConfirmSent = true;
-  _dcFinaliseAcceptance(app, appId, dept);
-  showToast('Mail client opened — status moved to Acceptance ✓', 'success');
-  if (btn) { btn.disabled = false; btn.textContent = '📧 Send via Mail Client'; }
-}
 
 // ── Shared finalise: post tracking + move to acceptance ──
 function _dcFinaliseAcceptance(app, appId, dept) {
@@ -32637,7 +32838,6 @@ function dcOfferDeclined() {
 }
 
 // ── Backward-compat alias for any older callers ──
-function dcConfirmSent() { dcOfferAccepted(); }
 
 // ── Deal Confirmation: attachment helpers (added v18) ──
 // Pending attachments are stored here until "Save to Documents" is clicked
@@ -32736,16 +32936,6 @@ function dcSaveAttachments() {
 })();
 
 // ── Open email client with pre-filled deal confirmation ──
-function dcOpenMailto() {
-  const appId = document.getElementById('dc-app-id')?.value;
-  const app   = APPLICATIONS.find(a => a.id === appId);
-  if (!app) return;
-  const to = document.getElementById('dc-to')?.value.trim();
-  const cc = document.getElementById('dc-cc')?.value.trim();
-  if (!to) { showToast('Please enter the customer email address', 'warn'); return; }
-  const { subject, bodyText } = dcBuildEmailContent(app);
-  window.open(`mailto:${to}?${cc ? 'cc=' + encodeURIComponent(cc) + '&' : ''}subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`, '_blank');
-}
 // ══════════════════════════════════════════════════════════════════════
 //  SYSTEM EMAIL CONFIGURATION
 //  Admin-configurable outgoing email identity for deal confirmations.
@@ -32761,7 +32951,10 @@ function dcOpenMailto() {
 const SYSMAIL_KEY = 'efin_system_email_config_v2';
 
 // ══════════════════════════════════════════════════════════════════
-//  SYSTEM EMAIL ENGINE — Gmail SMTP (via EmailJS) + Brevo API
+//  SYSTEM EMAIL ENGINE — dispatches to the backend (/api/email/send),
+//  which sends via real SMTP (Gmail/etc.) or the Brevo HTTP API,
+//  server-side, based on whatever the admin saved in Settings →
+//  Mail & Email. See mailSend() below.
 // ══════════════════════════════════════════════════════════════════
 
 
@@ -32770,76 +32963,70 @@ function mailGetConfig() {
   try { return JSON.parse(localStorage.getItem(SYSMAIL_KEY) || '{}'); } catch(e) { return {}; }
 }
 
+// ── Fetch with a hard timeout ──
+// Without this, a blocked/slow network (or a firewalled SMTP port on the
+// server) makes email requests look "stuck" with no error and no toast —
+// the UI just sits there. 25s gives the backend's own 15s SMTP timeout room
+// to fire and report a real error first; if even the HTTP call itself can't
+// complete in 25s, we surface that as a clear timeout instead of hanging.
+async function _mailFetch(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs || 25000);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Request timed out — the server took too long to respond (check server logs / SMTP port access).');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════
-//  CORE SEND FUNCTION — routes to Gmail (EmailJS) or Brevo
+//  CORE SEND FUNCTION — unified, backend-driven
+//  Every email in the app (invitation, password reset, loan status,
+//  EMI reminders, etc.) funnels through this one function, which now
+//  posts to the server's /api/email/send. The server resolves whatever
+//  provider (SMTP or Brevo) was saved in Settings → Mail & Email and
+//  actually delivers it — no SMTP password or Brevo API key is ever
+//  present in the browser, and there's no CORS dependency on a
+//  third-party provider's API being reachable from the client.
 // ══════════════════════════════════════════════════════════════════
 async function mailSend({ to, toName, subject, html, cc, replyTo }) {
   const cfg = mailGetConfig();
-  if (!cfg.fromEmail) throw new Error('NO_FROM');
+  if (!cfg.fromEmail) throw new Error('Email is not configured — go to Settings → Mail & Email first.');
 
-  if ((cfg.provider || 'brevo') === 'gmail') {
-    return await _sendViaEmailJS({ to, toName, subject, html, cfg });
-  } else {
-    return await _sendViaBrevo({ to, toName, subject, html, cc, replyTo, cfg });
-  }
-}
+  const token = (function () { try { return localStorage.getItem('loanms_token'); } catch (e) { return null; } })();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
 
-// ── Brevo send ──
-async function _sendViaBrevo({ to, toName, subject, html, cc, replyTo, cfg }) {
-  if (!cfg.apiKey) throw new Error('NO_KEY');
-  const body = {
-    sender:      { name: cfg.name || 'EFIN', email: cfg.fromEmail },
-    to:          [{ email: to, name: toName || to }],
-    subject,
-    htmlContent: html,
-  };
-  if (cc || cfg.cc)             body.cc      = [{ email: cc || cfg.cc }];
-  if (replyTo || cfg.replyto)   body.replyTo = { email: replyTo || cfg.replyto };
-
-  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: { 'api-key': cfg.apiKey, 'Content-Type': 'application/json', 'accept': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Brevo HTTP ' + res.status);
-  }
-  return await res.json();
-}
-
-// ── Gmail via EmailJS ──
-async function _sendViaEmailJS({ to, toName, subject, html, cfg }) {
-  if (!cfg.ejsService || !cfg.ejsTemplate || !cfg.ejsPubKey) throw new Error('NO_EJS_CONFIG');
-
-  // Load EmailJS SDK lazily
-  if (typeof emailjs === 'undefined') {
-    await new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js';
-      s.onload = resolve; s.onerror = () => reject(new Error('EmailJS SDK failed to load'));
-      document.head.appendChild(s);
+  let res;
+  try {
+    res = await _mailFetch('/api/email/send', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ to, toName, subject, html, cc: cc || cfg.cc || '', replyTo: replyTo || cfg.replyto || '' }),
     });
+  } catch (networkErr) {
+    console.error('[EFIN Mail Send] network/timeout error:', networkErr);
+    throw new Error(networkErr.message || 'Could not reach the server to send this email — check your connection.');
   }
-  emailjs.init(cfg.ejsPubKey);
 
-  // Strip HTML tags for plain-text fallback
-  const plainText = html.replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim();
+  if (res.status === 401) {
+    throw new Error('Your session has expired — please log in again and retry.');
+  }
 
-  const templateParams = {
-    to_email:    to,
-    to_name:     toName || to,
-    from_name:   cfg.name || 'EFIN',
-    from_email:  cfg.fromEmail,
-    subject:     subject,
-    message:     plainText,
-    message_html: html,
-    reply_to:    cfg.replyto || cfg.fromEmail,
-  };
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* non-JSON body — fall through */ }
 
-  const result = await emailjs.send(cfg.ejsService, cfg.ejsTemplate, templateParams);
-  if (result.status !== 200) throw new Error('EmailJS error: ' + result.text);
-  return result;
+  if (!res.ok || !data || data.success !== true) {
+    const msg = (data && ((data.errors && data.errors[0]) || data.message)) || ('Email send failed (HTTP ' + res.status + ')');
+    console.error('[EFIN Mail Send] failed:', msg, data);
+    throw new Error(msg);
+  }
+  return data;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -32891,10 +33078,7 @@ async function mailSendInvitation(user, plainTextPwd) {
     await mailSend({ to: user.email, toName: user.name, subject, html });
     showToast('Invitation email sent to ' + user.email + ' ✓', 'success');
   } catch(err) {
-    const msg = err.message === 'NO_FROM'       ? 'From address not configured in Settings → Mail & Email'  :
-                err.message === 'NO_KEY'        ? 'Brevo API key not configured'                 :
-                err.message === 'NO_EJS_CONFIG' ? 'EmailJS credentials not configured'           :
-                err.message;
+    const msg = err.message;
     showToast('Invitation email failed: ' + msg, 'warn');
     console.warn('[EFIN Invite Email]', err);
   }
@@ -32909,7 +33093,6 @@ async function mailSendInvitation(user, plainTextPwd) {
 function sysmailGetConfig() { return mailGetConfig(); }
 async function sysmailSend(opts) { return mailSend(opts); }
 async function sysmailSendInvitation(user, pwd) { return mailSendInvitation(user, pwd); }
-async function breveSend(opts) { return mailSend(opts); }
 
 // ── Scan pasted reply ──
 function sysmailScanReply() {
@@ -34164,8 +34347,9 @@ function downloadBlob(blob, filename) {
 // ══════════════════════════════════════════════════════════════════
 //  EFIN COMPREHENSIVE EMAIL ENGINE
 //  All email types centralised here. Every function uses sysmailSend
-//  so it automatically routes via Gmail (EmailJS) or Brevo based on
-//  whatever the admin has configured in Settings → Mail Configuration.
+//  so it automatically routes through the backend's unified sender
+//  (SMTP or Brevo, resolved server-side) based on whatever the admin
+//  has configured in Settings → Mail Configuration.
 // ══════════════════════════════════════════════════════════════════
 
 // ── Shared HTML email wrapper ──
@@ -34194,46 +34378,47 @@ function _emailWrap(accentColor, headerTitle, headerSub, bodyHtml, footerRef) {
 </table></div>`;
 }
 
-// ── Info box helper ──
-function _infoBox(rows, accentColor) {
-  return `<div style="background:#f0f4ff;border:1px solid #dde3f0;border-radius:10px;padding:16px 20px;margin:16px 0">
-    ${rows.map(([l,v]) => `<div style="font-size:13px;color:#0c1733;margin-bottom:7px"><span style="color:#7a8aaa;min-width:160px;display:inline-block">${l}:</span> <strong>${v}</strong></div>`).join('')}
-  </div>`;
+// ── Template-driven subject + HTML body ──
+// This is the piece that was missing: Settings → Mail & Email → "All Email
+// Templates" lets an admin edit/save a Subject + Body per template key (via
+// stgSaveTpl / stgGetTemplate), but until now nothing ever read those saved
+// templates back — every send function used its own hardcoded HTML instead.
+// _tplRender(key, vars) is the single place that resolves the (possibly
+// admin-customised) template, substitutes {{variables}}, and wraps it in the
+// branded header/footer, so every automated email actually reflects what an
+// admin configured in Settings.
+function _tplRender(key, vars, accentColor, headerTitle, headerSub, footerRef) {
+  const tpl = (typeof stgGetTemplate === 'function' ? stgGetTemplate(key) : null)
+              || (typeof STG_TPL_DEFAULTS !== 'undefined' ? STG_TPL_DEFAULTS[key] : null)
+              || { subject: headerTitle || 'EFIN Notification', body: '' };
+
+  const substitute = (str) => {
+    let out = str || '';
+    Object.entries(vars || {}).forEach(([k, v]) => {
+      out = out.split('{{' + k + '}}').join(v == null ? '' : String(v));
+    });
+    return out;
+  };
+
+  const subject = substitute(tpl.subject);
+  const bodyText = substitute(tpl.body);
+
+  const bodyHtml = `<pre style="white-space:pre-wrap;font-family:Arial,Helvetica,sans-serif;font-size:13.5px;color:#3a4d6e;line-height:1.75;margin:0">${bodyText}</pre>`;
+  const html = _emailWrap(accentColor, headerTitle, headerSub, bodyHtml, footerRef);
+  return { subject, html };
 }
 
 // ─────────────────────────────────────────────────────────────────
 //  1. USER INVITATION EMAIL
-//     Sent automatically when admin creates a new user.
+//     Sent automatically when admin creates a new user. The real
+//     implementation lives in mailSendInvitation() (near mailSend, in
+//     the SYSTEM EMAIL ENGINE section) — it already correctly reads
+//     cfg.invSubject/cfg.invBody and substitutes {{variables}}. This
+//     is kept only as a back-compat alias in case anything external
+//     still calls sendInvitationEmail() by name.
 // ─────────────────────────────────────────────────────────────────
-// SECURITY FIX: accept plainTextPwd explicitly so we never read the already-masked user._password.
 async function sendInvitationEmail(user, plainTextPwd) {
-  const cfg = sysmailGetConfig();
-  if (cfg.invEnabled === false || !cfg.fromEmail) return;
-
-  // user._password is '***' in storage by this point; use the explicitly passed value.
-  const pwd = plainTextPwd || '(set by admin — please contact your admin for credentials)';
-  const body = `
-    <div style="font-size:15px;font-weight:800;color:#0c1733;margin-bottom:8px">👋 Welcome to EFIN!</div>
-    <div style="font-size:13.5px;color:#3a4d6e;line-height:1.7;margin-bottom:16px">
-      Hi <strong>${user.name}</strong>, your account has been created on the EFIN Loan Management System.
-      Use the credentials below to log in for the first time.
-    </div>
-    ${_infoBox([['Login Email', user.email || '—'], ['Temporary Password', pwd], ['Your User ID', user.uid || '—'], ['Role', user.role || '—']], '#1a4fa3')}
-    <div style="margin:18px 0;padding:12px 16px;background:#fff8e1;border-left:4px solid #f0a000;border-radius:4px;font-size:12.5px;color:#6b4e00">
-      <strong>⚠️ Action required:</strong> Please log in and change your password immediately for security.
-    </div>
-    ${cfg.signature ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #dde3f0;font-size:12.5px;color:#5a7090;white-space:pre-line">${cfg.signature}</div>` : ''}`;
-
-  const html = _emailWrap('#1a4fa3', '🎉 You\'ve been invited', 'Your account is ready', body, user.uid);
-  const subject = cfg.invSubject || `You've been invited to EFIN — ${user.name}`;
-
-  try {
-    await sysmailSend({ to: user.email, toName: user.name, subject, html });
-    showToast('Invitation email sent to ' + user.email + ' ✓', 'success');
-  } catch(e) {
-    showToast('Invitation email failed: ' + e.message, 'warn');
-    console.warn('[EFIN Email: Invitation]', e);
-  }
+  return mailSendInvitation(user, plainTextPwd);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -34241,23 +34426,16 @@ async function sendInvitationEmail(user, plainTextPwd) {
 //     Sent when admin resets a user's password.
 // ─────────────────────────────────────────────────────────────────
 async function sendPasswordResetEmail(user, newPassword) {
+
   const cfg = sysmailGetConfig();
   if (!cfg.fromEmail || !user.email) return;
 
-  const body = `
-    <div style="font-size:15px;font-weight:800;color:#0c1733;margin-bottom:8px">🔐 Your Password Has Been Reset</div>
-    <div style="font-size:13.5px;color:#3a4d6e;line-height:1.7;margin-bottom:16px">
-      Hi <strong>${user.name}</strong>, your EFIN account password has been reset by the administrator. Use the new credentials below to log in.
-    </div>
-    ${_infoBox([['Login Email', user.email], ['New Password', newPassword], ['User ID', user.uid || '—']], '#d42b2b')}
-    <div style="margin:18px 0;padding:12px 16px;background:#fff8e1;border-left:4px solid #f0a000;border-radius:4px;font-size:12.5px;color:#6b4e00">
-      <strong>⚠️ Security notice:</strong> Please log in immediately and change this password. Do not share it with anyone.
-    </div>
-    ${cfg.signature ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #dde3f0;font-size:12.5px;color:#5a7090;white-space:pre-line">${cfg.signature}</div>` : ''}`;
+  const { subject, html } = _tplRender('pwreset', {
+    name: user.name, email: user.email, password: newPassword, signature: cfg.signature || ''
+  }, '#d42b2b', '🔐 Password Reset', 'Action required', user.uid);
 
-  const html = _emailWrap('#d42b2b', '🔐 Password Reset', 'Action required', body, user.uid);
   try {
-    await sysmailSend({ to: user.email, toName: user.name, subject: 'EFIN — Your Password Has Been Reset', html });
+    await sysmailSend({ to: user.email, toName: user.name, subject, html });
     showToast('Password reset email sent to ' + user.email + ' ✓', 'success');
   } catch(e) {
     showToast('Password reset email failed: ' + e.message, 'warn');
@@ -34274,30 +34452,15 @@ async function sendLoanApprovalEmail(app) {
   if (!cfg.fromEmail || !app.email) return;
   const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN') : '—';
   const loanType = typeof loanTypeLabel === 'function' ? loanTypeLabel(app.loanType) : 'Loan';
+  const roi = app.sanctionROI ? app.sanctionROI + '% p.a.' : (app.loanRate ? app.loanRate + '% p.a.' : '—');
 
-  const body = `
-    <div style="font-size:15px;font-weight:800;color:#0c1733;margin-bottom:8px">🎉 Congratulations! Your Loan Has Been Approved</div>
-    <div style="font-size:13.5px;color:#3a4d6e;line-height:1.7;margin-bottom:16px">
-      Dear <strong>${app.name}</strong>, we are delighted to inform you that your ${loanType} application has been <strong style="color:#1a7340">approved</strong>.
-    </div>
-    ${_infoBox([
-      ['Application ID',    app.id],
-      ['Loan Type',         loanType],
-      ['Sanctioned Amount', fmt(app.sanctionLoanAmt || app.amount)],
-      ['Rate of Interest',  app.sanctionROI ? app.sanctionROI + '% p.a.' : (app.loanRate ? app.loanRate + '% p.a.' : '—')],
-      ['Applicant',         app.name],
-    ], '#1a7340')}
-    <div style="margin:16px 0;padding:14px 18px;background:rgba(26,115,64,.06);border:1px solid rgba(26,115,64,.2);border-radius:10px;font-size:13px;color:#1a7340;font-weight:600">
-      ✅ Your loan is approved. Our team will contact you shortly with disbursement details.
-    </div>
-    <div style="font-size:12.5px;color:#7a8aaa;line-height:1.6">
-      Please keep your KYC documents handy. If you have any questions, please contact your assigned relationship manager.
-    </div>
-    ${cfg.signature ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #dde3f0;font-size:12.5px;color:#5a7090;white-space:pre-line">${cfg.signature}</div>` : ''}`;
+  const { subject, html } = _tplRender('approval', {
+    name: app.name, app_id: app.id, loan_type: loanType,
+    amount: fmt(app.sanctionLoanAmt || app.amount), roi, signature: cfg.signature || ''
+  }, '#1a7340', '✅ Loan Approved', app.id, app.id);
 
-  const html = _emailWrap('#1a7340', '✅ Loan Approved', app.id, body, app.id);
   try {
-    await sysmailSend({ to: app.email, toName: app.name, subject: `EFIN — Loan Approved · ${app.id} · ${app.name}`, html });
+    await sysmailSend({ to: app.email, toName: app.name, subject, html });
   } catch(e) { console.warn('[EFIN Email: Approval]', e); }
 }
 
@@ -34311,26 +34474,14 @@ async function sendLoanDisbursementEmail(app) {
   const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN') : '—';
   const loanType = typeof loanTypeLabel === 'function' ? loanTypeLabel(app.loanType) : 'Loan';
 
-  const body = `
-    <div style="font-size:15px;font-weight:800;color:#0c1733;margin-bottom:8px">🏦 Your Loan Has Been Disbursed</div>
-    <div style="font-size:13.5px;color:#3a4d6e;line-height:1.7;margin-bottom:16px">
-      Dear <strong>${app.name}</strong>, your ${loanType} has been successfully <strong style="color:#1a4fa3">disbursed</strong> to your registered bank account.
-    </div>
-    ${_infoBox([
-      ['Application ID',     app.id],
-      ['Loan Type',          loanType],
-      ['Disbursed Amount',   fmt(app.sanctionLoanAmt || app.amount)],
-      ['EMI',                fmt(app.emi) || '—'],
-      ['First EMI Date',     app.emiDate ? app.emiDate + ' of next month' : '—'],
-    ], '#1a4fa3')}
-    <div style="margin:16px 0;padding:14px 18px;background:rgba(26,79,163,.05);border:1px solid rgba(26,79,163,.15);border-radius:10px;font-size:13px;color:#1a4fa3;font-weight:600">
-      💳 Please ensure sufficient balance in your account before each EMI date.
-    </div>
-    ${cfg.signature ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #dde3f0;font-size:12.5px;color:#5a7090;white-space:pre-line">${cfg.signature}</div>` : ''}`;
+  const { subject, html } = _tplRender('disburse', {
+    name: app.name, app_id: app.id, loan_type: loanType,
+    amount: fmt(app.sanctionLoanAmt || app.amount), emi: fmt(app.emi),
+    emi_date: app.emiDate ? app.emiDate + ' of next month' : '—', signature: cfg.signature || ''
+  }, '#1a4fa3', '🏦 Loan Disbursed', app.id, app.id);
 
-  const html = _emailWrap('#1a4fa3', '🏦 Loan Disbursed', app.id, body, app.id);
   try {
-    await sysmailSend({ to: app.email, toName: app.name, subject: `EFIN — Loan Disbursed · ${app.id} · ${app.name}`, html });
+    await sysmailSend({ to: app.email, toName: app.name, subject, html });
   } catch(e) { console.warn('[EFIN Email: Disbursement]', e); }
 }
 
@@ -34343,25 +34494,13 @@ async function sendLoanRejectionEmail(app, reason) {
   if (!cfg.fromEmail || !app.email) return;
   const loanType = typeof loanTypeLabel === 'function' ? loanTypeLabel(app.loanType) : 'Loan';
 
-  const body = `
-    <div style="font-size:15px;font-weight:800;color:#0c1733;margin-bottom:8px">📋 Update on Your Loan Application</div>
-    <div style="font-size:13.5px;color:#3a4d6e;line-height:1.7;margin-bottom:16px">
-      Dear <strong>${app.name}</strong>, after careful review, we regret to inform you that your ${loanType} application (Ref: <strong>${app.id}</strong>) could not be approved at this time.
-    </div>
-    ${_infoBox([
-      ['Application ID', app.id],
-      ['Loan Type',      loanType],
-      ['Decision',       'Not Approved'],
-      ...(reason ? [['Reason', reason]] : []),
-    ], '#c0392b')}
-    <div style="margin:16px 0;font-size:13px;color:#3a4d6e;line-height:1.7">
-      This decision does not prevent you from reapplying in the future. You may reapply after addressing the factors mentioned above. If you have questions, please contact your relationship manager.
-    </div>
-    ${cfg.signature ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #dde3f0;font-size:12.5px;color:#5a7090;white-space:pre-line">${cfg.signature}</div>` : ''}`;
+  const { subject, html } = _tplRender('rejection', {
+    name: app.name, app_id: app.id, loan_type: loanType,
+    reason: reason || 'Not specified', signature: cfg.signature || ''
+  }, '#c0392b', '📋 Application Update', app.id, app.id);
 
-  const html = _emailWrap('#c0392b', '📋 Application Update', app.id, body, app.id);
   try {
-    await sysmailSend({ to: app.email, toName: app.name, subject: `EFIN — Application Update · ${app.id} · ${app.name}`, html });
+    await sysmailSend({ to: app.email, toName: app.name, subject, html });
   } catch(e) { console.warn('[EFIN Email: Rejection]', e); }
 }
 
@@ -34369,87 +34508,17 @@ async function sendLoanRejectionEmail(app, reason) {
 //  6. DOCUMENT REQUEST EMAIL
 //     Sent when agent requests additional documents from applicant.
 // ─────────────────────────────────────────────────────────────────
-async function sendDocumentRequestEmail(app, docList, instructions) {
-  const cfg = sysmailGetConfig();
-  if (!cfg.fromEmail || !app.email) return;
-
-  const docsHtml = Array.isArray(docList) && docList.length
-    ? `<ul style="margin:10px 0 0;padding-left:20px">${docList.map(d => `<li style="font-size:13px;color:#0c1733;margin-bottom:5px">${d}</li>`).join('')}</ul>`
-    : `<p style="font-size:13px;color:#3a4d6e">${instructions || 'Please contact your relationship manager for the full list.'}</p>`;
-
-  const body = `
-    <div style="font-size:15px;font-weight:800;color:#0c1733;margin-bottom:8px">📎 Additional Documents Required</div>
-    <div style="font-size:13.5px;color:#3a4d6e;line-height:1.7;margin-bottom:16px">
-      Dear <strong>${app.name}</strong>, to continue processing your loan application (Ref: <strong>${app.id}</strong>), we need the following documents at your earliest convenience.
-    </div>
-    <div style="background:#f0f4ff;border:1px solid #dde3f0;border-radius:10px;padding:16px 20px;margin-bottom:16px">
-      <div style="font-size:12px;font-weight:700;color:#1a4fa3;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">Documents Required</div>
-      ${docsHtml}
-    </div>
-    ${instructions ? `<div style="font-size:13px;color:#3a4d6e;line-height:1.7;margin-bottom:12px"><strong>Instructions:</strong> ${instructions}</div>` : ''}
-    <div style="font-size:12.5px;color:#7a8aaa">Please submit all documents within <strong>3 working days</strong> to avoid delays in processing.</div>
-    ${cfg.signature ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #dde3f0;font-size:12.5px;color:#5a7090;white-space:pre-line">${cfg.signature}</div>` : ''}`;
-
-  const html = _emailWrap('#e67e00', '📎 Documents Required', app.id, body, app.id);
-  try {
-    await sysmailSend({ to: app.email, toName: app.name, subject: `EFIN — Documents Required · ${app.id} · ${app.name}`, html });
-    showToast('Document request email sent ✓', 'success');
-  } catch(e) {
-    showToast('Document request email failed: ' + e.message, 'warn');
-    console.warn('[EFIN Email: Document Request]', e);
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────
 //  7. EMI REMINDER EMAIL
 //     Can be triggered manually by admin or on a schedule.
 // ─────────────────────────────────────────────────────────────────
-async function sendEmiReminderEmail(app, daysUntilDue) {
-  const cfg = sysmailGetConfig();
-  if (!cfg.fromEmail || !app.email) return;
-  const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN') : '—';
-  const daysText = daysUntilDue === 0 ? 'today' : daysUntilDue === 1 ? 'tomorrow' : `in ${daysUntilDue} days`;
-
-  const body = `
-    <div style="font-size:15px;font-weight:800;color:#0c1733;margin-bottom:8px">💳 EMI Payment Reminder</div>
-    <div style="font-size:13.5px;color:#3a4d6e;line-height:1.7;margin-bottom:16px">
-      Dear <strong>${app.name}</strong>, this is a friendly reminder that your EMI payment is due <strong>${daysText}</strong>.
-    </div>
-    ${_infoBox([
-      ['Application ID',  app.id],
-      ['EMI Amount',      fmt(app.emi)],
-      ['Due Date',        app.nextEmiDate || app.emiDate ? (app.nextEmiDate || app.emiDate) + ' of this month' : '—'],
-      ['Account',         app.bankName || '—'],
-    ], '#e67e00')}
-    <div style="margin:16px 0;padding:12px 16px;background:#fff8e1;border-left:4px solid #f0a000;border-radius:4px;font-size:12.5px;color:#6b4e00">
-      <strong>Reminder:</strong> Please ensure sufficient balance in your linked account before the due date to avoid penalties.
-    </div>
-    ${cfg.signature ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #dde3f0;font-size:12.5px;color:#5a7090;white-space:pre-line">${cfg.signature}</div>` : ''}`;
-
-  const html = _emailWrap('#e67e00', '💳 EMI Reminder', daysUntilDue === 0 ? 'Due Today' : `Due ${daysText}`, body, app.id);
-  try {
-    await sysmailSend({ to: app.email, toName: app.name, subject: `EFIN — EMI Reminder · ${fmt(app.emi)} due ${daysText} · ${app.id}`, html });
-    showToast('EMI reminder sent to ' + app.email + ' ✓', 'success');
-  } catch(e) {
-    showToast('EMI reminder failed: ' + e.message, 'warn');
-    console.warn('[EFIN Email: EMI Reminder]', e);
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────
 //  8. STAGE CHANGE EMAIL  (also defined inline above for the
 //     real-time sendStageNotifications, duplicated here as a
 //     standalone callable for manual triggers)
 // ─────────────────────────────────────────────────────────────────
-async function sendStageChangeEmail(app, newStatus) {
-  const STATUSES_LOCAL = { wip:'WIP', login:'Assign Lender', underwriting:'Underwriting', approved:'Approved', disbursed:'Disbursed', rejected:'Rejected', hold:'On Hold', offer:'Offer',  acceptance:'Acceptance' };
-  const stageName = STATUSES_LOCAL[newStatus] || newStatus;
-  await _sendStageChangeEmail(app, newStatus, stageName);
-  // Also trigger specific lifecycle emails
-  if (newStatus === 'approved')  sendLoanApprovalEmail(app);
-  if (newStatus === 'disbursed') sendLoanDisbursementEmail(app);
-  if (newStatus === 'rejected')  sendLoanRejectionEmail(app);
-}
 
 // ─────────────────────────────────────────────────────────────────
 //  WIRE INTO EXISTING HOOKS
@@ -34539,20 +34608,35 @@ function settingsSwitchTab(tab, el) {
   document.getElementById('settings-tab-access').style.display    = tab === 'access'   ? '' : 'none';
   document.getElementById('settings-tab-system').style.display    = tab === 'system'   ? '' : 'none';
   document.getElementById('settings-tab-branding').style.display  = tab === 'branding' ? '' : 'none';
+  document.getElementById('settings-tab-ai').style.display        = tab === 'ai'       ? '' : 'none';
 
   if (tab === 'access') {
+    // Render immediately from whatever's in memory (instant UI), then pull
+    // the authoritative copy from the server and re-render — so other
+    // admins' changes show up even if this browser's localStorage is stale.
     if (typeof renderAccessRights === 'function') {
       try { renderAccessRights(); } catch(e) { console.warn('[settings access tab]', e); }
     }
     stgRenderAccessRights();
+    // Admin Master Control & Permission Matrix now live in this tab (moved
+    // from System & Data, where they were originally misplaced) — render them here.
+    if (typeof renderMasterToggleGrid === 'function') { try { renderMasterToggleGrid(); } catch(e) { console.warn('[access-tab-mtg]',e); } }
+
+    if (typeof stgSyncPermissionsFromServer === 'function') {
+      stgSyncPermissionsFromServer().then(() => {
+        try { renderAccessRights(); } catch(e) { console.warn('[settings access tab sync]', e); }
+        stgRenderAccessRights();
+        if (typeof renderMasterToggleGrid === 'function') { try { renderMasterToggleGrid(); } catch(e) { console.warn('[access-tab-mtg sync]',e); } }
+      });
+    }
   }
   if (tab === 'system') {
     stgMirrorCam(); stgRenderWebhookLogs(); stgMirrorDropdowns();
     if (typeof renderAccessRights === 'function') { try { renderAccessRights(); } catch(e) { console.warn('[sys-tab]',e); } }
-    if (typeof renderMasterToggleGrid === 'function') { try { renderMasterToggleGrid(); } catch(e) { console.warn('[sys-tab-mtg]',e); } }
   }
   if (tab === 'mail') { stgRenderAllTemplates(); if (typeof sysmailRenderPending === 'function') sysmailRenderPending(); }
   if (tab === 'branding') { brandingInitPanel(); }
+  if (tab === 'ai') { if (typeof _renderKycProxySettingsCard === 'function') _renderKycProxySettingsCard(); }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -34685,12 +34769,18 @@ function stgSaveTpl(key) {
   const saved = document.getElementById('stg-tpl-' + key + '-saved');
   if (saved) { saved.style.display = 'inline'; setTimeout(() => saved.style.display = 'none', 2500); }
   showToast('Template saved ✓', 'success');
-  // Sync invitation template to mail config if needed
+
+  // The invitation template is also editable from the "Invitation Email" folder
+  // (stg-inv-subject / stg-inv-body), which persists to the backend — the exact
+  // config EmailService reads. Keep both editors in sync and push through to the
+  // backend here too, so a save from either place is never silently lost on the
+  // next Settings reload.
   if (key === 'invitation') {
-    const cfg = sysmailGetConfig ? sysmailGetConfig() : {};
-    cfg.invSubject = subjectEl.value;
-    cfg.invBody    = bodyEl.value;
-    try { localStorage.setItem(SYSMAIL_KEY, JSON.stringify(cfg)); localStorage.setItem(STG_KEY, JSON.stringify(cfg)); } catch(e) {}
+    const invSubjectEl = document.getElementById('stg-inv-subject');
+    const invBodyEl    = document.getElementById('stg-inv-body');
+    if (invSubjectEl) invSubjectEl.value = subjectEl.value;
+    if (invBodyEl)    invBodyEl.value    = bodyEl.value;
+    stgSaveMailConfig(); // persists invSubject/invBody (and the rest of the form) to the backend
   }
 }
 
@@ -34878,7 +34968,7 @@ function stgMlDeleteItem(key, idx) {
   showToast(`"${removed.label || removed}" removed`, 'info');
 }
 
-// ── Webhook Logs (backed by GET /api/incred/webhook/logs — real InCred callbacks) ──
+// ── Webhook Logs (backed by GET /api/settings/webhook-logs — Admin only; real InCred callbacks) ──
 async function stgRenderWebhookLogs() {
   const el = document.getElementById('stg-wh-logs');
   if (!el) return;
@@ -34887,7 +34977,7 @@ async function stgRenderWebhookLogs() {
   try {
     var jwtToken = null;
     try { jwtToken = localStorage.getItem('loanms_token'); } catch(e) {}
-    const res = await fetch('/api/incred/webhook/logs', {
+    const res = await fetch('/api/settings/webhook-logs', {
       headers: jwtToken ? { 'Authorization': 'Bearer ' + jwtToken } : {}
     });
     if (res.ok) {
@@ -34939,10 +35029,6 @@ async function stgRenderWebhookLogs() {
 }
 
 function stgRefreshWebhooks() { stgRenderWebhookLogs(); showToast('Webhook logs refreshed', 'info'); }
-function stgSimulateWebhook() {
-  if (typeof twSimulateWebhook === 'function') { twSimulateWebhook(); setTimeout(stgRenderWebhookLogs, 200); }
-  else { showToast('Simulate function not available', 'warn'); }
-}
 
 // ══════════════════════════════════════════════════════════════════
 //  SETTINGS — ROLES & PERMISSIONS TAB
@@ -34962,7 +35048,89 @@ function stgRenderAccessRights() {
   if (typeof stgRenderExpertExport === 'function') { try { stgRenderExpertExport(); } catch(e) { console.warn('[stg ee]', e); } }
   // Render security groups reference panel
   stgRenderSecGroups();
+  // Render permission change audit history
+  if (typeof stgRenderPermissionHistory === 'function') { try { stgRenderPermissionHistory(); } catch(e) { console.warn('[stg perm history]', e); } }
 }
+
+// ── Permission Change History ───────────────────────────────────────────────
+// Every save made through this section (Admin Master Control, the Permission
+// Matrix, Menu Access Control, and Expert Export) writes through the generic
+// Settings API / ExpertExport API, both of which are already covered by the
+// server's AuditMiddleware — so this panel is just a focused view over the
+// existing, database-backed Audit Log (GET /api/audit, Admin-only) rather
+// than a new logging mechanism. No backend changes were needed for this.
+// Self-contained copies (this function lives outside the IIFE that defines
+// STG_PERM_SETTINGS_KEY / STG_MENU_VIS_SETTINGS_KEY / _stgAuthHeaders — keep
+// the literal key strings in sync with those if they're ever renamed).
+const STG_PERM_HISTORY_KEYS = ['efin_role_permissions', 'efin_menu_visibility', 'expertexport', 'expert_export'];
+
+function _stgHistAuthHeaders() {
+  var tok = null;
+  try { tok = localStorage.getItem('loanms_token'); } catch (e) {}
+  return tok ? { 'Authorization': 'Bearer ' + tok } : {};
+}
+
+async function stgRenderPermissionHistory() {
+  const host = document.getElementById('stg-perm-history-list');
+  if (!host) return;
+  host.innerHTML = '<div class="efin-section-loader"><div class="esl-track"><div class="esl-fill"></div></div><div class="esl-dots"><div class="esl-dot"></div><div class="esl-dot"></div><div class="esl-dot"></div></div></div>';
+
+  let items = [];
+  try {
+    const headers = _stgHistAuthHeaders();
+    const [settingsRes, exportRes] = await Promise.all([
+      fetch('/api/audit?entity=Settings&pageSize=40', { headers }),
+      fetch('/api/audit?entity=Expertexport&pageSize=20', { headers })
+    ]);
+    const bodies = await Promise.all([
+      settingsRes.ok ? settingsRes.json() : null,
+      exportRes.ok ? exportRes.json() : null
+    ]);
+    bodies.forEach(b => {
+      const list = b && b.data && b.data.items ? b.data.items : [];
+      items = items.concat(list);
+    });
+  } catch (e) {
+    host.innerHTML = '<div style="color:var(--text3);font-size:12.5px;text-align:center;padding:16px">Could not load permission history — the Audit Log API may be unavailable.</div>';
+    return;
+  }
+
+  // Keep only entries that are actually about permissions/access (menu
+  // visibility, role permission matrix, expert export), not unrelated
+  // Settings writes (mail config, branding, dropdown lists, etc.)
+  const relevant = items.filter(it => {
+    const blob = ((it.newValues || '') + ' ' + (it.action || '')).toLowerCase();
+    return STG_PERM_HISTORY_KEYS.some(k => blob.includes(k.toLowerCase())) || it.entityName === 'Expertexport';
+  }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 25);
+
+  if (!relevant.length) {
+    host.innerHTML = '<div style="color:var(--text3);font-size:12.5px;text-align:center;padding:16px">No permission changes recorded yet. Changes made from this page will appear here.</div>';
+    return;
+  }
+
+  const kindLabel = (it) => {
+    const blob = (it.newValues || '').toLowerCase();
+    if (blob.includes('efin_menu_visibility'))  return { label: 'Menu Access Control', icon: '🗂', color: '#0ea5e9' };
+    if (blob.includes('efin_role_permissions')) return { label: 'Role Permissions',     icon: '🎛️', color: 'var(--accent)' };
+    if (it.entityName === 'Expertexport')          return { label: 'Expert Export Access', icon: '🧠', color: '#7c3aed' };
+    return { label: it.entityName || 'Settings', icon: '⚙️', color: '#64748b' };
+  };
+
+  host.innerHTML = relevant.map(it => {
+    const k = kindLabel(it);
+    const when = new Date(it.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+    return `
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-bottom:1px solid var(--border)">
+        <div style="width:30px;height:30px;border-radius:9px;background:${k.color}18;color:${k.color};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">${k.icon}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:700;color:var(--text)">${k.label} changed</div>
+          <div style="font-size:11.5px;color:var(--text3);margin-top:1px">by ${it.userName || 'Unknown user'} · ${when}</div>
+        </div>
+        <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(26,79,163,.08);color:var(--accent);flex-shrink:0">${it.action || 'Updated'}</span>
+      </div>`;
+  }).join('');
+}
+window.stgRenderPermissionHistory = stgRenderPermissionHistory;
 
 // ── Expert Export Permission panel ──────────────────────────────────────────
 // Backend roles are UserRole.Admin/Manager/Sales (the REAL authorization
@@ -34973,11 +35141,17 @@ const STG_EE_BACKEND_ROLES = ['Admin', 'Manager', 'Sales'];
 let _stgEeConfig = { roles: [], allUsers: [], userIds: [] };
 
 async function stgRenderExpertExport() {
-  var tok = null;
-  try { tok = localStorage.getItem('loanms_token'); } catch(e) {}
-  const headers = tok ? { 'Authorization': 'Bearer ' + tok } : {};
   try {
-    const res = await fetch('/api/expertexport/config', { headers });
+    // Shares the same centralized apiReqRaw() auth flow (Bearer token +
+    // 401 refresh/retry) as expertExportCheckAccess()/expertExportRun(),
+    // instead of a standalone raw fetch with a manually-read token.
+    const res = (typeof window.apiReqRaw === 'function')
+      ? await window.apiReqRaw('GET', '/expertexport/config')
+      : await (function() {
+          var tok = null;
+          try { tok = localStorage.getItem('loanms_token'); } catch(e) {}
+          return fetch('/api/expertexport/config', { headers: tok ? { 'Authorization': 'Bearer ' + tok } : {} });
+        })();
     if (res.ok) {
       const data = await res.json();
       _stgEeConfig = {
@@ -35024,13 +35198,18 @@ async function stgEeApply() {
   if (!roles.includes('Admin')) roles.push('Admin');
   const userIds = [...document.querySelectorAll('#stg-ee-users input[data-ee-user]:checked')].map(el => parseInt(el.dataset.eeUser, 10));
 
-  var tok = null;
-  try { tok = localStorage.getItem('loanms_token'); } catch(e) {}
-  const headers = { 'Content-Type': 'application/json' };
-  if (tok) headers['Authorization'] = 'Bearer ' + tok;
-
   try {
-    const res = await fetch('/api/expertexport/config', { method: 'POST', headers, body: JSON.stringify({ roles, userIds }) });
+    // Same centralized auth flow as the rest of Expert Export — attaches
+    // the Bearer token and transparently refreshes+retries once on a 401.
+    const res = (typeof window.apiReqRaw === 'function')
+      ? await window.apiReqRaw('POST', '/expertexport/config', { roles, userIds })
+      : await (function() {
+          var tok = null;
+          try { tok = localStorage.getItem('loanms_token'); } catch(e) {}
+          const headers = { 'Content-Type': 'application/json' };
+          if (tok) headers['Authorization'] = 'Bearer ' + tok;
+          return fetch('/api/expertexport/config', { method: 'POST', headers, body: JSON.stringify({ roles, userIds }) });
+        })();
     if (!res.ok) { showToast('Failed to save Expert Export permission', 'error'); return; }
     showToast('Expert Export permission saved ✓', 'success');
     const msg = document.getElementById('stg-ee-save-msg');
@@ -35047,17 +35226,7 @@ window.stgEeRenderUserList = stgEeRenderUserList;
 window.stgEeApply = stgEeApply;
 window.stgRenderExpertExport = stgRenderExpertExport;
 
-function stgDoApplyPerms() {
-  if (typeof applyMasterToggles === 'function') applyMasterToggles();
-  stgRenderAccessRights();
-  showToast('Permission changes applied ✓', 'success');
-}
 
-function stgDoResetPerms() {
-  if (typeof resetMasterToggles === 'function') resetMasterToggles();
-  stgRenderAccessRights();
-  showToast('Permissions reset to defaults ✓', 'info');
-}
 
 // ── Security groups (read-only reference) ──
 function stgRenderSecGroups() {
@@ -35154,6 +35323,7 @@ function stgMacToggle(itemId, role, el) {
 
 function stgMacApply() {
   applyMenuChanges();
+  if (typeof stgPushMenuVisibilityToServer === 'function') stgPushMenuVisibilityToServer();
   const msg = document.getElementById('stg-mac-save-msg');
   if (msg) { msg.style.display = ''; setTimeout(() => msg.style.display = 'none', 2500); }
 }
@@ -35161,12 +35331,11 @@ function stgMacApply() {
 function stgMacReset() {
   resetMenuToDefault();
   stgMacRender();
+  if (typeof stgPushMenuVisibilityToServer === 'function') stgPushMenuVisibilityToServer();
 }
 
 // Legacy wrappers kept for any remaining callers
 function stgRenderMenuAccessGrid() { stgMacRender(); }
-function stgApplyMenuChanges() { stgMacApply(); }
-function stgResetMenuDefaults() { stgMacReset(); }
 
 // ── Wire Settings page to showPage lifecycle ──
 (function () {
@@ -35231,16 +35400,10 @@ function stgCheckGmailReady() {
   const fields = {
     'stg-smtp-user':    'stgc-smtp-user',
     'stg-smtp-pass':    'stgc-smtp-pass',
-    'stg-ejs-service':  'stgc-ejs-service',
-    'stg-ejs-template': 'stgc-ejs-template',
-    'stg-ejs-pubkey':   'stgc-ejs-pubkey',
   };
   const labels = {
     'stg-smtp-user':    'Gmail address',
     'stg-smtp-pass':    'App Password',
-    'stg-ejs-service':  'Service ID',
-    'stg-ejs-template': 'Template ID',
-    'stg-ejs-pubkey':   'Public Key',
   };
   let allDone = true;
   Object.entries(fields).forEach(([inputId, chipId]) => {
@@ -35272,70 +35435,101 @@ function stgUpdateInvChip() {
   }
 }
 
-// ── Save Mail Config ──
-function stgSaveMailConfig() {
+// ── Read the current Settings-page form into a config object ──
+// (frontend keeps the 'gmail' provider name for the SMTP/Gmail card & folder;
+// it's translated to the backend's 'smtp' provider value when saving)
+function _stgReadMailFormCfg() {
   const provider = document.querySelector('input[name="stg-provider"]:checked')?.value || 'gmail';
-
-  const cfg = {
+  return {
     provider,
     fromEmail:   (document.getElementById('stg-from')?.value         || '').trim(),
     name:        (document.getElementById('stg-name')?.value         || '').trim(),
     cc:          (document.getElementById('stg-cc')?.value           || '').trim(),
     replyto:     (document.getElementById('stg-replyto')?.value      || '').trim(),
     signature:   (document.getElementById('stg-signature')?.value    || '').trim(),
-    // Gmail / EmailJS
+    // SMTP (Gmail or any other SMTP host) — sent server-side via MailKit
     smtpUser:    (document.getElementById('stg-smtp-user')?.value    || '').trim(),
     smtpPass:    (document.getElementById('stg-smtp-pass')?.value    || '').trim(),
-    ejsService:  (document.getElementById('stg-ejs-service')?.value  || '').trim(),
-    ejsTemplate: (document.getElementById('stg-ejs-template')?.value || '').trim(),
-    ejsPubKey:   (document.getElementById('stg-ejs-pubkey')?.value   || '').trim(),
-    // Brevo
+    // Brevo — sent server-side via HTTP API (key never touches the browser after save)
     apiKey:      (document.getElementById('stg-brevo-apikey')?.value || '').trim(),
     // Invitation
     invSubject:  (document.getElementById('stg-inv-subject')?.value  || '').trim(),
     invBody:     (document.getElementById('stg-inv-body')?.value     || ''),
     invEnabled:  document.getElementById('stg-inv-enabled')?.checked ?? true,
   };
+}
+
+// ── Save Mail Config — POSTs to the backend (single source of truth also
+//    read by EmailService); localStorage is kept only as a fast local cache
+//    so the form and the "is invitation enabled" pre-checks don't need a
+//    round-trip on every page load. ──
+async function stgSaveMailConfig() {
+  const cfg = _stgReadMailFormCfg();
 
   // Validation
   if (!cfg.fromEmail) { showToast('From Email Address is required', 'warn'); return; }
   if (!cfg.name)      { showToast('Sender Display Name is required', 'warn'); return; }
-  if (provider === 'gmail') {
-    if (!cfg.smtpUser)    { showToast('Gmail address is required', 'warn'); return; }
-    if (!cfg.smtpPass)    { showToast('Gmail App Password is required', 'warn'); return; }
-    if (!cfg.ejsService)  { showToast('EmailJS Service ID is required', 'warn'); return; }
-    if (!cfg.ejsTemplate) { showToast('EmailJS Template ID is required', 'warn'); return; }
-    if (!cfg.ejsPubKey)   { showToast('EmailJS Public Key is required', 'warn'); return; }
+  if (cfg.provider === 'gmail') {
+    if (!cfg.smtpUser) { showToast('Gmail address is required', 'warn'); return; }
+    if (!cfg.smtpPass) { showToast('Gmail App Password is required', 'warn'); return; }
   }
-  if (provider === 'brevo' && !cfg.apiKey) { showToast('Brevo API Key is required', 'warn'); return; }
+  if (cfg.provider === 'brevo' && !cfg.apiKey) { showToast('Brevo API Key is required', 'warn'); return; }
+
+  const token = (function () { try { return localStorage.getItem('loanms_token'); } catch (e) { return null; } })();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+
+  const payload = {
+    provider:   cfg.provider === 'gmail' ? 'smtp' : 'brevo',
+    fromEmail:  cfg.fromEmail,
+    name:       cfg.name,
+    cc:         cfg.cc,
+    replyTo:    cfg.replyto,
+    signature:  cfg.signature,
+    smtpHost:   'smtp.gmail.com',
+    smtpPort:   '587',
+    smtpUseSsl: false,
+    smtpUser:   cfg.smtpUser,
+    smtpPass:   cfg.smtpPass,
+    apiKey:     cfg.apiKey,
+    invEnabled: cfg.invEnabled,
+    invSubject: cfg.invSubject,
+    invBody:    cfg.invBody,
+  };
 
   try {
-    // Single source of truth: efin_system_email_config_v2 (consumed by the mail engine).
-    // STG_KEY retained only as a defensive mirror for older builds; can be dropped later.
-    localStorage.setItem(SYSMAIL_KEY,  JSON.stringify(cfg));
-    localStorage.setItem(STG_KEY,      JSON.stringify(cfg));
+    const res = await _mailFetch('/api/settings/email-config', { method: 'POST', headers, body: JSON.stringify(payload) });
+
+    if (res.status === 401) {
+      showToast('Your session has expired — please log in again.', 'error');
+      return;
+    }
+
+    let data = null; try { data = await res.json(); } catch (e) {}
+    if (!res.ok || !data || data.success !== true) {
+      const msg = (data && ((data.errors && data.errors[0]) || data.message)) || ('Save failed (HTTP ' + res.status + ')');
+      console.error('[EFIN Mail Config Save] failed:', msg, data);
+      showToast(msg, 'error');
+      return;
+    }
+
+    // Refresh local cache (used by mailGetConfig() for instant pre-flight checks
+    // like "is invitation email enabled" without waiting on a network round-trip).
+    try { localStorage.setItem(SYSMAIL_KEY, JSON.stringify(cfg)); localStorage.setItem(STG_KEY, JSON.stringify(cfg)); } catch (e) {}
 
     const banner = document.getElementById('stg-saved-banner');
     if (banner) { banner.style.display = 'flex'; setTimeout(() => banner.style.display = 'none', 4000); }
-    showToast('Settings saved ✓', 'success');
+    showToast('Settings saved ✓ — now live for every email EFIN sends', 'success');
     stgCheckGmailReady();
     stgUpdateInvChip();
-
-  } catch(e) { showToast('Save failed — localStorage may be full', 'error'); }
+  } catch (networkErr) {
+    console.error('[EFIN Mail Config Save] network/timeout error:', networkErr);
+    showToast(networkErr.message || 'Could not reach the server to save settings — check your connection.', 'error');
+  }
 }
 
 // ── Load settings into the Settings page form ──
-function stgLoadMailConfig() {
-  // Canonical store is SYSMAIL_KEY (read by the mail engine). Fall back to the
-  // legacy STG_KEY and migrate it forward so both stay in sync.
-  let cfg = {};
-  try {
-    const canonical = localStorage.getItem(SYSMAIL_KEY);
-    const legacy    = localStorage.getItem(STG_KEY);
-    cfg = JSON.parse(canonical || legacy || '{}');
-    if (!canonical && legacy) localStorage.setItem(SYSMAIL_KEY, legacy); // one-time migration
-  } catch(e) {}
-
+function _stgPaintMailForm(cfg) {
   const s  = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
   const cb = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val !== false; };
 
@@ -35346,9 +35540,6 @@ function stgLoadMailConfig() {
   s('stg-signature',    cfg.signature);
   s('stg-smtp-user',    cfg.smtpUser);
   s('stg-smtp-pass',    cfg.smtpPass);
-  s('stg-ejs-service',  cfg.ejsService);
-  s('stg-ejs-template', cfg.ejsTemplate);
-  s('stg-ejs-pubkey',   cfg.ejsPubKey);
   s('stg-brevo-apikey', cfg.apiKey);
   s('stg-inv-subject',  cfg.invSubject);
   s('stg-inv-body',     cfg.invBody);
@@ -35356,12 +35547,69 @@ function stgLoadMailConfig() {
 
   const provider = cfg.provider || 'gmail'; // default to Gmail for Santap Esco
   stgSelectProvider(provider);
-  document.getElementById('stg-provider-' + provider).checked = true;
+  const radio = document.getElementById('stg-provider-' + provider);
+  if (radio) radio.checked = true;
   stgCheckGmailReady();
   stgUpdateInvChip();
 }
 
+// Backend (DB, via Settings → Mail & Email) is now authoritative — it's the
+// exact same store EmailService reads to actually send mail, so what you see
+// here is guaranteed to be what's live. localStorage is only used to paint
+// the form instantly before the network call resolves, and as an offline
+// fallback if the request fails.
+async function stgLoadMailConfig() {
+  // 1) Instant paint from local cache (avoids a blank form flash)
+  let cachedCfg = {};
+  try {
+    const canonical = localStorage.getItem(SYSMAIL_KEY);
+    const legacy     = localStorage.getItem(STG_KEY);
+    cachedCfg = JSON.parse(canonical || legacy || '{}');
+    if (!canonical && legacy) localStorage.setItem(SYSMAIL_KEY, legacy);
+  } catch (e) {}
+  if (cachedCfg && cachedCfg.fromEmail) _stgPaintMailForm(cachedCfg);
+
+  // 2) Authoritative fetch from backend
+  try {
+    const token = (function () { try { return localStorage.getItem('loanms_token'); } catch (e) { return null; } })();
+    const headers = {};
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const res = await fetch('/api/settings/email-config', { headers });
+    const data = await res.json().catch(() => null);
+    const d = data && data.data;
+    if (res.ok && d && d.configured) {
+      const providerUi = (d.provider === 'brevo') ? 'brevo' : 'gmail';
+      const cfg = {
+        provider:   providerUi,
+        fromEmail:  d.fromEmail,
+        name:       d.name,
+        cc:         d.cc,
+        replyto:    d.replyTo,
+        signature:  d.signature,
+        smtpUser:   d.smtpUser,
+        // Secrets aren't returned in plaintext — show a masked placeholder so the
+        // Save validation passes without forcing a re-type; the backend keeps the
+        // real value unless this field is actually edited (see IsMasked() server-side).
+        smtpPass:   d.hasSmtpPass ? d.smtpPassMasked : '',
+        apiKey:     d.hasApiKey   ? d.apiKeyMasked   : '',
+        invSubject: d.invSubject,
+        invBody:    d.invBody,
+        invEnabled: d.invEnabled,
+      };
+      _stgPaintMailForm(cfg);
+      try { localStorage.setItem(SYSMAIL_KEY, JSON.stringify(cfg)); localStorage.setItem(STG_KEY, JSON.stringify(cfg)); } catch (e) {}
+    }
+  } catch (networkErr) {
+    // Offline / server unreachable — keep whatever the local cache already painted.
+    console.warn('[EFIN Mail Config] Could not reach server, using cached settings', networkErr);
+  }
+}
+
 // ── Test email from Settings page ──
+// Saves the current form to the backend (so we're testing the exact config
+// that will actually be used for every real email), then asks the server to
+// send a real test message through it. This replaces the old flow that hit
+// EmailJS/Brevo directly from the browser with an unsaved, temporary config.
 async function stgSendTestEmail() {
   const resultEl = document.getElementById('stg-test-result');
   const provider = document.querySelector('input[name="stg-provider"]:checked')?.value || 'gmail';
@@ -35369,62 +35617,53 @@ async function stgSendTestEmail() {
 
   if (!fromEmail) { showToast('Enter a From email address first', 'warn'); return; }
 
-  // Build a temporary config object from current form values (not yet saved)
-  const tempCfg = {
-    provider,
-    fromEmail,
-    name:        (document.getElementById('stg-name')?.value         || '').trim(),
-    cc:          (document.getElementById('stg-cc')?.value           || '').trim(),
-    replyto:     (document.getElementById('stg-replyto')?.value      || '').trim(),
-    smtpUser:    (document.getElementById('stg-smtp-user')?.value    || '').trim(),
-    smtpPass:    (document.getElementById('stg-smtp-pass')?.value    || '').trim(),
-    ejsService:  (document.getElementById('stg-ejs-service')?.value  || '').trim(),
-    ejsTemplate: (document.getElementById('stg-ejs-template')?.value || '').trim(),
-    ejsPubKey:   (document.getElementById('stg-ejs-pubkey')?.value   || '').trim(),
-    apiKey:      (document.getElementById('stg-brevo-apikey')?.value || '').trim(),
+  const setResult = (text, kind) => {
+    if (!resultEl) return;
+    const colors = {
+      info:    ['rgba(26,79,163,.06)',  'rgba(26,79,163,.18)',  'var(--accent)'],
+      success: ['rgba(26,115,64,.08)',  'rgba(26,115,64,.2)',   'var(--success)'],
+      error:   ['rgba(212,43,43,.06)',  'rgba(212,43,43,.2)',   'var(--danger)'],
+    }[kind] || ['rgba(26,79,163,.06)', 'rgba(26,79,163,.18)', 'var(--accent)'];
+    resultEl.style.cssText = `display:block;padding:10px 16px;border-radius:10px;font-size:12.5px;font-weight:600;background:${colors[0]};border:1px solid ${colors[1]};color:${colors[2]};width:100%;margin-top:8px`;
+    resultEl.textContent = text;
   };
 
-  if (provider === 'gmail' && (!tempCfg.ejsService || !tempCfg.ejsTemplate || !tempCfg.ejsPubKey)) {
-    showToast('Complete all EmailJS fields before testing', 'warn'); return;
-  }
-  if (provider === 'brevo' && !tempCfg.apiKey) {
-    showToast('Enter a Brevo API key before testing', 'warn'); return;
-  }
+  setResult('⏳ Saving configuration…', 'info');
 
-  if (resultEl) {
-    resultEl.style.cssText = 'display:block;padding:10px 16px;border-radius:10px;font-size:12.5px;font-weight:600;background:rgba(26,79,163,.06);border:1px solid rgba(26,79,163,.18);color:var(--accent);width:100%;margin-top:8px';
-    resultEl.textContent = '⏳ Sending test email via ' + (provider === 'gmail' ? 'Gmail (EmailJS)' : 'Brevo') + '…';
-  }
+  // 1) Save the form first — the test must reflect what will really be used.
+  await stgSaveMailConfig();
 
+  setResult('⏳ Sending test email via ' + (provider === 'gmail' ? 'Gmail (SMTP)' : 'Brevo') + '…', 'info');
+
+  // 2) Ask the backend to send a real test email through the saved config.
   try {
-    // Use tempCfg directly to test before save
-    const html = `<div style="font-family:Arial,sans-serif;padding:24px;max-width:480px"><div style="background:#1a4fa3;padding:18px;border-radius:10px 10px 0 0;text-align:center"><div style="color:#fff;font-size:22px;font-weight:900">EFIN</div></div><div style="background:#fff;padding:22px;border:1px solid #dde3f0;border-top:none;border-radius:0 0 10px 10px"><h2 style="color:#1a4fa3;margin:0 0 12px">✅ Gmail SMTP Test Successful!</h2><p style="color:#3a4d6e">Your <strong>${provider === 'gmail' ? 'Gmail SMTP via EmailJS' : 'Brevo API'}</strong> configuration is working correctly.</p><p style="color:#3a4d6e"><strong>From:</strong> ${fromEmail}</p><p style="color:#3a4d6e"><strong>Account:</strong> Santap Esco — EFIN</p><hr style="border:none;border-top:1px solid #dde3f0;margin:16px 0"><p style="color:#7a8aaa;font-size:11px">Sent by EFIN Settings · ${new Date().toLocaleString('en-IN')}</p></div></div>`;
+    const token = (function () { try { return localStorage.getItem('loanms_token'); } catch (e) { return null; } })();
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
 
-    if (provider === 'gmail') {
-      await _sendViaEmailJS({ to: fromEmail, toName: tempCfg.name || 'Admin', subject: 'EFIN — Gmail Test Email ✓', html, cfg: tempCfg });
-    } else {
-      await _sendViaBrevo({ to: fromEmail, toName: tempCfg.name || 'Admin', subject: 'EFIN — Brevo Test Email ✓', html, cfg: tempCfg });
+    const res = await _mailFetch('/api/settings/email-config/test', {
+      method: 'POST', headers, body: JSON.stringify({ toEmail: fromEmail }),
+    }, 20000); // 20s — gives the backend's 15s SMTP timeout room to report a real error first
+
+    if (res.status === 401) {
+      throw new Error('Your session has expired — please log in again and retry.');
     }
 
-    if (resultEl) {
-      resultEl.style.cssText = 'display:block;padding:10px 16px;border-radius:10px;font-size:12.5px;font-weight:600;background:rgba(26,115,64,.08);border:1px solid rgba(26,115,64,.2);color:var(--success);width:100%;margin-top:8px';
-      resultEl.textContent = '✅ Test email sent to ' + fromEmail + ' — check your inbox!';
+    let data = null; try { data = await res.json(); } catch (e) {}
+
+    if (!res.ok || !data || data.success !== true) {
+      const msg = (data && ((data.errors && data.errors[0]) || data.message)) || ('Test failed (HTTP ' + res.status + ')');
+      throw new Error(msg);
     }
+
+    setResult('✅ Test email sent to ' + fromEmail + ' — check your inbox (and spam folder)!', 'success');
     showToast('Test email sent ✓ — check ' + fromEmail, 'success');
-  } catch(err) {
-    const msg = err.message === 'NO_EJS_CONFIG' ? 'EmailJS credentials incomplete — check Service ID, Template ID and Public Key' :
-                err.message === 'NO_KEY'         ? 'Brevo API key not configured' :
-                err.message === 'NO_FROM'        ? 'From address missing' :
-                err.message.includes('EmailJS SDK') ? 'Could not load EmailJS — check your internet connection' :
-                err.message;
-    if (resultEl) {
-      resultEl.style.cssText = 'display:block;padding:10px 16px;border-radius:10px;font-size:12.5px;font-weight:600;background:rgba(212,43,43,.06);border:1px solid rgba(212,43,43,.2);color:var(--danger);width:100%;margin-top:8px';
-      resultEl.textContent = '✗ ' + msg;
-    }
-    showToast('Test failed: ' + msg, 'warn');
+  } catch (err) {
+    setResult('✗ ' + err.message, 'error');
+    showToast('Test failed: ' + err.message, 'warn');
     console.error('[EFIN Mail Test]', err);
   }
-  if (resultEl) setTimeout(() => resultEl.style.display = 'none', 12000);
+  if (resultEl) setTimeout(() => resultEl.style.display = 'none', 15000);
 }
 
 
@@ -36065,7 +36304,101 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     banks:        'efin_v22_banks',
     rptTargets:   'efin_v22_rpt_targets',
     ticketStore:  'efin_v22_ticket_store',
+    assignmentLog:'efin_v22_assignment_audit_log',
   };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  ENTERPRISE UPGRADE — server-backed sync for Roles & Permissions
+  // ═══════════════════════════════════════════════════════════════════════
+  //  Previously ROLES (Admin Master Control / Permission Matrix) and
+  //  roleMenuVisibility (Menu Access Control) were only ever written to
+  //  *this browser's* localStorage via persistSave(). That means a
+  //  permission change made by one admin was invisible to every other
+  //  admin, and was lost entirely if the browser's storage was cleared —
+  //  not acceptable for a production, multi-admin financial system.
+  //
+  //  These two settings are now also synced to the real database via the
+  //  existing generic Settings API (AppSettings table, already wired to
+  //  GET/POST /api/settings on the backend). localStorage is kept as an
+  //  instant-render / offline fallback — nothing about the existing
+  //  behaviour is removed, this is purely additive.
+  // ═══════════════════════════════════════════════════════════════════════
+  const STG_PERM_SETTINGS_KEY    = 'efin_role_permissions';
+  const STG_MENU_VIS_SETTINGS_KEY = 'efin_menu_visibility';
+
+  function _stgAuthHeaders(json) {
+    var tok = null;
+    try { tok = localStorage.getItem('loanms_token'); } catch (e) {}
+    var h = tok ? { 'Authorization': 'Bearer ' + tok } : {};
+    if (json) h['Content-Type'] = 'application/json';
+    return h;
+  }
+
+  // Pull the latest saved permission config from the server and merge it
+  // into the live in-memory ROLES / roleMenuVisibility objects. Safe to call
+  // repeatedly — falls back silently to whatever is already in memory
+  // (i.e. the localStorage-restored copy) if the server has nothing yet or
+  // is unreachable.
+  async function stgSyncPermissionsFromServer() {
+    try {
+      const res = await fetch('/api/settings/' + STG_PERM_SETTINGS_KEY, { headers: _stgAuthHeaders(false) });
+      if (res.ok) {
+        const body = await res.json();
+        const raw = body && body.data ? body.data.value : null;
+        if (raw) {
+          const saved = JSON.parse(raw);
+          Object.keys(saved).forEach(roleKey => {
+            if (ROLES[roleKey]) Object.assign(ROLES[roleKey], saved[roleKey]);
+          });
+        }
+      }
+    } catch (e) { console.warn('[perms] could not reach server for role permissions — using local copy', e); }
+
+    try {
+      const res2 = await fetch('/api/settings/' + STG_MENU_VIS_SETTINGS_KEY, { headers: _stgAuthHeaders(false) });
+      if (res2.ok) {
+        const body2 = await res2.json();
+        const raw2 = body2 && body2.data ? body2.data.value : null;
+        if (raw2) {
+          const savedVis = JSON.parse(raw2);
+          Object.keys(savedVis).forEach(itemId => {
+            roleMenuVisibility[itemId] = new Set(savedVis[itemId]);
+          });
+        }
+      }
+    } catch (e) { console.warn('[perms] could not reach server for menu visibility — using local copy', e); }
+  }
+
+  // Push the current in-memory ROLES config to the server so every admin —
+  // on any device — sees the same permission set. Fire-and-forget: if the
+  // network call fails, the change still stands locally via persistSave().
+  async function stgPushPermissionsToServer() {
+    try {
+      await fetch('/api/settings', {
+        method: 'POST', headers: _stgAuthHeaders(true),
+        body: JSON.stringify({ key: STG_PERM_SETTINGS_KEY, value: JSON.stringify(ROLES), category: 'Permissions' })
+      });
+    } catch (e) { console.warn('[perms] failed to sync role permissions to server (saved locally only)', e); }
+  }
+
+  // Push the current in-memory roleMenuVisibility (Sets) to the server as
+  // plain arrays, the same way.
+  async function stgPushMenuVisibilityToServer() {
+    try {
+      const plain = {};
+      Object.keys(roleMenuVisibility).forEach(itemId => {
+        plain[itemId] = Array.from(roleMenuVisibility[itemId]);
+      });
+      await fetch('/api/settings', {
+        method: 'POST', headers: _stgAuthHeaders(true),
+        body: JSON.stringify({ key: STG_MENU_VIS_SETTINGS_KEY, value: JSON.stringify(plain), category: 'Permissions' })
+      });
+    } catch (e) { console.warn('[perms] failed to sync menu visibility to server (saved locally only)', e); }
+  }
+
+  window.stgSyncPermissionsFromServer = stgSyncPermissionsFromServer;
+  window.stgPushPermissionsToServer   = stgPushPermissionsToServer;
+  window.stgPushMenuVisibilityToServer = stgPushMenuVisibilityToServer;
 
   function persistSave() {
     try {
@@ -36084,6 +36417,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       if (window.BANKS_STORE)   localStorage.setItem(STORE_KEYS.banks,        JSON.stringify(BANKS_STORE));
       if (window.RPT_TARGETS)   localStorage.setItem(STORE_KEYS.rptTargets,   JSON.stringify(RPT_TARGETS));
       if (window.TK_STORE)      localStorage.setItem(STORE_KEYS.ticketStore,  JSON.stringify(TK_STORE));
+      if (window.ASSIGNMENT_AUDIT_LOG) localStorage.setItem(STORE_KEYS.assignmentLog, JSON.stringify(ASSIGNMENT_AUDIT_LOG));
     } catch (e) {
       // Storage quota exceeded — attempt to save only critical data
       try {
@@ -36232,6 +36566,15 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         var idx = twLoginTeams.findIndex(function(t){ return t.id === saved.id; });
         if (idx >= 0) twLoginTeams[idx] = saved;
       });
+      loaded = true;
+    }
+
+    // Assignment Audit Log (append-only — merge by id, never drop history)
+    var savedAssignLog = safeJSON(_lsGet(STORE_KEYS.assignmentLog), null);
+    if (savedAssignLog && Array.isArray(savedAssignLog) && window.ASSIGNMENT_AUDIT_LOG) {
+      var assignIds = new Set(ASSIGNMENT_AUDIT_LOG.map(function(e){ return e.id; }));
+      savedAssignLog.filter(function(e){ return e && e.id && !assignIds.has(e.id); })
+        .forEach(function(e){ ASSIGNMENT_AUDIT_LOG.push(e); });
       loaded = true;
     }
 

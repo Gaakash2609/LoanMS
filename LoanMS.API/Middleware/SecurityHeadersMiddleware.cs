@@ -36,11 +36,11 @@ public class SecurityHeadersMiddleware
         // Replace with nonces or move scripts to external files and remove 'unsafe-inline' for full CSP benefit.
         headers["Content-Security-Policy"] =
             "default-src 'self'; " +
-            "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com https://cdn.emailjs.com https://cdn.jsdelivr.net; " +
+            "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
             "font-src 'self' https://fonts.gstatic.com; " +
             "img-src 'self' data: blob:; " +
-            "connect-src 'self' https://api.brevo.com https://api.emailjs.com https://api.cibil.com https://api.incred.com https://unpkg.com https://cdnjs.cloudflare.com https://generativelanguage.googleapis.com; " +
+            "connect-src 'self' https://api.cibil.com https://api.incred.com https://unpkg.com https://cdnjs.cloudflare.com https://generativelanguage.googleapis.com; " +
             "frame-src 'self'; " +
             "frame-ancestors 'self'; " +
             "form-action 'self';";

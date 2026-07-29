@@ -468,43 +468,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     window.toggleTopbarProfileDropdown = toggleTopbarProfileDropdown;
     window.doLogout = doLogout;
 
-    // ── KYC Proxy URL Settings UI (injected into Settings page) ──
-    function _renderKycProxySettingsCard() {
-      var container = document.getElementById('stg-kyc-proxy-container');
-      if (!container) return;
-      var curUrl = _loadKycProxyUrl();
-      container.innerHTML =
-        '<div class="stg-section-label" style="margin-top:0">KYC Vision Proxy (AWS Lambda)</div>' +
-        '<div style="font-size:12px;color:var(--text3);margin-bottom:10px;line-height:1.6">' +
-          'Enter your API Gateway endpoint URL for the KYC OCR Lambda proxy. ' +
-          'This keeps your Anthropic API key off the client. ' +
-          '<a href="https://docs.aws.amazon.com/lambda/" target="_blank" style="color:var(--accent)">AWS Lambda docs →</a>' +
-        '</div>' +
-        '<div style="display:flex;gap:8px;align-items:center">' +
-          '<input type="url" id="kyc-proxy-url-input" value="' + (curUrl || '') + '" ' +
-            'placeholder="https://xxxxxxxxxx.execute-api.ap-south-1.amazonaws.com/prod/kyc" ' +
-            'style="flex:1;padding:9px 12px;border:1.5px solid var(--border2);border-radius:var(--r-sm);' +
-            'font-size:12.5px;font-family:monospace;background:var(--surface2);color:var(--text);outline:none">' +
-          '<button onclick="_saveKycProxyUrlFromUI()" class="btn btn-primary btn-sm">Save</button>' +
-          '<button onclick="_clearKycProxyUrl()" class="btn btn-ghost btn-sm" style="color:var(--accent2)">Clear</button>' +
-        '</div>' +
-        (curUrl ? '<div style="margin-top:8px;font-size:11.5px;color:var(--success);font-weight:600">✅ Proxy configured: ' + curUrl.slice(0,60) + (curUrl.length > 60 ? '…' : '') + '</div>'
-                : '<div style="margin-top:8px;font-size:11.5px;color:var(--warn)">⚠ No proxy set — KYC OCR will use direct API key (local dev only)</div>');
-    }
-    function _saveKycProxyUrlFromUI() {
-      var val = (document.getElementById('kyc-proxy-url-input')?.value || '').trim();
-      _saveKycProxyUrl(val);
-      if (typeof showToast === 'function') showToast('KYC proxy URL ' + (val ? 'saved ✓' : 'cleared'), 'success');
-      _renderKycProxySettingsCard();
-    }
-    function _clearKycProxyUrl() {
-      _saveKycProxyUrl('');
-      var inp = document.getElementById('kyc-proxy-url-input');
-      if (inp) inp.value = '';
-      if (typeof showToast === 'function') showToast('KYC proxy URL cleared', 'info');
-      _renderKycProxySettingsCard();
-    }
-    window._renderKycProxySettingsCard = _renderKycProxySettingsCard;
-    window._saveKycProxyUrlFromUI     = _saveKycProxyUrlFromUI;
-    window._clearKycProxyUrl          = _clearKycProxyUrl;
+    // NOTE: The old "KYC Proxy URL (AWS Lambda)" settings card that used to live here
+    // has been removed — it referenced _loadKycProxyUrl()/_saveKycProxyUrl(), functions
+    // that no longer exist anywhere in the app. Because this file loads AFTER efin-app.js,
+    // its window._renderKycProxySettingsCard assignment was silently overwriting the
+    // current, working "AI Provider Keys" card (Gemini/OpenAI) defined in efin-app.js.
+    // Every time Settings opened, the browser called this dead version instead, which threw
+    // a ReferenceError on _loadKycProxyUrl() before it could touch the DOM — so the
+    // "Loading…" placeholder from index.html never got replaced. Removing this dead
+    // duplicate lets efin-app.js's real implementation run as intended.
 

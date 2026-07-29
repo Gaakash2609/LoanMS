@@ -19,10 +19,13 @@ public class TicketsController : BaseController
         var q = _db.Tickets.Include(t => t.CreatedBy).Include(t => t.AssignedTo).AsQueryable();
         if (!string.IsNullOrEmpty(status)) q = q.Where(t => t.Status == status);
 
-        // Scope: Sales, partner, and dsa_user see only their own tickets
+        // Scope: Sales, Dsa, and Partner see only their own tickets.
+        // Phase 3B fix: was comparing against "partner"/"dsa_user", which never
+        // matched the actual role claim ("Dsa"/"Partner"), so those two roles
+        // could see every ticket instead of just their own.
         if (CurrentUserRole == "Sales" ||
-            CurrentUserRole == "partner" ||
-            CurrentUserRole == "dsa_user")
+            CurrentUserRole == "Dsa" ||
+            CurrentUserRole == "Partner")
             q = q.Where(t => t.CreatedByUserId == CurrentUserId);
 
         var tickets = await q.OrderByDescending(t => t.CreatedAt)

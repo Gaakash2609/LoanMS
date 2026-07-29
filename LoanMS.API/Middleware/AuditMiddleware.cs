@@ -18,7 +18,13 @@ public class AuditMiddleware
         { "POST", "PUT", "PATCH", "DELETE" };
 
     private static readonly HashSet<string> _skipPaths = new(StringComparer.OrdinalIgnoreCase)
-        { "/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/swagger" };
+        { "/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/swagger",
+          // KYC vision uploads carry large base64 image payloads (up to 60MB).
+          // Buffering them here for audit runs BEFORE KycController's own
+          // [RequestSizeLimit] filter gets a chance to apply, which is what
+          // caused "IHttpRequestBodySizeFeature ... read-only" warnings — and
+          // there's no value in storing raw image bytes in the audit log anyway.
+          "/api/kyc/vision" };
 
     // JSON field names whose values must be masked in audit records
     private static readonly HashSet<string> _piiFields = new(StringComparer.OrdinalIgnoreCase)

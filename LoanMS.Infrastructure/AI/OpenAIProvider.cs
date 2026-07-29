@@ -15,7 +15,7 @@ namespace LoanMS.Infrastructure.AI;
 public class OpenAIProvider : IAIProvider
 {
     private readonly HttpClient              _http;
-    private readonly string?                 _apiKey;
+    private readonly IAiKeyStore             _keyStore;
     private readonly ILogger<OpenAIProvider> _logger;
     private const int MaxRetries = 2;
     private const string VisionModel = "gpt-4o-mini";
@@ -26,23 +26,27 @@ public class OpenAIProvider : IAIProvider
     // extraction pipeline Gemini serves — see FailoverAIProvider.
     public bool SupportsVision => true;
 
-    public OpenAIProvider(IHttpClientFactory httpFactory, IConfiguration config, ILogger<OpenAIProvider> logger)
+    public OpenAIProvider(IHttpClientFactory httpFactory, IAiKeyStore keyStore, ILogger<OpenAIProvider> logger)
     {
-        _http = httpFactory.CreateClient("ai");
-        // OpenAI needs its own real key — Gemini's AI:ApiKey is a different
-        // service/format entirely and would never authenticate against OpenAI's
-        // API, so it is intentionally NOT used as a fallback here (that would
-        // just turn a clean "OpenAI not configured" into a confusing 401).
-        _apiKey = config["AI:OpenAIApiKey"];
-        _logger = logger;
+        _http     = httpFactory.CreateClient("ai");
+        _keyStore = keyStore;
+        _logger   = logger;
     }
 
-    public Task<bool> IsAvailableAsync() => Task.FromResult(!string.IsNullOrEmpty(_apiKey));
+    // Resolves the Admin-saved key from the database first (Settings → AI
+    // Provider Keys), falling back to AI:OpenAIApiKey in appsettings/env —
+    // see AiKeyStore. Gemini's key is intentionally never used as a fallback
+    // here — different service/format, would just turn a clean
+    // "OpenAI not configured" into a confusing 401.
+    private Task<string?> GetApiKeyAsync() => _keyStore.GetKeyAsync("openai");
+
+    public async Task<bool> IsAvailableAsync() => !string.IsNullOrEmpty(await GetApiKeyAsync());
 
     public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, int maxTokens = 500)
     {
-        if (string.IsNullOrEmpty(_apiKey))
-            throw new InvalidOperationException("OpenAI API key not configured. Set AI:ApiKey.");
+        var apiKey = await GetApiKeyAsync();
+        if (string.IsNullOrEmpty(apiKey))
+            throw new InvalidOperationException("OpenAI API key not configured. Set AI:OpenAIApiKey.");
 
         for (int attempt = 0; attempt <= MaxRetries; attempt++)
         {
@@ -60,7 +64,7 @@ public class OpenAIProvider : IAIProvider
                 };
 
                 using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
                 req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
                 using var cts  = new CancellationTokenSource(TimeSpan.FromSeconds(25));
@@ -94,7 +98,8 @@ public class OpenAIProvider : IAIProvider
     public async Task<string> ExtractFromImagesAsync(
         IReadOnlyList<VisionImage> images, string prompt, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_apiKey))
+        var apiKey = await GetApiKeyAsync();
+        if (string.IsNullOrEmpty(apiKey))
             throw new InvalidOperationException("OpenAI API key not configured. Set AI:OpenAIApiKey.");
 
         var content = new List<object>();
@@ -125,7 +130,7 @@ public class OpenAIProvider : IAIProvider
                 {
                     Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
                 };
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cts.Token);
@@ -141,8 +146,13 @@ public class OpenAIProvider : IAIProvider
                 }
 
                 using var parsed = JsonDocument.Parse(json);
-                var text = parsed.RootElement
-                                  .GetProperty("choices")[0]
+                var choices = parsed.RootElement.GetProperty("choices");
+                if (choices.GetArrayLength() == 0)
+                {
+                    _logger.LogWarning("OpenAI vision returned no choices (possible content filter) body={Body}", json);
+                    throw new HttpRequestException("OpenAI returned no result for this image (it may have been filtered).", null, System.Net.HttpStatusCode.Forbidden);
+                }
+                var text = choices[0]
                                   .GetProperty("message")
                                   .GetProperty("content")
                                   .GetString() ?? string.Empty;

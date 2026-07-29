@@ -22,4 +22,22 @@ export const loansApi = {
 
   getDashboard: () =>
     api.get<ApiResponse<DashboardStats>>('/api/loans/dashboard'),
+
+  uploadDocument: (loanId: number, file: File, documentType: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('documentType', documentType)
+    return api.post<ApiResponse<{
+      id: number; documentName: string; documentType: string
+      fileRef: string; fileSizeBytes: number; uploadedAt: string
+    }>>(`/api/loans/${loanId}/documents`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
+  getDocuments: (loanId: number) =>
+    api.get<ApiResponse<Array<{
+      id: number; documentName: string; documentType: string
+      fileRef: string; fileSizeBytes: number; uploadedAt: string
+    }>>>(`/api/loans/${loanId}/documents`),
 }

@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/Button'
 import { StatusBadge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency, formatDate, formatDateTime } from '@/utils/format'
-import { ArrowLeft, User, Upload, Loader, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, User, Upload, Loader, CheckCircle2, Landmark, Zap } from 'lucide-react'
 import { useState } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import AIInsightPanel from '@/features/ai/AIInsightPanel'
 import { accountDetailsApi } from '@/api/accountDetailsApi'
 import { extractAccountDetails } from '@/utils/accountExtraction'
+import IncredTab from './IncredTab'
 
 const TRANSITIONS: Record<string, { label: string; variant: 'primary' | 'danger' | 'secondary' }[]> = {
   Draft:       [{ label: 'Submit', variant: 'primary' }, { label: 'Reject', variant: 'danger' }],
@@ -207,6 +208,40 @@ Extract exactly what is on the statement. Be accurate.`,
   )
 }
 
+function BankIncredTabs({ loanId }: { loanId: number }) {
+  const [tab, setTab] = useState<'bank' | 'incred'>('bank')
+
+  const tabs = [
+    { key: 'bank' as const, label: 'Bank Details', icon: Landmark },
+    { key: 'incred' as const, label: 'InCred', icon: Zap },
+  ]
+
+  return (
+    <div>
+      <div className="flex gap-6 border-b border-gray-200 mb-5">
+        {tabs.map(t => {
+          const Icon = t.icon
+          const active = tab === t.key
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-1.5 pb-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                active ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Icon size={15} className={active ? 'text-blue-600' : 'text-gray-400'} />
+              {t.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {tab === 'bank' ? <AccountDetailsCard /> : <IncredTab loanId={loanId} />}
+    </div>
+  )
+}
+
 export default function LoanDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -297,8 +332,8 @@ export default function LoanDetailPage() {
             </div>
           </Card>
 
-          {/* Account Details */}
-          <AccountDetailsCard />
+          {/* Bank Details / InCred */}
+          <BankIncredTabs loanId={loan.id} />
 
           {/* Status history */}
           <Card>

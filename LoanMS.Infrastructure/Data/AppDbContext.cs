@@ -13,6 +13,7 @@ public class AppDbContext : DbContext
     public DbSet<Loan>              Loans               => Set<Loan>();
     public DbSet<LoanDocument>      LoanDocuments       => Set<LoanDocument>();
     public DbSet<LoanStatusHistory> LoanStatusHistories => Set<LoanStatusHistory>();
+    public DbSet<LoanOffer>         LoanOffers          => Set<LoanOffer>();
     public DbSet<TrackingEntry>     TrackingEntries     => Set<TrackingEntry>();
     public DbSet<LoanTask>          Tasks               => Set<LoanTask>();
     public DbSet<Ticket>            Tickets             => Set<Ticket>();
@@ -62,6 +63,9 @@ public class AppDbContext : DbContext
             e.Property(c => c.PanNumber).HasMaxLength(10);
             e.Property(c => c.AadhaarNumber).HasMaxLength(12);
             e.Property(c => c.MonthlyIncome).HasColumnType("decimal(18,2)");
+            e.Property(c => c.Gender).HasMaxLength(1);
+            e.Property(c => c.FatherName).HasMaxLength(150);
+            e.Property(c => c.ResidenceType).HasMaxLength(40);
             e.HasQueryFilter(c => !c.IsDeleted);
         });
 
@@ -73,6 +77,9 @@ public class AppDbContext : DbContext
             e.HasIndex(l => new { l.Status, l.CreatedAt });
             e.HasIndex(l => l.CustomerId);
             e.HasIndex(l => l.CreatedByUserId);
+            e.HasIndex(l => l.DsaId);
+            e.HasIndex(l => l.PartnerId);
+            e.HasIndex(l => l.LocationId);
             e.Property(l => l.LoanNumber).HasMaxLength(20).IsRequired();
             e.Property(l => l.LoanType).HasConversion<string>();
             e.Property(l => l.Status).HasConversion<string>();
@@ -80,10 +87,30 @@ public class AppDbContext : DbContext
             e.Property(l => l.ApprovedAmount).HasColumnType("decimal(18,2)");
             e.Property(l => l.InterestRate).HasColumnType("decimal(5,2)").IsRequired();
             e.Property(l => l.MonthlyEmi).HasColumnType("decimal(18,2)");
+            e.Property(l => l.ApplicationSource).HasMaxLength(20);
+            e.Property(l => l.IncredApplicationId).HasMaxLength(100);
+            e.HasIndex(l => l.IncredApplicationId); // looked up on every inbound InCred webhook call
+            e.Property(l => l.IncredCustomerId).HasMaxLength(100);
+            e.Property(l => l.IncredRequestId).HasMaxLength(100);
+            e.Property(l => l.IncredOfferStatus).HasMaxLength(20);
             e.HasQueryFilter(l => !l.IsDeleted);
             e.HasOne(l => l.Customer).WithMany(c => c.Loans).HasForeignKey(l => l.CustomerId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(l => l.CreatedBy).WithMany(u => u.CreatedLoans).HasForeignKey(l => l.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(l => l.AssignedTo).WithMany(u => u.AssignedLoans).HasForeignKey(l => l.AssignedToUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(l => l.Dsa).WithMany().HasForeignKey(l => l.DsaId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(l => l.Partner).WithMany().HasForeignKey(l => l.PartnerId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(l => l.Location).WithMany().HasForeignKey(l => l.LocationId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        mb.Entity<LoanOffer>(e => {
+            e.HasKey(o => o.Id);
+            e.HasIndex(o => o.LoanId);
+            e.Property(o => o.OfferType).HasMaxLength(20);
+            e.Property(o => o.LoanAmount).HasColumnType("decimal(18,2)");
+            e.Property(o => o.LoanRate).HasColumnType("decimal(5,2)");
+            e.Property(o => o.ProcessingFee).HasColumnType("decimal(5,2)");
+            e.HasQueryFilter(o => !o.IsDeleted);
+            e.HasOne(o => o.Loan).WithMany(l => l.IncredOffers).HasForeignKey(o => o.LoanId).OnDelete(DeleteBehavior.Cascade);
         });
 
         mb.Entity<LoanStatusHistory>(e => {
@@ -160,8 +187,11 @@ public class AppDbContext : DbContext
             e.HasKey(d => d.Id);
             e.Property(d => d.Name).HasMaxLength(150).IsRequired();
             e.Property(d => d.Code).HasMaxLength(20).IsRequired();
+            e.Property(d => d.PartnerType).HasConversion<string>().HasMaxLength(20);
+            e.HasIndex(d => d.LinkedUserId);
             e.HasQueryFilter(d => !d.IsDeleted);
             e.HasOne(d => d.MappedSalesUser).WithMany().HasForeignKey(d => d.MappedSalesUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(d => d.LinkedUser).WithMany().HasForeignKey(d => d.LinkedUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
         });
 
         mb.Entity<AppSetting>(e => {

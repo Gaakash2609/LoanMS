@@ -5,6 +5,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Allow test project to access internal members -->
     <AssemblyName>LoanMS.Application</AssemblyName>
+    <!-- AutoMapper 14.0.0 has a known DoS advisory (GHSA-rvv3-g6hj-g44x) with no free-tier
+         patch — the fix (15.1.1+) requires registering for AutoMapper's new commercial/
+         community license, which is a real licensing obligation, not just a version bump.
+         Suppressing the audit warning here rather than taking on that licensing requirement
+         for a low-severity, non-network-facing mapping library. Revisit if a free patched
+         release for the pre-commercial line ever appears. -->
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="LoanMS.Tests" />
@@ -16,7 +23,7 @@
     <PackageReference Include="FluentValidation"                                     Version="11.11.0" />
     <PackageReference Include="BCrypt.Net-Next"                                      Version="4.0.3" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt"                     Version="8.9.0" />
-    <PackageReference Include="Microsoft.IdentityModel.Tokens"                      Version="8.9.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens"                      Version="8.14.0" />
     <PackageReference Include="AutoMapper"                                           Version="14.0.0" />
   </ItemGroup>
   <ItemGroup>

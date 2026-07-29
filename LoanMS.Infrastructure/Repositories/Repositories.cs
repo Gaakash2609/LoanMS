@@ -144,15 +144,83 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
 {
     public LoanRepository(AppDbContext ctx) : base(ctx) { }
 
-    public async Task<Loan?> GetWithDetailsAsync(int id) =>
-        await _set
+    public async Task<Loan?> GetWithDetailsAsync(int id, int? currentUserId = null, string? currentUserRole = null)
+    {
+        var query = _set
             .Include(l => l.Customer)
             .Include(l => l.CreatedBy)
             .Include(l => l.AssignedTo)
             .Include(l => l.StatusHistory.OrderByDescending(h => h.CreatedAt))
                 .ThenInclude(h => h.ChangedBy)
             .Include(l => l.Documents)
-            .FirstOrDefaultAsync(l => l.Id == id);
+            .AsQueryable();
+
+        // Phase 2B — same visibility scope as the list endpoint, applied here so
+        // that fetching a loan directly by id (e.g. by guessing/incrementing the
+        // loanId in the URL) is blocked for anyone outside the caller's scope.
+        // currentUserId is only null for internal callers (post-create/update
+        // refetch, AI service) that intentionally need the unrestricted record.
+        if (currentUserId.HasValue)
+            query = ApplyVisibilityScope(query, currentUserId.Value, currentUserRole);
+
+        return await query.FirstOrDefaultAsync(l => l.Id == id);
+    }
+
+    /// <summary>
+    /// Phase 2B — single source of truth for role-based Loan visibility.
+    /// Applied to every loan read surface: list, search/filter, dashboard/recent
+    /// loans, and detail-by-id. This is server-side query scoping — the frontend
+    /// never decides who can see what.
+    ///   Sales   -> own created loans + loans currently assigned to them
+    ///   Dsa     -> loans whose DsaId matches the DsaPartner record linked to this user
+    ///   Partner -> loans whose PartnerId matches the DsaPartner record linked to this user
+    ///   Manager -> loans at a Location the manager is the Team lead for (reuses
+    ///              the existing Team/Location relationship — no new model)
+    ///   Admin   -> unrestricted
+    ///   anything else / unrecognized role -> no loans visible
+    /// </summary>
+    private IQueryable<Loan> ApplyVisibilityScope(IQueryable<Loan> query, int currentUserId, string? currentUserRole)
+    {
+        var role = currentUserRole ?? string.Empty;
+
+        if (string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase))
+            return query;
+
+        if (string.Equals(role, "Sales", StringComparison.OrdinalIgnoreCase))
+            return query.Where(l => l.CreatedByUserId == currentUserId || l.AssignedToUserId == currentUserId);
+
+        if (string.Equals(role, "Dsa", StringComparison.OrdinalIgnoreCase))
+            // Never compare currentUserId directly to Loan.DsaId — DsaId is a
+            // DsaPartner record id, not a User id. Resolve via the linked user.
+            return query.Where(l => l.DsaId != null && l.Dsa != null && l.Dsa.LinkedUserId == currentUserId);
+
+        if (string.Equals(role, "Partner", StringComparison.OrdinalIgnoreCase))
+            // Same rule for Partner: never compare currentUserId directly to Loan.PartnerId.
+            return query.Where(l => l.PartnerId != null && l.Partner != null && l.Partner.LinkedUserId == currentUserId);
+
+        if (string.Equals(role, "Manager", StringComparison.OrdinalIgnoreCase))
+        {
+            var authorizedLocationIds = _ctx.Set<Team>()
+                .Where(t => t.TeamLeadUserId == currentUserId && t.LocationId != null)
+                .Select(t => t.LocationId!.Value);
+            return query.Where(l => l.LocationId != null && authorizedLocationIds.Contains(l.LocationId!.Value));
+        }
+
+        // Unrelated / unrecognized roles: no loan should be visible.
+        return query.Where(l => false);
+    }
+
+    /// <summary>
+    /// Phase 3A — "can this user act on this loan" check for Update/UpdateStatus/
+    /// Submit/Approve/Reject/Delete. Deliberately reuses ApplyVisibilityScope
+    /// (the same rule set that gates the list/detail endpoints) instead of a
+    /// second, separate authorization check — one rule set, one place to change it.
+    /// </summary>
+    public async Task<bool> HasAccessAsync(int loanId, int currentUserId, string? currentUserRole)
+    {
+        var query = ApplyVisibilityScope(_set.AsQueryable(), currentUserId, currentUserRole);
+        return await query.AnyAsync(l => l.Id == loanId);
+    }
 
     public async Task<PagedResultDto<LoanListDto>> GetPagedAsync(LoanFilterDto filter, int? currentUserId = null, string? currentUserRole = null)
     {
@@ -162,13 +230,9 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
             .Include(l => l.AssignedTo)
             .AsQueryable();
 
-        // Role-based scoping — enforced on the server, not the client
-        // Sales: own created/assigned loans only
-        if (currentUserRole == "Sales" && currentUserId.HasValue)
-            query = query.Where(l => l.CreatedByUserId == currentUserId || l.AssignedToUserId == currentUserId);
-        // Partner / DSA: own submitted applications only
-        else if ((currentUserRole == "partner" || currentUserRole == "dsa_user") && currentUserId.HasValue)
-            query = query.Where(l => l.CreatedByUserId == currentUserId);
+        // Role-based scoping — enforced on the server, not the client.
+        if (currentUserId.HasValue)
+            query = ApplyVisibilityScope(query, currentUserId.Value, currentUserRole);
 
         if (!string.IsNullOrEmpty(filter.Search))
         {
@@ -242,12 +306,13 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
 
     public async Task<DashboardStatsDto> GetDashboardStatsAsync(int? userId = null, string? role = null)
     {
-        // Use SQL aggregation instead of loading all loans into memory
+        // Use SQL aggregation instead of loading all loans into memory.
+        // Phase 2B — dashboard/recent-loans uses the same visibility scope as
+        // the list and detail endpoints, so a Sales/Dsa/Partner/Manager user
+        // never sees totals or "recent loans" that include loans outside their scope.
         var baseQuery = _set.AsQueryable();
-        if (role == "Sales" && userId.HasValue)
-            baseQuery = baseQuery.Where(l => l.CreatedByUserId == userId || l.AssignedToUserId == userId);
-        else if ((role == "partner" || role == "dsa_user") && userId.HasValue)
-            baseQuery = baseQuery.Where(l => l.CreatedByUserId == userId);
+        if (userId.HasValue)
+            baseQuery = ApplyVisibilityScope(baseQuery, userId.Value, role);
 
         // Single aggregation query — no ToListAsync() on full table
         var stats = await baseQuery.GroupBy(_ => 1).Select(g => new

@@ -151,6 +151,24 @@ public class KycController : BaseController
             _log.LogWarning(ex, "KYC vision FINAL RESULT: failed code={Code} totalMs={Ms} — MANUAL FALLBACK ACTIVATED", code, sw.ElapsedMilliseconds);
             return StatusCode(status, new KycVisionResponseDto { Success = false, Code = code, Error = msg, ProcessingTimeMs = sw.ElapsedMilliseconds });
         }
+        catch (InvalidOperationException ex)
+        {
+            // Thrown by GeminiAIProvider/OpenAIProvider when a key is missing/empty,
+            // and re-thrown by FailoverAIProvider once every provider in the chain
+            // has been tried and none had a usable key. ex.Message already says
+            // exactly which provider and why (e.g. "OpenAI API key not configured.") —
+            // surface that directly instead of the generic 500 below, so an admin can
+            // actually tell what to fix in Settings → KYC Vision.
+            sw.Stop();
+            _log.LogWarning(ex, "KYC vision FINAL RESULT: no usable provider ({Message}) totalMs={Ms} — MANUAL FALLBACK ACTIVATED", ex.Message, sw.ElapsedMilliseconds);
+            return Ok(new KycVisionResponseDto
+            {
+                Success = false,
+                Code = "NOT_CONFIGURED",
+                Error = ex.Message,
+                ProcessingTimeMs = sw.ElapsedMilliseconds
+            });
+        }
         catch (Exception ex)
         {
             sw.Stop();

@@ -61,9 +61,15 @@ public class AuthController : BaseController
     }
 
     /// <summary>Refresh — public (uses refresh token as credential), rate-limited.</summary>
+    // Uses its own "RefreshPolicy" (separate from "LoginPolicy") because this
+    // endpoint is called silently and automatically in the background by every
+    // open tab to renew an access token — it is not a deliberate sign-in
+    // attempt. Sharing the tight, brute-force-oriented login budget with this
+    // routine background traffic could exhaust it and make real logins fail
+    // with 429 even for a user who just typed in their correct password.
     [AllowAnonymous]
     [HttpPost("refresh")]
-    [EnableRateLimiting("LoginPolicy")]
+    [EnableRateLimiting("RefreshPolicy")]
     public async Task<IActionResult> Refresh([FromBody] RefreshTokenRequestDto request)
     {
         var result = await _auth.RefreshTokenAsync(request.RefreshToken);

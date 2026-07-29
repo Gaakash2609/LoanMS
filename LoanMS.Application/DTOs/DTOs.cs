@@ -43,6 +43,17 @@ public class UserDto
     public DateTime CreatedAt { get; set; }
 }
 
+// Minimal, non-sensitive projection of a user — safe for any authenticated
+// role to see (no email, no isActive/createdAt admin-management fields).
+// Used by the wizard's Sales Person dropdown so non-Admin roles don't need
+// access to the full Admin-only user management endpoint.
+public class UserLookupDto
+{
+    public int Id { get; set; }
+    public string FullName { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
+}
+
 public class CreateUserRequestDto
 {
     [Required] public string FullName { get; set; } = string.Empty;
@@ -85,6 +96,9 @@ public class CustomerDto
     public string? EmploymentType { get; set; }
     public string? CompanyName { get; set; }
     public int? CibilScore { get; set; }
+    public string? Gender { get; set; }
+    public string? FatherName { get; set; }
+    public string? ResidenceType { get; set; }
     public int TotalLoans { get; set; }
     public DateTime CreatedAt { get; set; }
 }
@@ -105,6 +119,10 @@ public class CreateCustomerRequestDto
     public string? EmploymentType { get; set; }
     public string? CompanyName { get; set; }
     public int? CibilScore { get; set; }
+    /// <summary>Stored as entered (Male/Female/Other) — converted to InCred's M/F format only when building the InCred payload.</summary>
+    public string? Gender { get; set; }
+    public string? FatherName { get; set; }
+    public string? ResidenceType { get; set; }
 }
 
 public class UpdateCustomerRequestDto : CreateCustomerRequestDto { }
@@ -270,6 +288,7 @@ public class WizardSubmitDto
     public string? Aadhar      { get; set; }
     public string? Dob         { get; set; }
     public string? Gender      { get; set; }
+    public string? FatherName  { get; set; }
     public int?   Cibil        { get; set; }
     public string? City        { get; set; }
     public string? State       { get; set; }
@@ -298,6 +317,13 @@ public class WizardSubmitDto
     public string? Channel     { get; set; }
     public string? LenderName  { get; set; }
     public string? EfinId      { get; set; }
+
+    // ── Phase 2A — Wizard mapping (DSA / Partner / Location) ──────────────
+    // Ids only. CreatedByUserId is NEVER taken from the request body — it is
+    // always derived server-side from the JWT (see BaseController.CurrentUserId).
+    public int? DsaId          { get; set; }
+    public int? PartnerId      { get; set; }
+    public int? LocationId     { get; set; }
 }
 
 public class WizardSubmitResponseDto

@@ -17,7 +17,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       url: '/api/kyc/vision',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + (sess.token || '')
+        'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '')
       }
     };
   }
@@ -820,7 +820,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       url: '/api/kyc/vision',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + (sess.token || '')
+        'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '')
       }
     };
   }
@@ -1684,9 +1684,10 @@ async function kycExtractAll() {
       if (panExtEl) {
         panExtEl.style.display = 'block';
         if (!document.getElementById('kyc-pan-error-msg')) {
+          var panErrDetail = (err && err.message && err.message !== 'KYC_API_NOT_CONFIGURED') ? (' (' + err.message + ')') : '';
           panExtEl.insertAdjacentHTML('beforeend',
             '<div id="kyc-pan-error-msg" style="color:#92400e;font-size:12px;padding:8px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;margin-top:8px">' +
-            '⚠️ Could not read PAN — please fill fields manually.</div>');
+            '⚠️ Could not read PAN — please fill fields manually.' + panErrDetail + '</div>');
         }
       }
     }
@@ -1728,9 +1729,10 @@ async function kycExtractAll() {
       if (aadharExtEl) {
         aadharExtEl.style.display = 'block';
         if (!document.getElementById('kyc-aadhar-error-msg')) {
+          var aadharErrDetail = (err && err.message && err.message !== 'KYC_API_NOT_CONFIGURED') ? (' (' + err.message + ')') : '';
           aadharExtEl.insertAdjacentHTML('beforeend',
             '<div id="kyc-aadhar-error-msg" style="color:#92400e;font-size:12px;padding:8px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;margin-top:8px">' +
-            '⚠️ Could not read Aadhaar — please fill fields manually.</div>');
+            '⚠️ Could not read Aadhaar — please fill fields manually.' + aadharErrDetail + '</div>');
         }
       }
       showToast('Aadhaar extraction failed — please fill manually', 'warn');

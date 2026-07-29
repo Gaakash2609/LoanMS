@@ -27,30 +27,52 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   function _refresh() { return _lsGet(LS_REFRESH); }
   function _clearAuth() { [LS_TOKEN, LS_REFRESH, LS_USER].forEach(function(k){ _lsRemove(k); }); }
 
-  /* ── Core API request with auto token refresh ── */
-  function apiReq(method, path, body) {
-    var headers = { 'Content-Type': 'application/json' };
+  /* ── Core API request with auto token refresh ──
+     apiReqRaw() is the SINGLE centralized implementation of the auth flow
+     (attach Bearer token → send → on 401 refresh once → retry once). It
+     returns the raw Response so callers needing something other than JSON
+     (e.g. Expert Export's CSV/blob download) can share this exact same
+     auth/refresh/retry path instead of hand-rolling their own with a plain
+     fetch(). apiReq() is kept as a thin JSON-parsing wrapper over it so all
+     existing callers keep working unchanged. There is intentionally only
+     ONE refresh implementation — nothing here starts a second, independent
+     refresh cycle. */
+  function apiReqRaw(method, path, body) {
+    var isForm = (typeof FormData !== 'undefined') && (body instanceof FormData);
+    var headers = isForm ? {} : { 'Content-Type': 'application/json' };
     var tok = _token();
     if (tok) headers['Authorization'] = 'Bearer ' + tok;
-    return fetch(BASE + path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined })
+    var fetchBody = isForm ? body : (body ? JSON.stringify(body) : undefined);
+
+    return fetch(BASE + path, { method: method, headers: headers, body: fetchBody })
       .then(function(res) {
-        if (res.status === 401) {
-          var rt = _refresh();
-          if (rt) {
-            return fetch(BASE + '/auth/refresh', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ refreshToken: rt }) })
-              .then(function(r2){ return r2.json(); })
-              .then(function(d2) {
-                if (d2.success) {
-                  _lsSet(LS_TOKEN, d2.data.accessToken);
-                  _lsSet(LS_REFRESH, d2.data.refreshToken);
-                  headers['Authorization'] = 'Bearer ' + d2.data.accessToken;
-                  return fetch(BASE + path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined }).then(function(r){ return r.json(); });
-                } else { _clearAuth(); return null; }
-              }).catch(function(){ _clearAuth(); return null; });
-          } else { _clearAuth(); return null; }
-        }
-        return res.json();
-      }).catch(function(e){ console.warn('[Bridge] API error:', path, e); return null; });
+        if (res.status !== 401) return res;
+        var rt = _refresh();
+        if (!rt) { _clearAuth(); return res; } // no refresh token — surface the 401 as-is, no loop
+        return fetch(BASE + '/auth/refresh', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ refreshToken: rt }) })
+          .then(function(r2){ return r2.json(); })
+          .then(function(d2) {
+            if (d2 && d2.success) {
+              _lsSet(LS_TOKEN, d2.data.accessToken);
+              _lsSet(LS_REFRESH, d2.data.refreshToken);
+              headers['Authorization'] = 'Bearer ' + d2.data.accessToken;
+              // Exactly one retry with the fresh token. Whatever this returns
+              // (even another 401) is handed back as-is — we never recurse
+              // back into the refresh branch again, so a bad/expired refresh
+              // token can never cause a repeated request loop.
+              return fetch(BASE + path, { method: method, headers: headers, body: fetchBody });
+            }
+            _clearAuth();
+            return res; // refresh rejected — surface the original 401, no loop
+          })
+          .catch(function(){ _clearAuth(); return res; });
+      });
+  }
+
+  function apiReq(method, path, body) {
+    return apiReqRaw(method, path, body)
+      .then(function(res){ return res.json(); })
+      .catch(function(e){ console.warn('[Bridge] API error:', path, e); return null; });
   }
 
   function _fmtDate(iso) {
@@ -471,6 +493,22 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   /* ══════════════════════════════════════════════════════════
      9. STATUS CHANGES → API (approve / reject / disburse / status)
   ══════════════════════════════════════════════════════════ */
+  /* Reports whether a backend-write attempt actually has a chance of
+     reaching the server. If the fallback (offline/local-only) login was
+     used, there is no real JWT — every write silently 401s. Surfacing
+     that up front means the user finds out immediately instead of the
+     UI quietly diverging from the database. */
+  function _isOfflineSession() {
+    return !_token();
+  }
+
+  function _statusActionLabel(newStatus) {
+    if (newStatus === 'approved')  return 'Approval';
+    if (newStatus === 'rejected')  return 'Rejection';
+    if (newStatus === 'disbursed') return 'Disbursement';
+    return 'Status change';
+  }
+
   function _patchStatusChange() {
     if (window._bridgeStatusPatched) return;
     window._bridgeStatusPatched = true;
@@ -479,11 +517,36 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     window.confirmStatusChange = function(id, newStatus) {
       var app = (window.APPLICATIONS||[]).find(function(a){ return a.id===id; });
       if (app && app._apiId) {
-        var apiStatus = STATUS_REV[newStatus];
-        if (newStatus==='approved')     apiReq('PATCH','/loans/'+app._apiId+'/approve',{approvedAmount:app.amount,comment:'Approved via EFIN'}).catch(function(){});
-        else if (newStatus==='rejected') apiReq('PATCH','/loans/'+app._apiId+'/reject',{reason:'Rejected via EFIN'}).catch(function(){});
-        else if (newStatus==='disbursed') apiReq('PATCH','/loans/'+app._apiId+'/disburse').catch(function(){});
-        else if (apiStatus)              apiReq('PATCH','/loans/'+app._apiId+'/status',{newStatus:apiStatus,comment:apiStatus+' via EFIN'}).catch(function(){});
+        var label = _statusActionLabel(newStatus);
+
+        if (_isOfflineSession()) {
+          // No real session token (e.g. logged in via offline fallback while
+          // the backend was unreachable) — a write call cannot succeed. Warn
+          // clearly instead of pretending it was saved.
+          _wizardToast('⚠ ' + label + ' NOT saved — you are in offline mode (no server session). Please sign in again once the server is reachable.', 'warn');
+        } else {
+          var apiStatus = STATUS_REV[newStatus];
+          var req;
+          if (newStatus==='approved')       req = apiReq('PATCH','/loans/'+app._apiId+'/approve',{approvedAmount:app.amount,comment:'Approved via EFIN'});
+          else if (newStatus==='rejected')  req = apiReq('PATCH','/loans/'+app._apiId+'/reject',{reason:'Rejected via EFIN'});
+          else if (newStatus==='disbursed') req = apiReq('PATCH','/loans/'+app._apiId+'/disburse');
+          else if (apiStatus)               req = apiReq('PATCH','/loans/'+app._apiId+'/status',{newStatus:apiStatus,comment:apiStatus+' via EFIN'});
+
+          if (req) {
+            req.then(function(r) {
+              if (!r || r.success === false) {
+                var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+                app._dbSyncFailed  = true;
+                app._dbSyncMessage = msg;
+                console.warn('[Bridge] ' + label + ' NOT saved to database:', msg);
+                _wizardToast('⚠ ' + label + ' NOT saved to database: ' + msg, 'warn');
+              } else {
+                app._dbSyncFailed  = false;
+                app._dbSyncMessage = '';
+              }
+            });
+          }
+        }
       }
       return _orig.apply(this, arguments);
     };
@@ -560,18 +623,23 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         if (typeof window.renderBanksTable==='function') window.renderBanksTable();
         if (typeof window.updateNotifBadge==='function') window.updateNotifBadge();
         if (typeof window.updateTasksNavBadge==='function') window.updateTasksNavBadge();
+        // No real JWT was issued by this login (backend unreachable), so
+        // every subsequent create/approve/reject/disburse call will fail to
+        // persist. Tell the user plainly rather than showing a normal
+        // "Welcome back" success toast that hides this.
+        var offlineWarning = function(){
+          if (typeof window.showToast==='function') {
+            window.showToast('⚠ Signed in offline — server unreachable. Changes made now will NOT be saved until you sign in again with the server online.', 'warn');
+          }
+        };
         if (typeof window.animateLoginOut==='function') {
           window.animateLoginOut(function() {
             var ls2 = document.getElementById('login-screen');
             if (ls2) ls2.style.display='none';
-            setTimeout(function(){
-              if (typeof window.showToast==='function') window.showToast('Welcome back, '+name+'! 👋','success');
-            }, 200);
+            setTimeout(offlineWarning, 200);
           });
         } else {
-          setTimeout(function(){
-            if (typeof window.showToast==='function') window.showToast('Welcome back, '+name+'! 👋','success');
-          }, 200);
+          setTimeout(offlineWarning, 200);
         }
         if (btn) { btn.disabled=false; btn.textContent='Sign In →'; }
       });
@@ -667,6 +735,27 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     if (tok && sess) {
       apiReq('GET', '/auth/me').then(function(r) {
         if (r && r.success) {
+          // ── Repopulate currentUser + refresh profile UI on session restore ──
+          // Previously this branch only re-synced data lists and never set
+          // window.currentUser or called applySession()/updateGreeting(), so
+          // after a page refresh (as opposed to a fresh login) the topbar
+          // avatar, profile dropdown name, and dashboard greeting stayed on
+          // their static HTML placeholders ("User Name" / default "AG" / a
+          // hardcoded "Admin" greeting fallback) even though the session was
+          // perfectly valid. /auth/me only returns Id/Email/Role (no display
+          // name), so the display name comes from the locally stored
+          // efin_session (saved at login time); role/email are refreshed
+          // from the server response since those are the authoritative copy.
+          try {
+            var s = JSON.parse(sess);
+            var efinRole = ROLE_MAP[r.data.role] || s.role || 'sales_executive';
+            var email    = (r.data.email || s.email || '').toLowerCase();
+            window.currentUser = { name: s.name || 'Admin', role: efinRole, email: email };
+            if (typeof window.applySession === 'function') window.applySession();
+            if (typeof window.updateGreeting === 'function') window.updateGreeting();
+          } catch (e) {
+            console.warn('[Bridge] Session-restore UI refresh failed:', e);
+          }
           setTimeout(function() {
             _syncLoans();
             _syncUsers();
@@ -686,7 +775,167 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
   /* ══════════════════════════════════════════════════════════
      WIZARD SUBMIT → API (saves to DB, not just localStorage)
+
+     Reliability notes (see fix history):
+     - The exact application created by THIS submit call is captured
+       synchronously (by diffing APPLICATIONS before/after the original
+       submitWizard() call), never by blindly reading APPLICATIONS[0]
+       later. This removes the dependency on array position and makes
+       the 500ms async delay before the network call harmless, since we
+       already hold a direct object reference by then.
+     - Each captured application gets a one-time in-memory sync token
+       (_bridgeSyncToken) and an in-flight guard (_bridgeSyncInFlight)
+       so a given application can never be POSTed twice concurrently.
+     - Transient failures (network errors / no response) are retried
+       with backoff up to WIZARD_MAX_ATTEMPTS; definitive backend
+       failures (validation errors, "already submitted", etc.) are
+       NOT retried since retrying identical data cannot succeed.
+     - "Success" is only ever reported to the user once the backend
+       has confirmed persistence (r.success === true). A transient or
+       exhausted-retry failure is always surfaced as "pending sync" /
+       "not saved to server" — never silently swallowed, never shown
+       as a false success.
   ══════════════════════════════════════════════════════════ */
+  var WIZARD_MAX_ATTEMPTS  = 4;                    // 1 initial attempt + 3 retries
+  var WIZARD_RETRY_DELAYS  = [3000, 8000, 20000];  // backoff (ms) before retries 1,2,3
+
+  function _wizardToast(msg, type) {
+    if (typeof window.showToast === 'function') {
+      try { window.showToast(msg, type); } catch(e) {}
+    }
+  }
+
+  function _buildWizardPayload(app) {
+    return {
+      // If a prior attempt for THIS submission already got a loanId back
+      // from the server (see _apiId below), resend it so the backend's
+      // existing "resume by LoanId" path is used instead of creating a
+      // second loan. On a brand-new application this is undefined/omitted.
+      loanId:      app._apiId || undefined,
+      fullName:    app.name  || '',
+      mobile:      app.mobile || '',
+      email:       app.email  || '',
+      pan:         app.pan    || '',
+      aadhar:      app.aadhar || '',
+      dob:         app.dob    || '',
+      gender:      app.gender || '',
+      cibil:       app.cibil  || 0,
+      city:        app.city   || '',
+      state:       app.state  || '',
+      street1:     app.street1 || '',
+      zip:         app.zip    || '',
+      homeType:    app.homeType || '',
+      empType:     app.empType || 'SALARIED',
+      compName:    app.compName || '',
+      compType:    app.compType || '',
+      salary:      app.salary  || 0,
+      desig:       app.desig   || '',
+      officeEmail: app.officeEmail || '',
+      loanType:    app.loanType || 'personal_loan',
+      amount:      app.amount  || 0,
+      loanRate:    app.loanRate || 12,
+      tenure:      parseInt(app.tenure) || 24,
+      purpose:     app.purpose || '',
+      r1Name:      app.r1name  || '',
+      r1Mobile:    app.r1no    || '',
+      r1Relation:  app.r1rel   || '',
+      r2Name:      app.r2name  || '',
+      r2Mobile:    app.r2no    || '',
+      r2Relation:  app.r2rel   || '',
+      salesPerson: app.sales   || '',
+      source:      app.source  || 'Direct',
+      channel:     app.channel || 'walk-in',
+      lenderName:  app.bank    || '',
+      efinId:      app.id      || ''
+    };
+  }
+
+  /* Marks the application's backend-sync state. Kept as plain fields on
+     the app object (distinct from the business `status` field) so any
+     UI can read them without us touching rendering code. */
+  function _setWizardSyncState(app, state, message) {
+    app._dbSyncPending = (state === 'pending');
+    app._dbSynced       = (state === 'synced');
+    app._dbSyncFailed   = (state === 'failed');
+    app._dbSyncMessage  = message || '';
+  }
+
+  function _attemptWizardBackendSubmit(app, token, attempt) {
+    // Guard: a different code path already finished this exact submission.
+    if (app._bridgeSyncToken !== token) return;
+    if (app._dbSynced) return;
+
+    var payload = _buildWizardPayload(app);
+
+    apiReq('POST', '/wizard/submit', payload).then(function(r) {
+      // If something else already completed this token in the meantime
+      // (shouldn't happen given the in-flight guard, but stay defensive).
+      if (app._bridgeSyncToken !== token) return;
+
+      if (r && r.success) {
+        // ── Confirmed backend persistence ──
+        app._apiId     = r.data.loanId;
+        app.id         = r.data.loanNumber || ('EFIN' + String(r.data.loanId).padStart(6, '0'));
+        app.loanNumber = r.data.loanNumber;
+        app.monthlyEmi = r.data.monthlyEmi;
+        app._bridgeSyncInFlight = false;
+        _setWizardSyncState(app, 'synced');
+        _wizardToast('Application ' + r.data.loanNumber + ' saved to database ✓', 'success');
+        if (typeof window.persistSave === 'function') window.persistSave();
+        setTimeout(_syncLoans, 1000);
+        return;
+      }
+
+      if (r && r.success === false) {
+        // Definitive backend response. A message telling us this exact
+        // loan was already submitted means an earlier attempt actually
+        // succeeded server-side (we just never saw that response) — that
+        // is a success, not a failure, so don't report it as one.
+        var msg = (r.message || (r.errors && r.errors.join(' ')) || 'Backend rejected the application.');
+        if (app._apiId && /already been submitted|already submitted/i.test(msg)) {
+          app._bridgeSyncInFlight = false;
+          _setWizardSyncState(app, 'synced');
+          _wizardToast('Application already saved to database ✓', 'success');
+          if (typeof window.persistSave === 'function') window.persistSave();
+          setTimeout(_syncLoans, 1000);
+          return;
+        }
+        // Real validation/business failure — retrying identical data
+        // cannot succeed, so stop here instead of looping.
+        app._bridgeSyncInFlight = false;
+        _setWizardSyncState(app, 'failed', msg);
+        console.warn('[Bridge] Wizard DB save rejected:', msg);
+        _wizardToast('⚠ Application NOT saved to database: ' + msg, 'warn');
+        return;
+      }
+
+      // ── r === null: transport/network failure — unknown server state ──
+      if (attempt < WIZARD_MAX_ATTEMPTS) {
+        _setWizardSyncState(app, 'pending', 'Retrying backend sync (attempt ' + (attempt + 1) + ' of ' + WIZARD_MAX_ATTEMPTS + ')…');
+        var delay = WIZARD_RETRY_DELAYS[Math.min(attempt - 1, WIZARD_RETRY_DELAYS.length - 1)];
+        setTimeout(function () {
+          _attemptWizardBackendSubmit(app, token, attempt + 1);
+        }, delay);
+      } else {
+        app._bridgeSyncInFlight = false;
+        _setWizardSyncState(app, 'failed', 'Could not reach the server after multiple attempts.');
+        console.warn('[Bridge] Wizard DB save failed after ' + WIZARD_MAX_ATTEMPTS + ' attempts:', app.id);
+        _wizardToast('⚠ Application saved locally only — backend sync failed after retries. It will remain marked as pending until sync succeeds.', 'warn');
+      }
+    });
+  }
+
+  /* Allows a manual, safe re-trigger of the sync for an application that
+     ended up in a failed/pending state (e.g. wired to a "Retry sync" UI
+     action in the future). Re-uses the same in-flight guard so it can
+     never race with an attempt already underway. */
+  window._bridgeRetryWizardSync = function(app) {
+    if (!app || app._bridgeSyncInFlight || app._dbSynced) return;
+    app._bridgeSyncInFlight = true;
+    _setWizardSyncState(app, 'pending', 'Retrying backend sync…');
+    _attemptWizardBackendSubmit(app, app._bridgeSyncToken, 1);
+  };
+
   function _patchWizardSubmit() {
     if (window._bridgeWizardPatched) return;
     window._bridgeWizardPatched = true;
@@ -694,75 +943,54 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     if (typeof _origSubmit !== 'function') return;
 
     window.submitWizard = function() {
-      // Run original first (UI + localStorage as fallback)
+      // Snapshot identities present BEFORE the original submit runs, so we
+      // can tell exactly which application (if any) it created — instead
+      // of assuming it always lands at APPLICATIONS[0].
+      var beforeIds = (window.APPLICATIONS || []).map(function(a) { return a && a.id; });
+
+      // Run original first (UI + localStorage as fallback). This call is
+      // synchronous up to and including the APPLICATIONS.unshift(newApp),
+      // so the moment it returns we can safely read the array.
       var result = _origSubmit.apply(this, arguments);
 
-      // Then async save to DB
-      setTimeout(function() {
-        try {
-          var app = window.APPLICATIONS && window.APPLICATIONS[0];
-          if (!app || String(app.id).startsWith('API')) return; // already API app
+      try {
+        var apps = window.APPLICATIONS;
+        var app = apps && apps[0];
 
-          var payload = {
-            fullName:    app.name  || '',
-            mobile:      app.mobile || '',
-            email:       app.email  || '',
-            pan:         app.pan    || '',
-            aadhar:      app.aadhar || '',
-            dob:         app.dob    || '',
-            gender:      app.gender || '',
-            cibil:       app.cibil  || 0,
-            city:        app.city   || '',
-            state:       app.state  || '',
-            street1:     app.street1 || '',
-            zip:         app.zip    || '',
-            homeType:    app.homeType || '',
-            empType:     app.empType || 'SALARIED',
-            compName:    app.compName || '',
-            compType:    app.compType || '',
-            salary:      app.salary  || 0,
-            desig:       app.desig   || '',
-            officeEmail: app.officeEmail || '',
-            loanType:    app.loanType || 'personal_loan',
-            amount:      app.amount  || 0,
-            loanRate:    app.loanRate || 12,
-            tenure:      parseInt(app.tenure) || 24,
-            purpose:     app.purpose || '',
-            r1Name:      app.r1name  || '',
-            r1Mobile:    app.r1no    || '',
-            r1Relation:  app.r1rel   || '',
-            r2Name:      app.r2name  || '',
-            r2Mobile:    app.r2no    || '',
-            r2Relation:  app.r2rel   || '',
-            salesPerson: app.sales   || '',
-            source:      app.source  || 'Direct',
-            channel:     app.channel || 'walk-in',
-            lenderName:  app.bank    || '',
-            efinId:      app.id      || ''
-          };
+        // Nothing new was created (e.g. client-side validation blocked
+        // the submit) — the first item is unchanged from before the call.
+        // Do NOT treat a pre-existing application as "just submitted".
+        if (!app || beforeIds.indexOf(app.id) !== -1) return result;
 
-          apiReq('POST', '/wizard/submit', payload).then(function(r) {
-            if (r && r.success) {
-              // Update the local app with the API ID so future operations use API
-              app._apiId    = r.data.loanId;
-              app.id        = r.data.loanNumber || ('EFIN' + String(r.data.loanId).padStart(6,'0'));
-              app.loanNumber= r.data.loanNumber;
-              app.monthlyEmi= r.data.monthlyEmi;
-              if (typeof window.showToast === 'function')
-                window.showToast('Application ' + r.data.loanNumber + ' saved to database ✓', 'success');
-              if (typeof window.persistSave === 'function') window.persistSave();
-              // Refresh to get DB state
-              setTimeout(_syncLoans, 1000);
-            } else {
-              console.warn('[Bridge] Wizard DB save failed:', r);
-              if (typeof window.showToast === 'function')
-                window.showToast('⚠ Application saved locally only. DB sync pending.', 'warn');
-            }
-          });
-        } catch(e) {
-          console.error('[Bridge] Wizard API submit error:', e);
-        }
-      }, 500);
+        // Already a backend-persisted application (defensive check —
+        // covers both the historical 'API...' id convention and the
+        // _apiId flag this bridge itself sets after a successful sync).
+        if (app._apiId || String(app.id).indexOf('API') === 0) return result;
+
+        // Assign a one-time token identifying *this* submit operation so
+        // retries/guards always refer to the exact same application,
+        // never to "whatever is currently at index 0".
+        var token = app.id + '_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        app._bridgeSyncToken    = token;
+        app._bridgeSyncInFlight = true;
+        _setWizardSyncState(app, 'pending', 'Saving to database…');
+
+        // Fire the actual network submit slightly after the original
+        // handler settles (preserves prior timing behavior), using the
+        // captured object reference directly — no re-lookup by index, so
+        // the delay can never cause the wrong application to be selected.
+        setTimeout(function() {
+          try {
+            _attemptWizardBackendSubmit(app, token, 1);
+          } catch (e) {
+            app._bridgeSyncInFlight = false;
+            _setWizardSyncState(app, 'failed', 'Unexpected error while syncing.');
+            console.error('[Bridge] Wizard API submit error:', e);
+          }
+        }, 500);
+      } catch (e) {
+        console.error('[Bridge] Wizard API submit setup error:', e);
+      }
 
       return result;
     };
@@ -958,10 +1186,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   }
 
   /* DSA commission auto-calculate on disburse */
-  function _patchDisbursePayout() {
-    if (window._bridgeDisbursePayPatched) return;
-    window._bridgeDisbursePayPatched = true;
-  }
 
 
   // Expose sync functions for manual refresh
@@ -972,6 +1196,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   window._apiSyncTasks  = _syncTasks;
   window._apiSyncTickets = _syncTickets;
   window.apiReq = apiReq;
+  window.apiReqRaw = apiReqRaw;
 
   console.info('[LoanMS Bridge v6] Ready — API-backed workflows: Loans, Users, Teams, Locations, Tasks, Tickets, Reports, Status Changes, Password Change');
 })();
@@ -1022,35 +1247,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           window.showToast('Document uploaded to server ✓', 'success');
       }).catch(function(e) { console.warn('[Bridge] doc upload:', e); });
   };
-
-  /* Session expiry warning — shows banner 5 mins before JWT expires */
-  (function _sessionExpiryWatcher() {
-    setInterval(function() {
-      var tok = _lsGet('loanms_token');
-      if (!tok) return;
-      try {
-        var payload = JSON.parse(atob(tok.split('.')[1]));
-        var expiresIn = (payload.exp * 1000) - Date.now();
-        var banner = document.getElementById('_session-expiry-banner');
-        if (expiresIn < 5 * 60 * 1000 && expiresIn > 0) {
-          if (!banner) {
-            banner = document.createElement('div');
-            banner.id = '_session-expiry-banner';
-            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#f59e0b;color:#fff;padding:10px 20px;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;';
-            banner.innerHTML = '<span>⚠️ Your session expires in <span id="_ses-timer"></span>. Save your work.</span>' +
-              '<button onclick="window._apiSyncAll&&_apiSyncAll();this.parentNode.remove();" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 12px;border-radius:6px;cursor:pointer;font-weight:600;">Refresh Session</button>';
-            document.body.prepend(banner);
-          }
-          var mins = Math.max(0, Math.floor(expiresIn / 60000));
-          var secs = Math.max(0, Math.floor((expiresIn % 60000) / 1000));
-          var t = document.getElementById('_ses-timer');
-          if (t) t.textContent = mins + 'm ' + secs + 's';
-        } else if (banner) {
-          banner.remove();
-        }
-      } catch(e) {}
-    }, 10000);
-  })();
 
   /* Smart polling — sync data every 60s when tab is visible */
   (function _smartPoller() {
