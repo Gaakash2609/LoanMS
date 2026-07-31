@@ -1,5 +1,6 @@
 using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 #nullable disable
 
@@ -12,6 +13,12 @@ namespace LoanMS.Infrastructure.Migrations
     /// Safe to apply on an existing production database.
     /// </summary>
     /// <inheritdoc />
+    // PHASE 6 FIX: this migration was missing the [DbContext]/[Migration]
+    // attributes that dotnet-ef normally generates (see PHASE6 report for
+    // why this matters — without them EF Core cannot register/order this
+    // migration for AppDbContext at runtime).
+    [DbContext(typeof(LoanMS.Infrastructure.Data.AppDbContext))]
+    [Migration("20260728000000_AddDsaPartnerPhase1")]
     public partial class AddDsaPartnerPhase1 : Migration
     {
         /// <inheritdoc />

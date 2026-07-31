@@ -30,8 +30,16 @@ export const useAuthStore = create<AuthState>()(
         set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false }),
     }),
     {
+      // IMPORTANT: must be localStorage, not sessionStorage.
+      // sessionStorage is cleared the moment the browser tab/window is closed,
+      // which silently discarded the (correctly 7-day-lived, per Jwt:RefreshExpiryDays)
+      // refreshToken on every "browser close/reopen" — the user was bounced back
+      // to a logged-out/empty screen and it *looked* like "all data disappeared",
+      // even though nothing was ever deleted server-side. localStorage persists
+      // across tab/browser restarts (still per-origin, still cleared on logout()),
+      // matching the backend's actual session lifetime intent.
       name: 'efin_auth',
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         user: state.user,
         accessToken: state.accessToken,

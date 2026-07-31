@@ -321,6 +321,7 @@ export default function LoanDetailPage() {
                 ['PAN', loan.customer.panNumber],
                 ['CIBIL Score', loan.customer.cibilScore?.toString()],
                 ['Monthly Income', formatCurrency(loan.customer.monthlyIncome)],
+                ['Monthly Obligations', formatCurrency(loan.customer.monthlyObligations)],
                 ['Employment', loan.customer.employmentType],
                 ['Company', loan.customer.companyName],
               ].map(([label, value]) => (

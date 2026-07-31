@@ -10,7 +10,7 @@ import { CheckCircle, ChevronRight, ChevronLeft, AlertCircle, Upload, Loader, Ch
 
 import { emiReducing as computeEmiReducing } from '@/utils/emi'
 import { extractPanData, extractAadhaarData } from '@/utils/kycExtraction'
-import { createDraftId, saveDraft, getDraft, deleteDraft } from '@/utils/draftStorage'
+import { createDraftId, saveDraftMeta, getDraftMeta, deleteDraftMeta } from '@/utils/draftStorage'
 
 function fmtINR(n: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
@@ -128,6 +128,60 @@ const emptyData: WizardData = {
   empType: '', compName: '', compType: '', salary: '', desig: '', officeEmail: '', obligations: '0',
   loanType: 'personal_loan', amount: '', loanRate: '12', tenure: '24', purpose: '', cibil: '',
   r1Name: '', r1Mobile: '', r1Relation: '', r2Name: '', r2Mobile: '', r2Relation: '',
+}
+
+// Reverse of buildPayload() below — used only when resuming a draft, to turn
+// the server's response (GET /api/wizard/draft/{loanId}) back into wizard
+// form state. FullName is split on the first/last space as a best-effort;
+// the person can adjust it on Step 3 if the split isn't exact.
+function payloadToWizardData(p: Partial<WizardSubmitPayload>, fallback: WizardData): WizardData {
+  const nameParts = (p.fullName ?? '').trim().split(/\s+/).filter(Boolean)
+  const firstName = nameParts[0] ?? ''
+  const lastName  = nameParts.length > 1 ? nameParts[nameParts.length - 1] : ''
+  const middleName = nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : ''
+
+  return {
+    ...fallback,
+    mobile: p.mobile ?? fallback.mobile,
+    pan: p.pan ?? fallback.pan,
+    location: p.locationId != null ? String(p.locationId) : fallback.location,
+    channel: p.channel ?? fallback.channel,
+    dsaName: p.dsaName ?? fallback.dsaName,
+    dsaId: p.dsaId != null ? String(p.dsaId) : fallback.dsaId,
+    partnerId: p.partnerId != null ? String(p.partnerId) : fallback.partnerId,
+    firstName, middleName, lastName,
+    dob: p.dob ?? fallback.dob,
+    gender: p.gender ?? fallback.gender,
+    aadhar: p.aadhar ?? fallback.aadhar,
+    email: p.email ?? fallback.email,
+    phone: p.mobile ?? fallback.phone,
+    father: p.fatherName ?? fallback.father,
+    street1: p.street1 ?? fallback.street1,
+    street2: p.street2 ?? fallback.street2,
+    city: p.city ?? fallback.city,
+    state: p.state ?? fallback.state,
+    zip: p.zip ?? fallback.zip,
+    homeType: p.homeType ?? fallback.homeType,
+    empType: p.empType ?? fallback.empType,
+    compName: p.compName ?? fallback.compName,
+    compType: p.compType ?? fallback.compType,
+    salary: p.salary != null && p.salary > 0 ? String(p.salary) : fallback.salary,
+    obligations: p.obligations != null ? String(p.obligations) : fallback.obligations,
+    desig: p.desig ?? fallback.desig,
+    officeEmail: p.officeEmail ?? fallback.officeEmail,
+    loanType: p.loanType ?? fallback.loanType,
+    amount: p.amount != null && p.amount > 0 ? String(p.amount) : fallback.amount,
+    loanRate: p.loanRate != null && p.loanRate > 0 ? String(p.loanRate) : fallback.loanRate,
+    tenure: p.tenure != null && p.tenure > 0 ? String(p.tenure) : fallback.tenure,
+    purpose: p.purpose ?? fallback.purpose,
+    cibil: p.cibil != null ? String(p.cibil) : fallback.cibil,
+    r1Name: p.r1Name ?? fallback.r1Name,
+    r1Mobile: p.r1Mobile ?? fallback.r1Mobile,
+    r1Relation: p.r1Relation ?? fallback.r1Relation,
+    r2Name: p.r2Name ?? fallback.r2Name,
+    r2Mobile: p.r2Mobile ?? fallback.r2Mobile,
+    r2Relation: p.r2Relation ?? fallback.r2Relation,
+  }
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -1113,15 +1167,25 @@ export default function NewApplicationPage() {
   // Applications → Drafts list (see LoansPage). Visiting the wizard any other
   // way ("Register New" / New Application) always starts a brand-new draft —
   // it never reads, overwrites, or deletes another draft.
+  //
+  // The local index (draftStorage) only tells us *which* backend loanId to
+  // resume and what step it was on — the actual form data (PAN, Aadhar,
+  // address, salary, references, ...) is fetched fresh from the server via
+  // wizardApi.getDraft, never read out of localStorage.
   const resumeDraftId = searchParams.get('draftId')
-  const resumedDraft   = resumeDraftId ? getDraft<WizardData>(resumeDraftId) : null
+  const resumedMeta    = resumeDraftId ? getDraftMeta(resumeDraftId) : null
 
-  const [draftId]          = useState<string>(() => (resumeDraftId && resumedDraft) ? resumeDraftId : createDraftId())
-  const [step, setStep]    = useState(resumedDraft?.step ?? 1)
-  const [data, setData]    = useState<WizardData>(() => resumedDraft?.data ?? {
+  const [draftId]          = useState<string>(() => (resumeDraftId && resumedMeta) ? resumeDraftId : createDraftId())
+  const [step, setStep]    = useState(resumedMeta?.step ?? 1)
+  const [data, setData]    = useState<WizardData>(() => ({
     ...emptyData,
     salesPerson: user?.fullName ?? '',
-  })
+  }))
+  // True while we're fetching a resumed draft's form data back from the
+  // server (GET /api/wizard/draft/{loanId}) — gates the wizard body so the
+  // person doesn't see a flash of empty fields before their data loads.
+  const [isResuming, setIsResuming] = useState(!!(resumeDraftId && resumedMeta?.loanId))
+  const [resumeError, setResumeError] = useState('')
   const [stepErrors, setStepErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState('')
   const [documents, setDocuments] = useState<Record<string, File | null>>({})
@@ -1130,7 +1194,31 @@ export default function NewApplicationPage() {
   // (see wizardApi.saveDraft). Once set, every subsequent draft-save,
   // validate, and final submit call reuses this same record instead of the
   // final submit accidentally creating a brand-new, duplicate Loan.
-  const [serverLoanId, setServerLoanId] = useState<number | undefined>(resumedDraft?.loanId)
+  const [serverLoanId, setServerLoanId] = useState<number | undefined>(resumedMeta?.loanId)
+
+  // Fetch the resumed draft's real form data from the database. Runs once,
+  // only when arriving via ?draftId= for a locally-known draft that has a
+  // backend loanId attached.
+  useEffect(() => {
+    if (!resumeDraftId || !resumedMeta?.loanId) return
+    let cancelled = false
+    wizardApi.getDraft(resumedMeta.loanId)
+      .then(res => {
+        if (cancelled) return
+        const payload = res.data.data
+        if (payload) {
+          setData(prev => payloadToWizardData(payload, prev))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setResumeError('Could not load this draft from the server. It may have already been submitted or removed.')
+      })
+      .finally(() => {
+        if (!cancelled) setIsResuming(false)
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // Set once submission succeeds. Its presence gates the wizard body off the
   // screen in favour of a confirmation screen — which is also what actually
   // prevents a duplicate submission (there's no longer a Submit button to
@@ -1166,6 +1254,7 @@ export default function NewApplicationPage() {
     compName:    data.compName,
     compType:    data.compType,
     salary:      parseFloat(data.salary) || 0,
+    obligations: parseFloat(data.obligations) || 0,
     desig:       data.desig,
     officeEmail: data.officeEmail,
     loanType:    data.loanType,
@@ -1192,19 +1281,24 @@ export default function NewApplicationPage() {
   // Autosave the in-progress wizard so it can be resumed later from
   // Applications → Drafts. Debounced to avoid writing on every keystroke.
   // File uploads (Step 8) are intentionally excluded — they cannot be
-  // serialized to local storage and are re-attached on resume.
+  // serialized and are re-attached on resume.
   //
-  // Two layers: localStorage always (instant, offline-safe), plus a
-  // backend-integrated Draft Loan record once there's enough to save
-  // (mobile or name) — this is what lets a draft be resumed from the same
-  // database record rather than only from this browser's storage.
+  // The actual form data (business/PII) is saved ONLY to the backend Draft
+  // Loan record once there's enough to save (mobile or name). Only a small,
+  // non-sensitive index (step/label/loanId) is kept in localStorage, purely
+  // so the Applications → Drafts list can render without a round trip.
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
-      const label = [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ')
-        || data.mobile || 'Untitled application'
-      saveDraft(draftId, step, data, label, data.loanType, serverLoanId)
+      // IMPORTANT: this label is stored in localStorage (see draftStorage.ts),
+      // so it must NEVER contain applicant name, mobile, or any other
+      // business/PII data — only a generic, non-identifying label built from
+      // the loan type. The real applicant details live only in the backend
+      // Draft Loan record and are fetched via wizardApi.getDraft on resume.
+      const loanTypeLabel = LOAN_TYPES.find(lt => lt.value === data.loanType)?.label
+      const label = loanTypeLabel || 'Untitled application'
+      saveDraftMeta(draftId, step, label, data.loanType, serverLoanId)
 
       const fullName = [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ')
       if (data.mobile || fullName) {
@@ -1212,12 +1306,12 @@ export default function NewApplicationPage() {
           const loanId = res.data.data?.loanId
           if (loanId) {
             setServerLoanId(loanId)
-            saveDraft(draftId, step, data, label, data.loanType, loanId)
+            saveDraftMeta(draftId, step, label, data.loanType, loanId)
           }
         }).catch(() => {
-          // Autosave to the backend is best-effort — localStorage above
-          // already has this progress, so a failed sync here never loses
-          // the user's work.
+          // Autosave to the backend failed — the local index above still
+          // reflects "step" progress, but the actual form data for this
+          // round only lives in memory until the next successful autosave.
         })
       }
     }, 800)
@@ -1359,7 +1453,7 @@ export default function NewApplicationPage() {
     },
     onSuccess: (res) => {
       const result = res.data.data
-      deleteDraft(draftId) // completed application — no longer a draft
+      deleteDraftMeta(draftId) // completed application — no longer a draft
       if (result) {
         setSubmissionResult({
           applicationId: result.loanId, eFinId: result.eFinId,
@@ -1402,6 +1496,28 @@ export default function NewApplicationPage() {
   }
 
   const progress = Math.round((step / TOTAL_STEPS) * 100)
+
+  if (isResuming) {
+    return (
+      <div className="max-w-2xl mx-auto py-24 text-center">
+        <Loader size={28} className="mx-auto text-efin-blue animate-spin mb-4" />
+        <p className="text-sm text-gray-500">Loading your draft…</p>
+      </div>
+    )
+  }
+
+  if (resumeError) {
+    return (
+      <div className="max-w-2xl mx-auto py-24 text-center">
+        <AlertCircle size={28} className="mx-auto text-red-500 mb-4" />
+        <p className="text-sm text-gray-700 mb-4">{resumeError}</p>
+        <button onClick={() => navigate('/loans')}
+          className="px-4 py-2 rounded-lg bg-efin-blue text-white text-sm font-medium hover:opacity-90">
+          Back to Applications
+        </button>
+      </div>
+    )
+  }
 
   if (submissionResult) {
     return (

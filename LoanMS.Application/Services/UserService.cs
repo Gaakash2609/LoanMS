@@ -99,6 +99,25 @@ public class UserService : IUserService
         return ApiResponseDto<bool>.Ok(true, "Password changed.");
     }
 
+    /// <summary>
+    /// Admin-initiated password reset for a DIFFERENT user. No current
+    /// password is required (the caller's own Admin authorization, enforced
+    /// at the controller via [Authorize(Roles="Admin")], is what grants this).
+    /// Never returns or logs the plaintext/hash; only a bool + message.
+    /// </summary>
+    public async Task<ApiResponseDto<bool>> AdminResetPasswordAsync(int targetUserId, AdminResetPasswordRequestDto request)
+    {
+        var user = await _uow.Users.GetByIdAsync(targetUserId);
+        if (user == null) return ApiResponseDto<bool>.Fail("User not found.");
+
+        user.PasswordHash = _auth.HashPassword(request.NewPassword);
+        user.UpdatedAt    = DateTime.UtcNow;
+
+        await _uow.Users.UpdateAsync(user);
+        await _uow.SaveChangesAsync();
+        return ApiResponseDto<bool>.Ok(true, "Password reset.");
+    }
+
     private static UserDto MapToDto(User u) => new()
     {
         Id        = u.Id,

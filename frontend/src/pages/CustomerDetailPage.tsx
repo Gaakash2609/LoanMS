@@ -23,6 +23,7 @@ export default function CustomerDetailPage() {
     ['Date of Birth',   customer.dateOfBirth ? formatDate(customer.dateOfBirth) : null],
     ['CIBIL Score',     customer.cibilScore?.toString()],
     ['Monthly Income',  customer.monthlyIncome ? formatCurrency(customer.monthlyIncome) : null],
+    ['Monthly Obligations', customer.monthlyObligations != null ? formatCurrency(customer.monthlyObligations) : null],
     ['Employment Type', customer.employmentType],
     ['Company Name',    customer.companyName],
     ['Address',         customer.address],

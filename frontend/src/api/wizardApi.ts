@@ -36,6 +36,10 @@ export interface WizardSubmitPayload {
   compName?: string
   compType?: string
   salary: number
+  // Existing monthly EMI/debt obligations — persisted onto Customer.MonthlyObligations
+  // (Phase 5A). Was previously captured in the wizard UI but silently dropped before
+  // reaching the API; now sent through on both draft-save and final submit.
+  obligations?: number
   desig?: string
   officeEmail?: string
   // Step 6 — Loan offer
@@ -77,6 +81,13 @@ export const wizardApi = {
   // submit) to keep updating the same record instead of creating duplicates.
   saveDraft: (data: Partial<WizardSubmitPayload>) =>
     api.post<ApiResponse<WizardSubmitResponse>>('/api/wizard/draft', data),
+
+  // Resume: reads the full in-progress form (PAN, Aadhar, address, employment,
+  // references, ...) back from the database record — this is the server-side
+  // source of truth used to resume a draft, so the browser never needs to
+  // hold that data itself.
+  getDraft: (loanId: number) =>
+    api.get<ApiResponse<WizardSubmitPayload>>(`/api/wizard/draft/${loanId}`),
 
   // On failure the backend returns { success: false, errors: string[] } (no
   // `data` payload) rather than `{ valid, errors }` — ApiResponse already

@@ -8,9 +8,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       // Init confetti engine
       _confetti.init();
 
-      // ── Hydrate credential hashes from localStorage into USER_ACCOUNTS ──
-      _hydrateUserAccounts();
-
       // ── Migrate any stored partner_user sessions/credentials → partner ──
       (function() {
         try {
@@ -26,44 +23,27 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         } catch(e) {}
       })();
 
-      // ── Sanitise stale localStorage: remove corrupt credential store ──
-      // A corrupt store is one that exists but has no valid email→hash entries.
-      // This handles the case where a previous session left an empty {} object,
-      // which would block the first-run wizard from ever appearing.
-      (function() {
-        try {
-          const UA_KEY = 'efin_credentials_v1';
-          const raw = localStorage.getItem(UA_KEY);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (!parsed || typeof parsed !== 'object' || Object.keys(parsed).length === 0) {
-              localStorage.removeItem(UA_KEY);
-            }
-          }
-        } catch(e) {
-          try { localStorage.removeItem('efin_credentials_v1'); } catch(_) {}
-        }
-      })();
-
-      // ── First-run check: show setup wizard if no credentials stored ──
-      if (!_loadCredentials()) {
-        _showFirstRunSetup();
-      }
-
       // ── Auto-restore session from localStorage ──
+      // The real backend JWT (loanms_token) is the only thing that gates
+      // this restore — not any client-side credential/hash store. This is
+      // an optimistic UI restore only (skip the login-screen flash on
+      // reload) using the session snapshot saved at login time; api-bridge.js's
+      // own DOMContentLoaded handler independently calls GET /api/auth/me
+      // with the same token to authoritatively confirm/refresh the session
+      // and will clear everything via _clearAuth() if the token is invalid
+      // or expired server-side.
       const savedSession = _lsGet('efin_session');
-      if (savedSession) {
+      const savedToken   = _lsGet('loanms_token');
+      if (savedSession && savedToken) {
         try {
           const sess = JSON.parse(savedSession);
-          const account = USER_ACCOUNTS.find(u => u.email === sess.email);
-          const credMap = _loadCredentials();
           // Session expiry: 8 hours
           const _SESSION_MAX_MS = 8 * 60 * 60 * 1000;
           const _sessionAge = sess.loginTs ? (Date.now() - sess.loginTs) : 0;
           const _sessionValid = !sess.loginTs || _sessionAge < _SESSION_MAX_MS;
 
-          if (account && credMap && credMap[sess.email] && _sessionValid) {
-            currentUser = { name: account.name, role: account.role, email: account.email };
+          if (sess.email && _sessionValid) {
+            currentUser = { name: sess.name, role: sess.role, email: sess.email };
             applySession();
             updateGreeting();
             renderPipeline();
@@ -80,20 +60,23 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             if (savedHash && document.getElementById('page-' + savedHash)) {
               const savedNav = document.querySelector('.nav-item[data-menu-id="' + savedHash + '"]');
               showPage(savedHash, savedNav);
-            } else if (account.role === 'partner') {
+            } else if (sess.role === 'partner') {
               showPage('payout', document.getElementById('nav-access'));
               initPayoutFromDisbursed();
-            } else if (account.role === 'accounts') {
+            } else if (sess.role === 'accounts') {
               showPage('payout', document.getElementById('nav-access'));
             }
           } else if (sess.loginTs && _sessionAge >= _SESSION_MAX_MS) {
-            localStorage.removeItem('efin_session');
-          } else if (!account || !credMap || !credMap[sess.email]) {
             localStorage.removeItem('efin_session');
           }
         } catch(e) {
           _lsRemove('efin_session');
         }
+      } else if (savedSession && !savedToken) {
+        // A session snapshot with no backing JWT can't be trusted — e.g.
+        // leftover from the removed offline-login fallback. Never restore
+        // from it; always fall through to the login screen.
+        _lsRemove('efin_session');
       }
 
       setTimeout(function () {

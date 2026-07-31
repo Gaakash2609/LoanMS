@@ -6,36 +6,10 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import DataTable, { type Column } from '@/components/shared/DataTable'
 import { formatCurrency, formatDate } from '@/utils/format'
-import { TrendingUp, CheckCircle, Clock, XCircle, DollarSign, BarChart3, Download, Plus, Search } from 'lucide-react'
+import { BarChart3, Download, Plus, Search } from 'lucide-react'
 
 const STATUS_VARIANTS: Record<string, 'default'|'success'|'warning'|'danger'|'info'> = {
   Pending: 'warning', Approved: 'success', Paid: 'info', Rejected: 'danger',
-}
-
-interface StatCardProps {
-  icon: React.ReactNode
-  label: string
-  value: string | number
-  subtext?: string
-  bgColor: string
-  textColor: string
-  accentColor: string
-}
-
-function StatCard({ icon, label, value, subtext, bgColor, textColor, accentColor }: StatCardProps) {
-  return (
-    <div className={`${bgColor} rounded-2xl p-6 border-2 ${accentColor} shadow-sm hover:shadow-md transition-shadow`}>
-      <div className="flex items-start justify-between mb-3">
-        <div className={`${textColor} p-2.5 bg-white rounded-lg`}>
-          {icon}
-        </div>
-        <TrendingUp size={18} className={`${textColor} opacity-50`} />
-      </div>
-      <p className="text-sm font-medium text-gray-600 mb-1">{label}</p>
-      <p className={`text-3xl font-bold ${textColor} mb-1`}>{value}</p>
-      {subtext && <p className="text-xs text-gray-500">{subtext}</p>}
-    </div>
-  )
 }
 
 interface StatusCardProps {

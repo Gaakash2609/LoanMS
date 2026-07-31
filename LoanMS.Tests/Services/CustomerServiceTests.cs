@@ -53,7 +53,7 @@ public class CustomerServiceTests
             FullName = "Test", Email = "existing@test.com", Phone = "9999999999"
         });
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("Email already registered");
+        result.Errors.Should().Contain(e => e.Contains("Email already registered"));
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public class CustomerServiceTests
             FullName = "Test", Email = "new@test.com", Phone = "9999999999", PanNumber = "ABCDE1234F"
         });
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("PAN");
+        result.Errors.Should().Contain(e => e.Contains("PAN"));
     }
 
     [Fact]
@@ -116,6 +116,6 @@ public class CustomerServiceTests
         var svc = CreateService();
         var result = await svc.DeleteAsync(1);
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("active loans");
+        result.Errors.Should().Contain(e => e.Contains("active loans"));
     }
 }

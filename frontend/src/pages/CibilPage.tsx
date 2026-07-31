@@ -6,10 +6,8 @@ import { Card, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import PageHeader from '@/components/shared/PageHeader'
 import { 
-  AlertCircle, CheckCircle, Clock, TrendingDown, TrendingUp, 
-  Download, RefreshCw, PrinterIcon, Copy, FileText, AlertTriangle,
-  DollarSign, Calendar, Building, User, MapPin, Phone, Mail,
-  BarChart3, PieChart, LineChart, Shield, Zap
+  AlertCircle, Clock, TrendingUp, 
+  Download, RefreshCw, PrinterIcon, Shield
 } from 'lucide-react'
 
 interface CibilReport {
@@ -50,7 +48,7 @@ export default function CibilPage() {
     enabled: !!customerId && activeTab === 'accounts',
   })
 
-  const { data: historyData } = useQuery({
+  useQuery({
     queryKey: ['cibil-history', customerId],
     queryFn: async () => {
       if (!customerId) return null
@@ -60,7 +58,7 @@ export default function CibilPage() {
     enabled: !!customerId && activeTab === 'history',
   })
 
-  const { data: riskData } = useQuery({
+  useQuery({
     queryKey: ['cibil-risk', customerId],
     queryFn: async () => {
       if (!customerId) return null
@@ -147,13 +145,13 @@ export default function CibilPage() {
       <div className="flex items-center justify-between mb-6">
         <PageHeader title="📊 CIBIL Report" subtitle={`${reportData.customerProfile?.fullName || 'Customer'}'s Credit Profile`} />
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <Button variant="secondary" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-4 h-4 mr-2" /> Refresh
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="secondary" size="sm">
             <PrinterIcon className="w-4 h-4 mr-2" /> Print
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="secondary" size="sm">
             <Download className="w-4 h-4 mr-2" /> Export PDF
           </Button>
         </div>

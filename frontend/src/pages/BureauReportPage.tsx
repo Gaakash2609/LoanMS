@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Download, RefreshCw, Printer } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/utils/format'
@@ -19,10 +19,9 @@ const bureauApi = {
 
 interface BureauReportPageProps {
   customerId: number
-  applicationId: string
 }
 
-export default function BureauReportPage({ customerId, applicationId }: BureauReportPageProps) {
+export default function BureauReportPage({ customerId }: BureauReportPageProps) {
   const [activeSection, setActiveSection] = useState<'overview' | 'accounts' | 'payments' | 'risk'>('overview')
 
   const { data: reportData, isLoading, refetch } = useQuery({
@@ -32,21 +31,6 @@ export default function BureauReportPage({ customerId, applicationId }: BureauRe
   })
 
   const report = reportData?.data
-
-  const handleExportPDF = async () => {
-    try {
-      const blob = await bureauApi.exportPDF(report.id)
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `Bureau_Report_${report.id}.pdf`)
-      document.body.appendChild(link)
-      link.click()
-      link.parentNode?.removeChild(link)
-    } catch (error) {
-      console.error('Export failed:', error)
-    }
-  }
 
   const handlePrint = () => {
     window.print()
@@ -194,7 +178,7 @@ Generated: ${new Date(report.generatedAt).toLocaleString()}
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 print:p-2">
               <div className="text-xs text-gray-600 font-semibold print:text-xs">DATE OF BIRTH</div>
               <div className="text-sm text-gray-900 mt-1 print:mt-0 print:text-xs">
-                {formatDate(report.customerProfile.dateOfBirth, 'YYYY-MM-DD')}
+                {formatDate(report.customerProfile.dateOfBirth)}
               </div>
             </div>
 
@@ -204,7 +188,7 @@ Generated: ${new Date(report.generatedAt).toLocaleString()}
               <div className="text-sm text-gray-900 mt-1 print:mt-0 print:text-xs">
                 {new Date(report.creditScore.generatedDate).toLocaleTimeString('en-IN')}
                 <br />
-                {formatDate(report.creditScore.generatedDate, 'DD/MM/YYYY')}
+                {formatDate(report.creditScore.generatedDate)}
               </div>
             </div>
           </div>
@@ -360,7 +344,7 @@ function CustomerProfileSection({ profile }: any) {
         </div>
         <div>
           <div className="text-xs text-gray-600 font-semibold print:text-xs">DATE OF BIRTH</div>
-          <div className="text-gray-900 mt-1 print:mt-0">{formatDate(profile.dateOfBirth, 'DD-MM-YYYY')}</div>
+          <div className="text-gray-900 mt-1 print:mt-0">{formatDate(profile.dateOfBirth)}</div>
         </div>
         <div>
           <div className="text-xs text-gray-600 font-semibold print:text-xs">GENDER</div>

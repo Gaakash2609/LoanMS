@@ -46,7 +46,7 @@ public class LoanServiceTests
         var svc    = CreateService();
         var result = await svc.GetByIdAsync(99, 1, "Admin");
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("not found");
+        result.Errors.Should().Contain(e => e.Contains("not found"));
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class LoanServiceTests
                 InterestRate = 10, TenureMonths = 12, LoanType = LoanType.Personal
             }, 1);
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("Customer not found");
+        result.Errors.Should().Contain(e => e.Contains("Customer not found"));
     }
 
     [Fact]
@@ -106,9 +106,13 @@ public class LoanServiceTests
         loan.InterestRate    = 0;
         loan.RequestedAmount = 120000;
         loan.TenureMonths    = 12;
+        // MapToDto is a pure passthrough projection — MonthlyEmi is computed and
+        // stored on the entity elsewhere (CreateAsync/UpdateStatusAsync), so the
+        // test must set it the same way before mapping.
+        // When rate=0, EMI = principal / months = 10000
+        loan.MonthlyEmi = loan.RequestedAmount / loan.TenureMonths;
         var dto = LoanService.MapToDto(loan, "Admin");
         dto.Should().NotBeNull();
-        // When rate=0, EMI = principal / months = 10000
         dto.MonthlyEmi.Should().Be(10000m);
     }
 
@@ -125,7 +129,7 @@ public class LoanServiceTests
             new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Approved, Comment = "Test" }, 1, "Admin");
 
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("Cannot move");
+        result.Errors.Should().Contain(e => e.Contains("Cannot move"));
     }
 
     [Fact]

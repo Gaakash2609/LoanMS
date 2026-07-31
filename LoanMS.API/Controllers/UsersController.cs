@@ -100,4 +100,20 @@ public class UsersController : BaseController
         var result = await _userService.ChangePasswordAsync(CurrentUserId, request);
         return ApiResult(result);
     }
+
+    /// <summary>Admin resets another user's password [Admin only]. No current
+    /// password is required from the target user — Admin authorization is
+    /// enforced by the role check below, matching Create/Update/Delete on
+    /// this controller.</summary>
+    [HttpPost("{id:int}/reset-password")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> AdminResetPassword(int id, [FromBody] AdminResetPasswordRequestDto request)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ApiResponseDto<bool>.Fail(
+                ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
+
+        var result = await _userService.AdminResetPasswordAsync(id, request);
+        return ApiResult(result);
+    }
 }

@@ -98,6 +98,12 @@ public class WizardController : BaseController
         if (!string.IsNullOrWhiteSpace(dto.R2Mobile) && !MobileRegex.IsMatch(dto.R2Mobile.Trim()))
             errors.Add("Reference 2 mobile number must be exactly 10 digits.");
 
+        // Server-side mirror of the frontend's own check (NewApplicationPage validate()) —
+        // a request that bypasses the UI must not be able to slip a negative obligations
+        // value past the API.
+        if (dto.Obligations < 0)
+            errors.Add("Existing EMI obligations cannot be negative.");
+
         return errors;
     }
 
@@ -193,6 +199,7 @@ public class WizardController : BaseController
                 State          = dto.State,
                 PinCode        = dto.Zip,
                 MonthlyIncome  = dto.Salary > 0 ? dto.Salary : null,
+                MonthlyObligations = dto.Obligations > 0 ? dto.Obligations : null,
                 EmploymentType = dto.EmpType == "SALARIED" ? "Salaried"
                                : dto.EmpType == "SELFEMP" ? "Self-Employed"
                                : dto.EmpType == "PROFESSIONAL" ? "Professional" : dto.EmpType,
@@ -211,6 +218,7 @@ public class WizardController : BaseController
             if (!string.IsNullOrWhiteSpace(dto.City))   customer.City   = dto.City;
             if (!string.IsNullOrWhiteSpace(dto.State))  customer.State  = dto.State;
             if (dto.Salary > 0)  customer.MonthlyIncome = dto.Salary;
+            if (dto.Obligations > 0) customer.MonthlyObligations = dto.Obligations;
             if (dto.Cibil > 0)   customer.CibilScore    = dto.Cibil;
             if (!string.IsNullOrWhiteSpace(dto.CompName)) customer.CompanyName = dto.CompName;
             if (!string.IsNullOrWhiteSpace(dto.Gender))     customer.Gender        = dto.Gender.Trim();
@@ -389,27 +397,73 @@ public class WizardController : BaseController
             }
 
             // ── 6. Auto-calculate payout (server-side only — not user-submitted) ──
-            // Skip if a payout claim already exists for this loan (e.g. resuming a
-            // draft that — under the old bug — had already produced one), so a
-            // completed draft never ends up with duplicate payout claims either.
-            var payoutAlreadyClaimed = existingLoan != null &&
-                await _db.Set<PayoutClaim>().AnyAsync(p => p.LoanId == loan.Id);
+            // Phase 3: generate one claim per eligible claimant tied to this loan —
+            // the submitting user, plus the linked-user accounts (DsaPartner.
+            // LinkedUserId) of any DSA/Partner mapped onto the loan — instead of a
+            // single claim for whoever completed the wizard. Every ClaimedByUserId
+            // here comes either from the authenticated JWT (CurrentUserId) or from
+            // a server-validated FK already persisted on the loan (loan.DsaId /
+            // loan.PartnerId, checked in ValidateDsaPartnerMapping above) — never
+            // from a claimant list supplied in the request body.
+            // Idempotent per (LoanId, ClaimedByUserId, ClaimType): resuming a draft,
+            // or this step running more than once for any reason, can never produce
+            // duplicate claims — enforced here and backed by a unique DB index.
+            var payoutRule = await _db.Set<PayoutRule>()
+                .FirstOrDefaultAsync(r => r.LoanType == dto.LoanType && r.IsActive && !r.IsDeleted);
 
-            if (!payoutAlreadyClaimed)
+            if (payoutRule != null)
             {
-                var payoutRule = await _db.Set<PayoutRule>()
-                    .FirstOrDefaultAsync(r => r.LoanType == dto.LoanType && r.IsActive && !r.IsDeleted);
-                if (payoutRule != null)
+                var claimAmt = Math.Round(dto.Amount * payoutRule.Percentage / 100, 2);
+                if (payoutRule.MinPayout.HasValue) claimAmt = Math.Max(claimAmt, payoutRule.MinPayout.Value);
+                if (payoutRule.MaxPayout.HasValue) claimAmt = Math.Min(claimAmt, payoutRule.MaxPayout.Value);
+
+                // Claimant list: (userId, claimType). Built entirely from
+                // server-trusted identity/FKs, never client-supplied.
+                var claimants = new List<(int UserId, string ClaimType)>();
+
+                var submitterType = CurrentUserRole switch
                 {
-                    var claimAmt = Math.Round(dto.Amount * payoutRule.Percentage / 100, 2);
-                    if (payoutRule.MinPayout.HasValue) claimAmt = Math.Max(claimAmt, payoutRule.MinPayout.Value);
-                    if (payoutRule.MaxPayout.HasValue) claimAmt = Math.Min(claimAmt, payoutRule.MaxPayout.Value);
+                    "Dsa"     => "Dsa",
+                    "Partner" => "Partner",
+                    _         => "Sales"   // Admin/Manager/Sales submitting on their own behalf
+                };
+                if (CurrentUserId > 0) claimants.Add((CurrentUserId, submitterType));
+
+                if (loan.DsaId.HasValue)
+                {
+                    var dsaUserId = await _db.DsaPartners
+                        .Where(d => d.Id == loan.DsaId.Value && !d.IsDeleted)
+                        .Select(d => d.LinkedUserId).FirstOrDefaultAsync();
+                    if (dsaUserId.HasValue && !claimants.Any(c => c.UserId == dsaUserId.Value && c.ClaimType == "Dsa"))
+                        claimants.Add((dsaUserId.Value, "Dsa"));
+                }
+                if (loan.PartnerId.HasValue)
+                {
+                    var partnerUserId = await _db.DsaPartners
+                        .Where(d => d.Id == loan.PartnerId.Value && !d.IsDeleted)
+                        .Select(d => d.LinkedUserId).FirstOrDefaultAsync();
+                    if (partnerUserId.HasValue && !claimants.Any(c => c.UserId == partnerUserId.Value && c.ClaimType == "Partner"))
+                        claimants.Add((partnerUserId.Value, "Partner"));
+                }
+
+                // Claims already persisted for this loan (covers resuming a draft
+                // where this step may have already partially run before).
+                var existingClaimKeys = await _db.Set<PayoutClaim>()
+                    .Where(p => p.LoanId == loan.Id)
+                    .Select(p => new { p.ClaimedByUserId, p.ClaimType })
+                    .ToListAsync();
+
+                foreach (var (userId, claimType) in claimants)
+                {
+                    if (userId <= 0) continue;
+                    if (existingClaimKeys.Any(k => k.ClaimedByUserId == userId && k.ClaimType == claimType)) continue;
                     _db.Set<PayoutClaim>().Add(new PayoutClaim
                     {
                         LoanId = loan.Id, ClaimAmount = claimAmt,
                         Month  = DateTime.UtcNow.ToString("MMM yyyy"),
                         Notes  = $"Auto-generated from configured payout rule",   // no formula/rate disclosed
-                        Status = "Pending", ClaimedByUserId = CurrentUserId, CreatedAt = DateTime.UtcNow
+                        Status = "Pending", ClaimedByUserId = userId, ClaimType = claimType,
+                        CreatedAt = DateTime.UtcNow
                     });
                 }
             }
@@ -440,6 +494,76 @@ public class WizardController : BaseController
                 "Application submission failed. Please try again or contact support."));
         }
         });
+    }
+
+    /// <summary>
+    /// Fetch a previously-autosaved Draft loan back out of the database so the
+    /// wizard can be resumed with the full form state (PAN, Aadhar, address,
+    /// employment, references, etc.) coming from the server — not from a copy
+    /// cached in browser localStorage. Only the loan's own creator, or an
+    /// Admin/Manager, may resume it; a foreign draft id returns 404 rather
+    /// than leaking another user's in-progress PII.
+    /// </summary>
+    [HttpGet("draft/{loanId:int}")]
+    public async Task<IActionResult> GetDraft(int loanId)
+    {
+        var loan = await _db.Loans
+            .Include(l => l.Customer)
+            .FirstOrDefaultAsync(l => l.Id == loanId && !l.IsDeleted && l.Status == LoanStatus.Draft);
+
+        if (loan == null)
+            return NotFound(ApiResponseDto<WizardSubmitDto>.Fail("Draft not found."));
+
+        var isInternal = CurrentUserRole is "Admin" or "Manager";
+        if (!isInternal && loan.CreatedByUserId != CurrentUserId)
+            return NotFound(ApiResponseDto<WizardSubmitDto>.Fail("Draft not found."));
+
+        var refs = await _db.LoanReferences
+            .Where(r => r.LoanId == loanId)
+            .ToListAsync();
+        var r1 = refs.FirstOrDefault(r => r.RefNumber == 1);
+        var r2 = refs.FirstOrDefault(r => r.RefNumber == 2);
+        var c  = loan.Customer;
+
+        var dto = new WizardSubmitDto
+        {
+            LoanId      = loan.Id,
+            FullName    = c?.FullName ?? string.Empty,
+            Mobile      = c?.Phone ?? string.Empty,
+            Email       = c?.Email ?? string.Empty,
+            Pan         = c?.PanNumber,
+            Aadhar      = c?.AadhaarNumber,
+            Dob         = c?.DateOfBirth?.ToString("yyyy-MM-dd"),
+            Gender      = c?.Gender,
+            FatherName  = c?.FatherName,
+            Cibil       = c?.CibilScore,
+            City        = c?.City,
+            State       = c?.State,
+            Street1     = c?.Address,
+            Zip         = c?.PinCode,
+            HomeType    = c?.ResidenceType,
+            EmpType     = c?.EmploymentType,
+            CompName    = c?.CompanyName,
+            Salary      = c?.MonthlyIncome ?? 0,
+            Obligations = c?.MonthlyObligations ?? 0,
+            LoanType    = _loanTypeMap.FirstOrDefault(kv => kv.Value == loan.LoanType).Key ?? "personal_loan",
+            Amount      = loan.RequestedAmount,
+            LoanRate    = loan.InterestRate,
+            Tenure      = loan.TenureMonths,
+            Purpose     = loan.Purpose,
+            R1Name      = r1?.Name,
+            R1Mobile    = r1?.Mobile,
+            R1Relation  = r1?.Relation,
+            R2Name      = r2?.Name,
+            R2Mobile    = r2?.Mobile,
+            R2Relation  = r2?.Relation,
+            DsaId       = loan.DsaId,
+            PartnerId   = loan.PartnerId,
+            LocationId  = loan.LocationId,
+            EfinId      = loan.LoanNumber,
+        };
+
+        return Ok(ApiResponseDto<WizardSubmitDto>.Ok(dto));
     }
 
     /// <summary>

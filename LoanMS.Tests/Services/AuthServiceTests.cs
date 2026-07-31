@@ -40,7 +40,7 @@ public class AuthServiceTests
         var svc    = CreateService();
         var result = await svc.LoginAsync(new LoginRequestDto { Email = "x@x.com", Password = "test" });
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("Invalid email or password");
+        result.Errors.Should().Contain(e => e.Contains("Invalid email or password"));
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class AuthServiceTests
         var svc    = CreateService();
         var result = await svc.RefreshTokenAsync("bad_token");
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("Invalid or expired");
+        result.Errors.Should().Contain(e => e.Contains("Invalid or expired"));
     }
 
     [Fact]

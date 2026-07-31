@@ -38,7 +38,7 @@ public class PayoutController : BaseController
 
         var claims = await q.OrderByDescending(p => p.CreatedAt)
             .Select(p => new {
-                p.Id, p.Status, p.ClaimAmount, p.Month, p.Notes,
+                p.Id, p.Status, p.ClaimAmount, p.Month, p.Notes, p.ClaimType,
                 p.CreatedAt, p.VerifiedAt, p.PaidAt,
                 LoanNumber   = p.Loan.LoanNumber,
                 CustomerName = p.Loan.Customer.FullName,
@@ -99,17 +99,54 @@ public class PayoutController : BaseController
             if (minOk && maxOk) serverAmount = dto.ClaimAmount;
         }
 
+        // ClaimType is the capacity in which the caller is claiming (Sales/Dsa/
+        // Partner/Login). It is derived from the caller's own authenticated role
+        // by default; Admin/Manager may pass an explicit type only when
+        // reconciling on another eligible claimant's behalf via a whitelisted
+        // value. It is never trusted blindly from an arbitrary client value.
+        var allowedClaimTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "Sales", "Dsa", "Partner", "Login", "Manager", "Admin" };
+        string claimType = CurrentUserRole switch
+        {
+            "Dsa"     => "Dsa",
+            "Partner" => "Partner",
+            _         => "Sales"
+        };
+        if (CurrentUserRole is "Admin" or "Manager" &&
+            !string.IsNullOrWhiteSpace(dto.ClaimType) && allowedClaimTypes.Contains(dto.ClaimType))
+        {
+            claimType = dto.ClaimType;
+        }
+
+        // Idempotency / duplicate-claim guard: one claim per (loan, claimant,
+        // capacity). Checked here for a friendly error, and backed by a unique
+        // DB index for the race-condition case.
+        var duplicate = await _db.PayoutClaims.AnyAsync(p =>
+            p.LoanId == dto.LoanId && p.ClaimedByUserId == CurrentUserId && p.ClaimType == claimType);
+        if (duplicate)
+            return BadRequest(ApiResponseDto<bool>.Fail("A claim already exists for this loan in this capacity."));
+
         var claim = new PayoutClaim {
             LoanId          = dto.LoanId,
             ClaimAmount     = serverAmount,
             Month           = dto.Month ?? DateTime.UtcNow.ToString("MMM yyyy"),
             Notes           = dto.Notes,
             ClaimedByUserId = CurrentUserId,
+            ClaimType       = claimType,
             CreatedAt       = DateTime.UtcNow
         };
         _db.PayoutClaims.Add(claim);
-        await _db.SaveChangesAsync();
-        return Ok(ApiResponseDto<object>.Ok(new { claim.Id, claimAmount = serverAmount }, "Claim submitted."));
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // Unique-index race: another request created the same
+            // (loan, claimant, type) claim between our check and this save.
+            return BadRequest(ApiResponseDto<bool>.Fail("A claim already exists for this loan in this capacity."));
+        }
+        return Ok(ApiResponseDto<object>.Ok(new { claim.Id, claimAmount = serverAmount, claimType }, "Claim submitted."));
     }
 
     [HttpPatch("{id:int}/status")]
@@ -154,6 +191,10 @@ public class ClaimCreateDto {
     public decimal ClaimAmount { get; set; }  // Used only by Admin/Manager within rule bounds
     public string? Month       { get; set; }
     public string? Notes       { get; set; }
+    /// <summary>Optional. Only honored for Admin/Manager callers reconciling on
+    /// another eligible claimant's behalf; otherwise derived server-side from
+    /// the caller's own role. See PayoutController.Submit.</summary>
+    public string? ClaimType   { get; set; }
 }
 
 public class ClaimStatusDto {

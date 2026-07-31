@@ -1,0 +1,47 @@
+# ── LoanMS — EF Core Migration Runner (staging/prod one-off task) ─────────────
+# Packages the already-generated self-contained migration bundle
+# (migration-bundle/efbundle) into a minimal image. This is a SEPARATE image
+# from the main API (Dockerfile) — it never touches the production ECS
+# service or the production ECR repository.
+#
+# Build context MUST be the repository root, because it needs
+# migration-bundle/efbundle, which is produced by:
+#   dotnet ef migrations bundle --project .\LoanMS.Infrastructure\LoanMS.Infrastructure.csproj `
+#     --startup-project .\LoanMS.API\LoanMS.API.csproj -r linux-x64 --self-contained `
+#     -o .\migration-bundle\efbundle
+#
+# Build with:
+#   docker build -f Dockerfile.migration -t loanms-migration:latest .
+# (run from the repo root — same folder this file and migration-bundle/ live in)
+
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
+# runtime-deps (not aspnet/sdk) is correct here: efbundle is self-contained and
+# carries its own .NET runtime — the container only needs native OS libraries
+# (ICU, OpenSSL, etc.), the same base Microsoft itself recommends for bundles.
+
+WORKDIR /app
+
+# libgssapi-krb5-2 required by Npgsql on Debian-based runtime images —
+# same package already installed in the main Dockerfile for the same reason.
+RUN apt-get update && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user (matches ECS/Fargate best practice already used in the main Dockerfile)
+RUN groupadd -r migration && useradd -r -g migration migration
+
+# COPY path is relative to the build context (repo root — see note above).
+COPY migration-bundle/efbundle /app/efbundle
+
+# efbundle is generated on a Windows machine (NTFS has no POSIX executable bit),
+# so the executable permission must be set explicitly here, not assumed from COPY.
+RUN chmod +x /app/efbundle && chown -R migration:migration /app
+
+USER migration
+
+# ECS task definitions pass command-line args as a literal argv array — no shell,
+# so no $VAR expansion happens automatically. This entrypoint uses `sh -c` so that
+# ConnectionStrings__PostgreSQL (injected by ECS from Secrets Manager as a container
+# environment variable) is expanded at container start and passed to efbundle via
+# its --connection argument, exactly as EF Core's own docs recommend for bundles
+# run in a container.
+ENTRYPOINT ["/bin/sh", "-c", "exec /app/efbundle --connection \"$ConnectionStrings__PostgreSQL\""]

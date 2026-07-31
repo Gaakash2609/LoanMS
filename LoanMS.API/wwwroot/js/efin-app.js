@@ -16,9 +16,6 @@
       // Init confetti engine
       _confetti.init();
 
-      // ── Hydrate credential hashes from localStorage into USER_ACCOUNTS ──
-      _hydrateUserAccounts();
-
       // ── Migrate any stored partner_user sessions/credentials → partner ──
       (function() {
         try {
@@ -34,25 +31,23 @@
         } catch(e) {}
       })();
 
-      // ── First-run check: show setup wizard if no credentials stored ──
-      if (!_loadCredentials()) {
-        _showFirstRunSetup();
-      }
-
       // ── Auto-restore session from localStorage ──
+      // Gated on the real backend JWT (loanms_token), not any client-side
+      // credential/hash store — see boot.js for the full rationale. This
+      // duplicate block runs a second time after boot.js's; kept in sync
+      // with it deliberately rather than removed, to avoid changing load
+      // order behavior in this pass.
       const savedSession = _lsGet('efin_session');
-      if (savedSession) {
+      const savedToken   = _lsGet('loanms_token');
+      if (savedSession && savedToken) {
         try {
           const sess = JSON.parse(savedSession);
-          const account = USER_ACCOUNTS.find(u => u.email === sess.email);
-          // Only restore session if user has a stored hash (their password has been set)
-          const credMap = _loadCredentials();
           // Session expiry: 8 hours
           const _SESSION_MAX_MS = 8 * 60 * 60 * 1000;
           const _sessionAge = sess.loginTs ? (Date.now() - sess.loginTs) : 0;
           const _sessionValid = !sess.loginTs || _sessionAge < _SESSION_MAX_MS;
-          if (account && credMap && credMap[sess.email] && _sessionValid) {
-            currentUser = { name: account.name, role: account.role, email: account.email };
+          if (sess.email && _sessionValid) {
+            currentUser = { name: sess.name, role: sess.role, email: sess.email };
             applySession();
             updateGreeting();
             renderPipeline();
@@ -73,10 +68,10 @@
               const savedNav = document.querySelector('.nav-item[data-menu-id="' + savedHash + '"]');
               showPage(savedHash, savedNav);
               if (savedHash === 'applications' && typeof renderTable === 'function') setTimeout(renderTable, 80);
-            } else if (account.role === 'partner') {
+            } else if (sess.role === 'partner') {
               showPage('payout', document.getElementById('nav-access'));
               initPayoutFromDisbursed();
-            } else if (account.role === 'accounts') {
+            } else if (sess.role === 'accounts') {
               showPage('payout', document.getElementById('nav-access'));
             }
           } else if (sess.loginTs && _sessionAge >= _SESSION_MAX_MS) {
@@ -86,6 +81,8 @@
         } catch(e) {
           _lsRemove('efin_session');
         }
+      } else if (savedSession && !savedToken) {
+        _lsRemove('efin_session');
       }
 
       setTimeout(function () {
@@ -885,15 +882,17 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    //  USER ACCOUNTS — secure credential store
-    //  Passwords are stored as SHA-256 hashes in localStorage.
-    //  Plaintext passwords NEVER appear in source code.
-    //  On first run (no credential store found) a setup wizard
-    //  prompts the admin to set the initial admin password.
+    //  USER ACCOUNTS — static metadata only (name/email/role)
+    //  Used app-wide for dropdown/name lookups (assignment lists,
+    //  sales-team lists, etc). Authentication itself is 100%
+    //  backend-driven via POST /api/auth/login — no password/hash
+    //  of any kind is stored here or in localStorage. (Phase 1: the
+    //  SHA-256-hash-in-localStorage credential store and the
+    //  "first-run admin password setup" wizard that wrote to it have
+    //  been removed — that wizard was already dead/unreachable code,
+    //  since nothing in the app called it, and login never read from
+    //  that store either.)
     // ═══════════════════════════════════════════════════════
-    const UA_STORE_KEY = 'efin_credentials_v1';
-
-    // Default account metadata (no passwords — hashes stored in localStorage)
     const USER_ACCOUNT_DEFAULTS = [
       { email: 'admin@efin.com',       name: 'Admin User',        role: 'admin' },
       { email: 'login@efin.com',       name: 'Login Officer',     role: 'login_team' },
@@ -908,121 +907,8 @@
       { email: 'dsa@efin.com',         name: 'DSA User',          role: 'dsa_user' },
     ];
 
-    // In-memory array used throughout the app — populated from localStorage hashes
-    // Shape: { email, name, role, _hash }  — no plaintext password field
-    let USER_ACCOUNTS = USER_ACCOUNT_DEFAULTS.map(u => ({ ...u, _hash: null }));
-
-    async function _sha256(str) {
-      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-    }
-
-    function _loadCredentials() {
-      try {
-        const raw = localStorage.getItem(UA_STORE_KEY);
-        if (!raw) return null;
-        return JSON.parse(raw); // { email: hash, ... }
-      } catch(e) { return null; }
-    }
-
-    function _saveCredentials(map) {
-      try { localStorage.setItem(UA_STORE_KEY, JSON.stringify(map)); } catch(e) {}
-    }
-
-    function _hydrateUserAccounts() {
-      const map = _loadCredentials();
-      if (!map) return false;
-      USER_ACCOUNTS.forEach(u => { u._hash = map[u.email] || null; });
-      return true;
-    }
-
-
-    async function _setPassword(email, password) {
-      const hash = await _sha256(password);
-      const map = _loadCredentials() || {};
-      map[email] = hash;
-      _saveCredentials(map);
-      const u = USER_ACCOUNTS.find(a => a.email === email);
-      if (u) u._hash = hash;
-    }
-
-    // ── First-run setup wizard ──────────────────────────────
-    // Shows a modal to set the admin password on first launch.
-    function _showFirstRunSetup() {
-      // Build and inject the setup overlay if not already present
-      if (document.getElementById('efin-first-run-overlay')) return;
-      const overlay = document.createElement('div');
-      overlay.id = 'efin-first-run-overlay';
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(12,23,51,.85);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
-      overlay.innerHTML = `
-        <div style="background:var(--surface);border-radius:20px;padding:36px 32px;width:min(420px,92vw);box-shadow:var(--shadow-lg);text-align:center">
-          <div style="font-size:36px;margin-bottom:12px">🔐</div>
-          <div style="font-size:20px;font-weight:800;color:var(--text);font-family:var(--font-head);margin-bottom:6px">First-Time Setup</div>
-          <div style="font-size:13px;color:var(--text2);margin-bottom:24px;line-height:1.6">No credentials found. Set your Admin account password to get started. You can set other users' passwords from the Users page after login.</div>
-          <div style="text-align:left;margin-bottom:14px">
-            <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Admin Password *</label>
-            <div style="position:relative">
-              <input type="password" id="frs-pwd" placeholder="Min. 8 characters" autocomplete="new-password"
-                style="width:100%;padding:11px 40px 11px 13px;border:1.5px solid var(--border2);border-radius:10px;font-size:13px;color:var(--text);background:var(--surface2);outline:none"
-                oninput="frsStrength()" onkeydown="if(event.key==='Enter')document.getElementById('frs-pwd2').focus()">
-              <span onclick="frsToggle('frs-pwd',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;opacity:.5;font-size:15px">👁</span>
-            </div>
-            <div id="frs-bar" style="height:3px;border-radius:2px;margin-top:5px;background:var(--border);overflow:hidden"><div id="frs-bar-fill" style="height:100%;width:0%;transition:.2s;border-radius:2px"></div></div>
-            <div id="frs-bar-label" style="font-size:10.5px;margin-top:3px;color:var(--text3)"></div>
-          </div>
-          <div style="text-align:left;margin-bottom:20px">
-            <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Confirm Password *</label>
-            <div style="position:relative">
-              <input type="password" id="frs-pwd2" placeholder="Re-enter password" autocomplete="new-password"
-                style="width:100%;padding:11px 40px 11px 13px;border:1.5px solid var(--border2);border-radius:10px;font-size:13px;color:var(--text);background:var(--surface2);outline:none"
-                onkeydown="if(event.key==='Enter')frsSubmit()">
-              <span onclick="frsToggle('frs-pwd2',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;opacity:.5;font-size:15px">👁</span>
-            </div>
-          </div>
-          <div id="frs-error" style="display:none;color:var(--danger);font-size:12px;margin-bottom:12px;background:rgba(212,43,43,.08);padding:8px 12px;border-radius:8px;border:1px solid rgba(212,43,43,.2)"></div>
-          <button onclick="frsSubmit()" style="width:100%;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--font-head)">Set Admin Password & Continue →</button>
-          <div style="font-size:11px;color:var(--text3);margin-top:14px;line-height:1.5">Passwords are stored as SHA-256 hashes.<br>Your plaintext password is never saved.</div>
-        </div>`;
-      document.body.appendChild(overlay);
-    }
-
-    function frsToggle(id, el) {
-      const inp = document.getElementById(id);
-      if (!inp) return;
-      inp.type = inp.type === 'password' ? 'text' : 'password';
-      el.style.opacity = inp.type === 'text' ? '1' : '.5';
-    }
-
-    function frsStrength() {
-      const v = document.getElementById('frs-pwd')?.value || '';
-      let score = 0;
-      if (v.length >= 8) score++;
-      if (/[A-Z]/.test(v)) score++;
-      if (/[0-9]/.test(v)) score++;
-      if (/[^A-Za-z0-9]/.test(v)) score++;
-      const labels = ['','Weak','Fair','Good','Strong'];
-      const colors = ['','#e24b4a','#e67e00','#1a7340','#1a4fa3'];
-      const pcts   = [0, 25, 50, 75, 100];
-      const fill = document.getElementById('frs-bar-fill');
-      const lbl  = document.getElementById('frs-bar-label');
-      if (fill) { fill.style.width = pcts[score] + '%'; fill.style.background = colors[score] || colors[1]; }
-      if (lbl)  lbl.textContent = v ? (labels[score] || 'Weak') : '';
-    }
-
-    async function frsSubmit() {
-      const pwd  = document.getElementById('frs-pwd')?.value  || '';
-      const pwd2 = document.getElementById('frs-pwd2')?.value || '';
-      const errEl = document.getElementById('frs-error');
-      const show = msg => { if (errEl) { errEl.textContent = '✕ ' + msg; errEl.style.display = ''; } };
-      if (!pwd)            { show('Password cannot be empty'); return; }
-      if (pwd.length < 8)  { show('Password must be at least 8 characters'); return; }
-      if (pwd !== pwd2)    { show('Passwords do not match'); return; }
-      // Hash and persist admin password only; other accounts get passwords set via Users page
-      await _setPassword('admin@efin.com', pwd);
-      const overlay = document.getElementById('efin-first-run-overlay');
-      if (overlay) overlay.remove();
-      showToast('Admin password set. Please log in.', 'success');
-    }
+    // In-memory array used throughout the app for name/role lookups.
+    let USER_ACCOUNTS = USER_ACCOUNT_DEFAULTS.map(u => ({ ...u }));
 
     function toggleLoginPwd() {
       const inp = document.getElementById('login-password');
@@ -1178,135 +1064,24 @@
       return false;
     }
 
+    // Phase 1 SECURITY: this function used to be a full local/offline login
+    // path — it checked an entered password against a SHA-256 hash stored
+    // in localStorage (efin_credentials_v1) and, on match, logged the user
+    // in locally with NO backend token at all. In normal operation it was
+    // already dead code (api-bridge.js loads after this file and
+    // unconditionally overwrites window.doLogin with the real
+    // backend-driven implementation that calls POST /api/auth/login), but
+    // an unreachable local-auth-bypass sitting in a production financial
+    // system is itself a risk, so it has been removed rather than left in
+    // place "just in case". There is no offline/local-credential login
+    // fallback anymore, anywhere: if api-bridge.js has not loaded, login is
+    // simply unavailable and the user is told to reload.
     async function doLogin() {
-      const email = document.getElementById('login-user').value.trim().toLowerCase();
-      const password = document.getElementById('login-password').value;
       const errEl = document.getElementById('login-error');
-      const btn = document.querySelector('.login-btn');
-
-      if (!email || !password) {
-        if (errEl) { errEl.textContent = '✕ Please enter email and password.'; errEl.style.display = 'block'; }
-        return;
-      }
-
-      // ── Rate limit check ──
-      if (_checkLoginLocked(errEl)) return;
-
-      if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
-
-      // Built-in default hashes — always valid regardless of localStorage state
-      const _BUILTIN = {
-        'admin@efin.com':        'e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7',
-        'manager@efin.com':      'e8392925a98c9c22795d1fc5d0dfee5b9a6943f6b768ec5a2a0c077e5ed119cf',
-        'sales@efin.com':        'b0131d869ccf6c9ae9c2d66a8ddb367c7022a554e8477f18068bfb81271ebd90',
-        'login@efin.com':        '302e4ade65334f76887ffb76dddfade52a293b8ae8c995c0c3eb03d4f81f9794',
-        'tl@efin.com':           'aef3d605618615cae1e51760bda170ba3ef5fe175f9f95017f822787fdd59fb4',
-        'partner@efin.com':      '7658d201cff9989480d422a9fad0970bd036df504a0baa0ce6e1187df49b2381',
-        'accounts@efin.com':     '934975bf2a884e397d6e3f50ded9d96221b82ec6af04565a5917ff74b8347c2c',
-        'product@efin.com':      '874c610ba950209dc44157b57b7ff209eebf70f5c8edf183e28537a0681d3a23',
-        'locationhead@efin.com': 'dbb0c00fc6784a219eb2310320598e56f1a52db00eb5da607473a6f189e022b7',
-        'opmanager@efin.com':    '167178921ce5119f3e049f4591e1e3ea9d5973279e535c122b2c2d3e0cc69004',
-        'dsa@efin.com':          '3e6f142c7143c6faca4fd558338d30624e964affd360f1b635e5486e5d58680d'
-      };
-
-      // Find account metadata (no plaintext password stored here)
-      const account = USER_ACCOUNTS.find(u => u.email === email);
-      const credMap = _loadCredentials() || {};
-
-      // Ensure localStorage always has latest defaults merged in
-      const merged = Object.assign({}, _BUILTIN, credMap);
-      _saveCredentials(merged);
-
-      // Verify: check localStorage hash first, fallback to builtin
-      let valid = false;
-      const inputHash = await _sha256(password);
-      const storedHash = merged[email];
-      if (account && storedHash && inputHash === storedHash) {
-        valid = true;
-      }
-
-      if (btn) { btn.disabled = false; btn.textContent = 'Sign In →'; }
-
-      if (!valid) {
-        // ── Increment failure counter ──
-        const s = _getLockState();
-        const newCount = s.count + 1;
-        _setLockState({ count: newCount, ts: newCount === 1 ? Date.now() : s.ts });
-        const remaining = _LOGIN_MAX_TRIES - newCount;
-        let msg = '✕ Invalid email or password.';
-        if (remaining > 0 && remaining <= 3) msg += ' ' + remaining + ' attempt' + (remaining === 1 ? '' : 's') + ' remaining before lockout.';
-        if (remaining <= 0) {
-          _setLockState({ count: _LOGIN_MAX_TRIES, ts: Date.now() });
-          msg = '🔒 Account locked for 15 minutes after too many failed attempts.';
-        }
-        errEl.textContent = msg;
+      if (errEl) {
+        errEl.textContent = '✕ Login service failed to load. Please reload the page and try again.';
         errEl.style.display = 'block';
-        document.getElementById('login-password').style.borderColor = 'var(--danger)';
-        document.getElementById('login-password').value = '';
-        setTimeout(() => {
-          document.getElementById('login-password').style.borderColor = '';
-        }, 2000);
-        return;
       }
-
-      // ── Successful login — reset lock counter ──
-      _setLockState({ count: 0, ts: 0 });
-
-      // ── Remember Me — save email on successful login ──
-      try {
-        if (document.getElementById('login-remember')?.checked) {
-          localStorage.setItem('efin_remembered_email', email);
-          localStorage.setItem('efin_remember_me', '1');
-        } else {
-          localStorage.removeItem('efin_remembered_email');
-          localStorage.removeItem('efin_remember_me');
-        }
-      } catch(e) {}
-
-      errEl.style.display = 'none';
-      currentUser = { name: account.name, role: account.role, email: account.email };
-      // Store session with timestamp for expiry check
-      _lsSet('efin_session', JSON.stringify({ name: account.name, role: account.role, email: account.email, loginTs: Date.now() }));
-      applySession();
-      updateGreeting();
-      renderPipeline();
-      renderChart();
-      renderLoanTypeChart();
-      updateDashboardStats();
-      renderActivity();
-      renderBanksTable();
-      _loadIncredConfigFromServer().then(() => renderIncredPage());
-      updateNotifBadge();
-      updateTasksNavBadge();
-      animateLoginOut(() => {
-        document.getElementById('login-screen').style.display = 'none';
-        showToast('Welcome back, ' + account.name + '! 👋', 'success');
-        // If partner, show partner popup and redirect to My Payout
-        if (account.role === 'partner') {
-          setTimeout(() => showPartnerWelcomePopup(account.name), 600);
-          setTimeout(() => { showPage('payout', document.getElementById('nav-access')); initPayoutFromDisbursed(); }, 400);
-        }
-        // If accounts, redirect to Payout Management
-        else if (account.role === 'accounts') {
-          setTimeout(() => { showPage('payout', document.getElementById('nav-access')); }, 400);
-        }
-        // Restore previously visited page from URL hash
-        else {
-          const savedHash = location.hash.replace('#', '');
-          if (savedHash && document.getElementById('page-' + savedHash)) {
-            const savedNav = document.querySelector('.nav-item[data-menu-id="' + savedHash + '"]');
-            setTimeout(() => {
-              showPage(savedHash, savedNav);
-              // Re-render table with new user's role filter applied
-              if (savedHash === 'applications' && typeof renderTable === 'function') setTimeout(renderTable, 50);
-            }, 100);
-          } else {
-            // Default: go to applications and render with correct role filter
-            const appsNav = document.querySelector('.nav-item[data-menu-id="applications"]');
-            setTimeout(() => showPage('applications', appsNav), 100);
-          }
-        }
-      });
     }
 
     // ── Login lockout countdown ticker ──
@@ -24921,11 +24696,12 @@ ${printContent}
       <td><span class="badge ${TK_STATUS_BADGE[t.status] || 'badge-hold'}">${TK_STATUS_LABEL[t.status] || t.status}</span></td>
       <td style="font-size:12px;color:var(--text3)">${t.date}</td>
       <td onclick="event.stopPropagation()">
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="tkOpenDetail('${t.id}')">💬 Notes</button>
           ${t.status !== 'resolved' && t.status !== 'closed'
-          ? `<button class="btn btn-success btn-sm" onclick="tkResolve('${t.id}')">✓ Resolve</button>`
-          : `<button class="btn btn-ghost btn-sm" onclick="tkReopen('${t.id}')">↩ Reopen</button>`}
-          <button class="btn btn-danger btn-sm" onclick="tkClose('${t.id}')">✕</button>
+          ? `<button class="btn btn-success btn-sm" onclick="tkResolve('${t.id}', this)">✓ Resolve</button>`
+          : `<button class="btn btn-ghost btn-sm" onclick="tkReopen('${t.id}', this)">↩ Reopen</button>`}
+          <button class="btn btn-danger btn-sm" onclick="tkClose('${t.id}', this)">✕</button>
         </div>
       </td>
     </tr>`).join('');
@@ -25003,45 +24779,141 @@ ${printContent}
       showToast(`Ticket #${ticket.id} created`, 'success');
     }
 
-    function tkResolve(id) {
+    function tkResolve(id, btnEl) {
       const t = TK_STORE.find(x => x.id === id);
       if (!t) return;
+      const prevStatus = t.status;
       t.status = 'resolved';
       // Sync twTickets
       const tw = twTickets.find(x => x.id === id);
       if (tw) tw.status = 'resolved';
       twUpdateCounts();
       tkRenderTable(tkActiveFilter);
+      // api-bridge.js patches this function to persist the change via
+      // PUT /api/tickets/{id} and roll back t.status/tw.status + re-render
+      // on failure. If the bridge isn't loaded (e.g. offline dev), fall back
+      // to a local-only toast so the UI still gives feedback.
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
-      showToast(`Ticket #${id} resolved`, 'success');
+      if (!window._bridgeTicketStatusPatched) {
+        showToast(`Ticket #${id} resolved (local only — not saved to server)`, 'warn');
+      }
     }
 
-    function tkReopen(id) {
+    function tkReopen(id, btnEl) {
+      if (!confirm(`Reopen ticket #${id}?`)) return;
       const t = TK_STORE.find(x => x.id === id);
       if (!t) return;
+      const prevStatus = t.status;
       t.status = 'open';
       const tw = twTickets.find(x => x.id === id);
       if (tw) tw.status = 'open';
       twUpdateCounts();
       tkRenderTable(tkActiveFilter);
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
-      showToast(`Ticket #${id} reopened`, 'info');
+      if (!window._bridgeTicketStatusPatched) {
+        showToast(`Ticket #${id} reopened (local only — not saved to server)`, 'warn');
+      }
     }
 
-    function tkClose(id) {
-      const idx = TK_STORE.findIndex(x => x.id === id);
-      if (idx < 0) return;
+    function tkClose(id, btnEl) {
+      const t = TK_STORE.find(x => x.id === id);
+      if (!t) return;
       if (!confirm(`Close ticket #${id}? This cannot be undone.`)) return;
-      TK_STORE.splice(idx, 1);
-      const twIdx = twTickets.findIndex(x => x.id === id);
-      if (twIdx >= 0) twTickets.splice(twIdx, 1);
+      const prevStatus = t.status;
+      // Phase 4B fix: this used to TK_STORE.splice() the ticket out entirely
+      // on close, so a closed ticket vanished from the list instead of
+      // showing a "Closed" status — and there was nothing left for Reopen
+      // to act on. Close now just changes status, same as every other
+      // transition, so F5/reload shows the real persisted state.
+      t.status = 'closed';
+      const tw = twTickets.find(x => x.id === id);
+      if (tw) tw.status = 'closed';
       twUpdateCounts();
       tkRenderTable(tkActiveFilter);
-      showToast(`Ticket #${id} closed`, 'info');
       if (typeof persistSave === 'function') persistSave();
+      if (!window._bridgeTicketStatusPatched) {
+        showToast(`Ticket #${id} closed (local only — not saved to server)`, 'warn');
+      }
     }
 
-    // Repopulate loan select when modal opens
+    // Phase 4B: comments/notes/activity panel. The actual GET/POST calls live
+    // in api-bridge.js (window._tkFetchComments / window._tkPostComment) since
+    // that's where the apiReq()/_apiId plumbing already lives for tickets —
+    // this just owns rendering the modal.
+    var tkDetailTicketId = null;
+    function tkOpenDetail(id) {
+      const t = TK_STORE.find(x => x.id === id);
+      if (!t) return;
+      tkDetailTicketId = id;
+      const titleEl = document.getElementById('tk-detail-title');
+      if (titleEl) titleEl.textContent = `#${t.id} — ${t.subject}`;
+      const metaEl = document.getElementById('tk-detail-meta');
+      if (metaEl) {
+        metaEl.innerHTML = `<span class="badge ${TK_STATUS_BADGE[t.status] || 'badge-hold'}">${TK_STATUS_LABEL[t.status] || t.status}</span>
+          <span class="badge ${TK_PRIORITY_BADGE[t.priority] || 'badge-hold'}">${TK_PRIORITY_LABEL[t.priority] || t.priority}</span>
+          ${t.desc ? `<div style="margin-top:8px;color:var(--text3);font-size:13px">${t.desc}</div>` : ''}`;
+      }
+      const listEl = document.getElementById('tk-detail-comments');
+      if (listEl) listEl.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px 0">Loading…</div>';
+      if (typeof openModal === 'function') openModal('modal-ticket-detail');
+
+      if (!t._apiId) {
+        if (listEl) listEl.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px 0">This ticket hasn\'t synced to the server yet — comments aren\'t available until it does.</div>';
+        return;
+      }
+      if (typeof window._tkFetchComments !== 'function') {
+        if (listEl) listEl.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px 0">Comments unavailable.</div>';
+        return;
+      }
+      window._tkFetchComments(t._apiId).then(function(comments) {
+        if (tkDetailTicketId !== id) return; // modal moved on to a different ticket
+        tkRenderComments(comments || []);
+      }).catch(function() {
+        if (listEl) listEl.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px 0">Failed to load comments.</div>';
+      });
+    }
+
+    function tkRenderComments(comments) {
+      const listEl = document.getElementById('tk-detail-comments');
+      if (!listEl) return;
+      if (!comments.length) {
+        listEl.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px 0">No comments or activity yet.</div>';
+        return;
+      }
+      listEl.innerHTML = comments.map(function(c) {
+        const isActivity = c.type === 'Activity';
+        const when = c.createdAt ? new Date(c.createdAt).toLocaleString('en-IN') : '';
+        return `<div style="padding:8px 0;border-bottom:1px solid var(--border);${isActivity ? 'color:var(--text3);font-size:12px;font-style:italic' : ''}">
+          ${isActivity ? '' : `<strong style="font-size:13px">${c.user || ''}</strong> `}
+          <span>${c.content}</span>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${when}</div>
+        </div>`;
+      }).join('');
+    }
+
+    function tkSubmitComment() {
+      const input = document.getElementById('tk-detail-comment-input');
+      const content = input ? input.value.trim() : '';
+      if (!content) return;
+      const t = TK_STORE.find(x => x.id === tkDetailTicketId);
+      if (!t || !t._apiId) { showToast('Ticket not yet synced to server', 'warn'); return; }
+      if (typeof window._tkPostComment !== 'function') return;
+      const btn = document.getElementById('tk-detail-comment-submit');
+      if (btn) btn.disabled = true;
+      window._tkPostComment(t._apiId, content).then(function(ok) {
+        if (btn) btn.disabled = false;
+        if (!ok) { showToast('Failed to save comment', 'error'); return; }
+        if (input) input.value = '';
+        window._tkFetchComments(t._apiId).then(function(comments) { tkRenderComments(comments || []); });
+      }).catch(function() {
+        if (btn) btn.disabled = false;
+        showToast('Failed to save comment', 'error');
+      });
+    }
+    window.tkOpenDetail = tkOpenDetail;
+    window.tkSubmitComment = tkSubmitComment;
+
+
     document.addEventListener('DOMContentLoaded', function () {
       const overlay = document.getElementById('modal-new-ticket');
       if (overlay) {
@@ -28600,6 +28472,15 @@ window.twPartnerList = [
 
 // ── Permission helper ──
 // Roles: admin → full; team_leader/login_team/sales → create+edit+view; partner → view only
+// NOTE (Phase 2 RBAC fix): this frontend allow-list is UI-only convenience —
+// it is NOT the security boundary. The backend DsaController now enforces
+// [Authorize(Roles = "Admin,Sales")] on Create/Update, which is the actual
+// authorization check. Of the roles listed below, only 'admin' and
+// 'sales_executive' are ever produced by a real login (see ROLE_MAP in
+// api-bridge.js); 'team_leader'/'login_team'/'product_team' are legacy
+// strings no current login flow issues. Left as-is (not narrowed) since the
+// backend is authoritative and doing so risks unintended UI regressions —
+// see Phase 2 report for full reasoning.
 function dsaCanCreate()  { return ['admin','team_leader','login_team','sales_executive','product_team'].includes(currentUser?.role); }
 function dsaCanEdit() {
   const role = currentUser?.role || window.currentUser?.role || '';
@@ -35756,7 +35637,7 @@ function invCheckStrength() {
   if (sl) { sl.textContent = val ? label : ''; sl.style.color = color; }
 }
 
-function invSaveSetup() {
+async function invSaveSetup() {
   if (_invTargetIdx === null) return;
   const u = twUsers[_invTargetIdx];
   if (!u) return;
@@ -35767,13 +35648,31 @@ function invSaveSetup() {
   if (pwd && pwd !== pwd2) { showToast('Passwords do not match', 'error'); return; }
   if (pwd && pwd.length < 6) { showToast('Password must be at least 6 characters', 'error'); return; }
 
-  // Save password as hash if provided
-  // SECURITY FIX: capture plaintext pwd now, mask in storage, then pass to email function
-  // This prevents the email from reading the already-masked '***' value from u._password
-  const _pwdForEmail = pwd || null; // captured before masking
+  // Set password via the real backend admin-reset endpoint — nothing is
+  // stored/hashed in localStorage. If this user has no backend record yet
+  // (_apiId missing), the password step is skipped with a clear toast
+  // rather than silently "succeeding" locally.
+  const _pwdForEmail = pwd || null; // captured before any masking, only used for the invite email below
+  let pwdOk = true;
   if (pwd) {
-    u._password = '***'; // never store plaintext
-    _setPassword(u.email, pwd); // async hash + persist
+    if (!u._apiId) {
+      showToast('Password not set — this user isn\u2019t linked to a backend account yet.', 'error');
+      pwdOk = false;
+    } else if (typeof window.apiReq !== 'function') {
+      showToast('Password not set — unable to reach the server.', 'error');
+      pwdOk = false;
+    } else {
+      const r = await window.apiReq('POST', '/users/' + u._apiId + '/reset-password', { newPassword: pwd });
+      if (r && r.success) {
+        u._password = '***'; // never store plaintext
+      } else {
+        const msg = (r && r.message) ? r.message
+                  : (r && Array.isArray(r.errors) && r.errors.length) ? r.errors.join(' ')
+                  : 'Failed to set password.';
+        showToast(msg, 'error');
+        pwdOk = false;
+      }
+    }
   }
 
   // Save photo data if uploaded
@@ -35789,17 +35688,17 @@ function invSaveSetup() {
   closeModal('modal-user-invitation');
 
   const summary = [];
-  if (pwd) summary.push('password set');
+  if (pwd && pwdOk) summary.push('password set');
   if (u._photoData) summary.push('photo uploaded');
   if (summary.length) {
     showToast('Invitation complete — ' + summary.join(', ') + ' ✓', 'success');
-  } else {
+  } else if (!pwd) {
     showToast('Invitation saved (no changes made)', 'info');
   }
   pushActivity('var(--accent)', `<strong>Invited user</strong>: ${u.name} — ${u.uid}`);
 
   // Fire invitation email automatically, passing plaintext pwd before it's masked
-  setTimeout(() => sysmailSendInvitation(u, _pwdForEmail), 300);
+  if (pwd && pwdOk) setTimeout(() => sysmailSendInvitation(u, _pwdForEmail), 300);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -35857,40 +35756,100 @@ function cpCheckStrength() {
   if (sl) { sl.textContent = val ? label : ''; sl.style.color = color; }
 }
 
+// NOTE (backend-driven change-password flow):
+// This is now the SINGLE handler for the self-service "Update Password"
+// button (modal-change-password). Previously api-bridge.js ALSO attached a
+// document-level click listener to the same button (matched via
+// [onclick*="cpSave"]) that independently called the real
+// /api/users/change-password backend endpoint. That meant two handlers
+// fired on one click: this function used to save a SHA-256 hash straight
+// into localStorage (efin_credentials_v1) and show a "success" toast
+// regardless of what the backend call did — so a backend failure (wrong
+// current password, expired session, validation error, network error)
+// could still show a fake success message to the user. That duplicate
+// listener has been removed from api-bridge.js (_patchChangePassword is now
+// a no-op) so this is the only code path, and it only ever reports success
+// after the backend confirms it. The admin "reset another user's password"
+// branch below is now backed by a real endpoint too — see
+// POST /api/users/{id}/reset-password (Admin-only, added in Phase 1).
 async function cpSavePassword() {
   const newPwd  = document.getElementById('cp-new')?.value    || '';
   const confirm = document.getElementById('cp-confirm')?.value || '';
   const errEl   = document.getElementById('cp-error');
+  const saveBtn = document.querySelector('#modal-change-password [onclick*="cpSavePassword"]');
 
   const showErr = msg => { if (errEl) { errEl.textContent = '✕ ' + msg; errEl.style.display = ''; } };
+  const clearErr = () => { if (errEl) errEl.style.display = 'none'; };
 
   if (!newPwd)           { showErr('New password cannot be empty'); return; }
   if (newPwd.length < 6) { showErr('Password must be at least 6 characters'); return; }
   if (newPwd !== confirm) { showErr('Passwords do not match'); return; }
 
   if (_cpTargetEmail === null) {
-    // Self-service — verify current password against stored hash
+    // Self-service — current password is required and is verified by the
+    // backend itself (not against any local store). Nothing is written to
+    // localStorage at any point in this flow.
     const curPwd = document.getElementById('cp-current')?.value || '';
-    const credMap = _loadCredentials();
-    if (credMap && credMap[currentUser.email]) {
-      const curHash = await _sha256(curPwd);
-      if (curHash !== credMap[currentUser.email]) {
-        showErr('Current password is incorrect'); return;
-      }
+    if (!curPwd) { showErr('Current password is required'); return; }
+    if (typeof window.apiReq !== 'function') {
+      showErr('Unable to reach the server. Please check your connection and try again.');
+      return;
     }
-    await _setPassword(currentUser.email, newPwd);
-    const tu = twUsers.find(u => u.email === currentUser.email);
-    if (tu) tu._password = '***';
-    closeModal('modal-change-password');
-    showToast('Password updated successfully ✓', 'success');
+    clearErr();
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.dataset._origLabel = saveBtn.textContent; saveBtn.textContent = 'Updating…'; }
+    let r;
+    try {
+      r = await window.apiReq('POST', '/users/change-password', {
+        currentPassword: curPwd,
+        newPassword: newPwd,
+        confirmPassword: confirm
+      });
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = saveBtn.dataset._origLabel || '🔐 Update Password'; }
+    }
+    if (r && r.success) {
+      closeModal('modal-change-password');
+      showToast('Password updated successfully ✓', 'success');
+    } else {
+      const msg = (r && r.message) ? r.message
+                : (r && Array.isArray(r.errors) && r.errors.length) ? r.errors.join(' ')
+                : 'Failed to change password. Please check your current password and try again.';
+      showErr(msg);
+      return; // do NOT close the modal or show success on failure
+    }
   } else {
-    // Admin resetting for another user — no current password required
-    await _setPassword(_cpTargetEmail, newPwd);
-    const tu = twUsers.find(u => u.email === _cpTargetEmail);
-    if (tu) tu._password = '***';
-    closeModal('modal-change-password');
-    showToast('Password reset for ' + (_cpTargetEmail) + ' ✓', 'success');
-    pushActivity('var(--accent2)', `<strong>Reset password</strong> for: ${tu?.name || _cpTargetEmail}`);
+    // Admin resetting another user's password — now backed by a real
+    // endpoint: POST /api/users/{id}/reset-password [Admin only]. No
+    // current password is required (Admin authorization is what grants
+    // this), and nothing is written to localStorage.
+    if (typeof window.apiReq !== 'function') {
+      showErr('Unable to reach the server. Please check your connection and try again.');
+      return;
+    }
+    const tu = (typeof twUsers !== 'undefined' ? twUsers : []).find(u => u.email === _cpTargetEmail);
+    if (!tu || !tu._apiId) {
+      showErr('This user isn\u2019t linked to a backend account yet, so their password can\u2019t be reset. Make sure the user is saved/synced first.');
+      return;
+    }
+    clearErr();
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.dataset._origLabel = saveBtn.textContent; saveBtn.textContent = 'Resetting…'; }
+    let r;
+    try {
+      r = await window.apiReq('POST', '/users/' + tu._apiId + '/reset-password', { newPassword: newPwd });
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = saveBtn.dataset._origLabel || '🔐 Update Password'; }
+    }
+    if (r && r.success) {
+      closeModal('modal-change-password');
+      showToast('Password reset for ' + _cpTargetEmail + ' ✓', 'success');
+      pushActivity('var(--accent2)', `<strong>Reset password</strong> for: ${tu.name || _cpTargetEmail}`);
+    } else {
+      const msg = (r && r.message) ? r.message
+                : (r && Array.isArray(r.errors) && r.errors.length) ? r.errors.join(' ')
+                : 'Failed to reset password. You may not be authorized to do this.';
+      showErr(msg);
+      return; // do NOT close the modal or show success on failure
+    }
   }
   _cpTargetEmail = null;
 }
@@ -36411,12 +36370,16 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       if (window.PAYOUT_CLAIMS) localStorage.setItem(STORE_KEYS.payoutClaims, JSON.stringify(PAYOUT_CLAIMS));
       if (window.twPartnerList) localStorage.setItem(STORE_KEYS.partners,     JSON.stringify(twPartnerList));
       if (window.twDSAList)     localStorage.setItem(STORE_KEYS.dsaList,      JSON.stringify(twDSAList));
-      if (window.twTickets)     localStorage.setItem(STORE_KEYS.tickets,      JSON.stringify(twTickets));
+      // Phase 4B: tickets (twTickets / TK_STORE) are intentionally NOT written
+      // to localStorage anymore. PostgreSQL/RDS via /api/tickets is now the
+      // sole source of truth — see _syncTickets() in api-bridge.js, which
+      // reloads TK_STORE from the API on boot and after every mutation.
+      // Persisting them here would let a stale local copy silently win over
+      // the server on the next load, which is exactly what Phase 4B removes.
     if (window.OBLIGATIONS)   localStorage.setItem(STORE_KEYS.obligations,  JSON.stringify(OBLIGATIONS));
       if (window.ROLES)         localStorage.setItem(STORE_KEYS.roles,        JSON.stringify(ROLES));
       if (window.BANKS_STORE)   localStorage.setItem(STORE_KEYS.banks,        JSON.stringify(BANKS_STORE));
       if (window.RPT_TARGETS)   localStorage.setItem(STORE_KEYS.rptTargets,   JSON.stringify(RPT_TARGETS));
-      if (window.TK_STORE)      localStorage.setItem(STORE_KEYS.ticketStore,  JSON.stringify(TK_STORE));
       if (window.ASSIGNMENT_AUDIT_LOG) localStorage.setItem(STORE_KEYS.assignmentLog, JSON.stringify(ASSIGNMENT_AUDIT_LOG));
     } catch (e) {
       // Storage quota exceeded — attempt to save only critical data
@@ -36477,24 +36440,14 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       savedUsers.filter(function (u) { return !existEmails.has(u.email); }).forEach(function (u) { twUsers.push(u); });
     }
 
-    // Helpdesk tickets master (merge persisted; mutate in place since TK_STORE is const)
-    var savedTk = safeJSON(_lsGet(STORE_KEYS.ticketStore), null);
-    if (savedTk && Array.isArray(savedTk) && window.TK_STORE) {
-      var tkIds = new Set(TK_STORE.map(function(t){ return t.id; }));
-      savedTk.forEach(function(st){
-        if (!st || !st.id) return;
-        var idx = TK_STORE.findIndex(function(t){ return t.id === st.id; });
-        if (idx >= 0) TK_STORE[idx] = st;
-        else if (!tkIds.has(st.id)) TK_STORE.push(st);
-      });
-      if (savedTk.length) {
-        var savedTkIds = new Set(savedTk.map(function(t){ return t.id; }));
-        for (var ti = TK_STORE.length - 1; ti >= 0; ti--) {
-          if (!savedTkIds.has(TK_STORE[ti].id)) TK_STORE.splice(ti, 1);
-        }
-      }
-      loaded = true;
-    }
+    // Phase 4B: tickets are no longer restored from localStorage here.
+    // TK_STORE is populated exclusively from GET /api/tickets (see
+    // _syncTickets() in api-bridge.js, called on boot). Any ticket data still
+    // sitting in the old localStorage keys (STORE_KEYS.ticketStore /
+    // STORE_KEYS.tickets) from a pre-4B session is handled separately by
+    // tkMigrateLegacyLocalTickets() in api-bridge.js — which POSTs
+    // never-synced tickets to the API instead of silently merging or
+    // discarding them, per the data-safety requirement.
 
     // Report targets (merge persisted monthly targets; mutate in place since const)
     var savedTargets = safeJSON(_lsGet(STORE_KEYS.rptTargets), null);
@@ -36607,12 +36560,10 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       });
     }
 
-    // Tickets
-    var savedTickets = safeJSON(_lsGet(STORE_KEYS.tickets), null);
-    if (savedTickets && Array.isArray(savedTickets) && window.twTickets) {
-      var tIds = new Set(twTickets.map(function(t){ return t.id; }));
-      savedTickets.filter(function(t){ return !tIds.has(t.id); }).forEach(function(t){ twTickets.push(t); });
-    }
+    // Phase 4B: twTickets (Team Overview dashboard projection) is likewise no
+    // longer restored from localStorage — it's derived from TK_STORE via
+    // tkSaveTicket()/_syncTickets(), which is itself API-backed. See the note
+    // above the removed TK_STORE restore block.
 
     // Obligations — keyed by appId
     var savedObligations = safeJSON(_lsGet(STORE_KEYS.obligations), null);

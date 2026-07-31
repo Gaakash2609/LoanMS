@@ -6159,6 +6159,26 @@
     </div>
   </div>
 
+  <!-- ════ TICKET DETAIL / COMMENTS-ACTIVITY (Phase 4B) ════ -->
+  <div class="modal-overlay" id="modal-ticket-detail">
+    <div class="modal modal-sm">
+      <div class="modal-head">
+        <div class="modal-title" id="tk-detail-title">Ticket</div><button class="modal-close"
+          onclick="closeModal('modal-ticket-detail')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="tk-detail-meta" style="margin-bottom:12px"></div>
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Comments &amp; Activity</div>
+        <div id="tk-detail-comments" style="max-height:280px;overflow-y:auto;margin-bottom:12px"></div>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="tk-detail-comment-input" placeholder="Add a note…" style="flex:1"
+            onkeydown="if(event.key==='Enter'){tkSubmitComment();}">
+          <button class="btn btn-primary btn-sm" id="tk-detail-comment-submit" onclick="tkSubmitComment()">Post</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── MODAL: TRACKING WIZARD ── -->
   <div class="modal-overlay" id="modal-tracking">
     <div class="modal modal-sm">
@@ -9357,7 +9377,7 @@ Please log in and change your password immediately.
   <!-- credential-seed.js: must run before efin-app.js -->
   <script src="/js/credential-seed.js"></script>
   <script src="/js/login-helpers.js"></script>
-  <script src="/js/efin-app.js?v=56"></script>
+  <script src="/js/efin-app.js?v=57"></script>
   <script src="/js/kyc.js?v=42"></script>
   <script src="/js/tasks.js"></script>
   <script src="/js/user-profile.js"></script>
@@ -9373,7 +9393,7 @@ Please log in and change your password immediately.
   <script src="/js/cibil-view.js?v=8"></script>
   <script src="/js/ai-agent.js"></script>
   <script src="/js/lender-email-workflow.js"></script>
-  <script src="/js/api-bridge.js"></script>
+  <script src="/js/api-bridge.js?v=2"></script>
 
   <!-- ══ Login page function safety wrapper ══
        Moved to /js/login-helpers.js (must load after boot.js) -->

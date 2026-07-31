@@ -17,16 +17,20 @@ public class AppDbContext : DbContext
     public DbSet<TrackingEntry>     TrackingEntries     => Set<TrackingEntry>();
     public DbSet<LoanTask>          Tasks               => Set<LoanTask>();
     public DbSet<Ticket>            Tickets             => Set<Ticket>();
+    public DbSet<TicketComment>     TicketComments      => Set<TicketComment>();
     public DbSet<PayoutClaim>       PayoutClaims        => Set<PayoutClaim>();
     public DbSet<Location>          Locations           => Set<Location>();
     public DbSet<Team>              Teams               => Set<Team>();
     public DbSet<TeamMember>        TeamMembers         => Set<TeamMember>();
     public DbSet<DsaPartner>        DsaPartners         => Set<DsaPartner>();
+    public DbSet<DsaDocument>       DsaDocuments        => Set<DsaDocument>();
     public DbSet<AppSetting>        AppSettings         => Set<AppSetting>();
     public DbSet<AuditLog>          AuditLogs           => Set<AuditLog>();
+    public DbSet<AssignmentLog>     AssignmentLogs      => Set<AssignmentLog>();
     public DbSet<PayoutRule>        PayoutRules         => Set<PayoutRule>();
     public DbSet<LoanReference>     LoanReferences      => Set<LoanReference>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<BankMaster>        Banks               => Set<BankMaster>();
 
     // CIBIL / Bureau Report Entities
     public DbSet<BureauReport>           BureauReports           => Set<BureauReport>();
@@ -63,6 +67,7 @@ public class AppDbContext : DbContext
             e.Property(c => c.PanNumber).HasMaxLength(10);
             e.Property(c => c.AadhaarNumber).HasMaxLength(12);
             e.Property(c => c.MonthlyIncome).HasColumnType("decimal(18,2)");
+            e.Property(c => c.MonthlyObligations).HasColumnType("decimal(18,2)");
             e.Property(c => c.Gender).HasMaxLength(1);
             e.Property(c => c.FatherName).HasMaxLength(150);
             e.Property(c => c.ResidenceType).HasMaxLength(40);
@@ -153,19 +158,56 @@ public class AppDbContext : DbContext
             e.HasOne(t => t.AssignedTo).WithMany().HasForeignKey(t => t.AssignedToUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
         });
 
+        mb.Entity<TicketComment>(e => {
+            e.HasKey(c => c.Id);
+            e.HasIndex(c => new { c.TicketId, c.CreatedAt });
+            e.HasQueryFilter(c => !c.IsDeleted);
+            e.HasOne(c => c.Ticket).WithMany().HasForeignKey(c => c.TicketId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(c => c.User).WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         mb.Entity<PayoutClaim>(e => {
             e.HasKey(p => p.Id);
             e.Property(p => p.ClaimAmount).HasColumnType("decimal(18,2)");
+            e.Property(p => p.ClaimType).HasMaxLength(20).HasDefaultValue("Sales");
             e.HasQueryFilter(p => !p.IsDeleted);
             e.HasOne(p => p.Loan).WithMany().HasForeignKey(p => p.LoanId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(p => p.ClaimedBy).WithMany().HasForeignKey(p => p.ClaimedByUserId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(p => p.ProcessedBy).WithMany().HasForeignKey(p => p.ProcessedByUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            // Phase 3: idempotency / duplicate-claim protection. One claim per
+            // (loan, claimant, capacity) — e.g. the same person can hold a
+            // "Sales" claim and a separately-earned "Dsa" claim on one loan,
+            // but never two "Sales" claims on the same loan.
+            e.HasIndex(p => new { p.LoanId, p.ClaimedByUserId, p.ClaimType })
+                .IsUnique()
+                .HasFilter("\"IsDeleted\" = false")
+                .HasDatabaseName("IX_PayoutClaims_Loan_Claimant_Type_Unique");
         });
 
         mb.Entity<Location>(e => {
             e.HasKey(l => l.Id);
             e.Property(l => l.Name).HasMaxLength(100).IsRequired();
             e.HasQueryFilter(l => !l.IsDeleted);
+        });
+
+        mb.Entity<BankMaster>(e => {
+            e.HasKey(b => b.Id);
+            e.Property(b => b.BankName).HasMaxLength(150).IsRequired();
+            e.Property(b => b.IfscPrefix).HasMaxLength(20);
+            e.Property(b => b.EmpCode).HasMaxLength(50);
+            e.Property(b => b.Location).HasMaxLength(200);
+            e.Property(b => b.RmName).HasMaxLength(150);
+            e.Property(b => b.RmMobile).HasMaxLength(15);
+            e.Property(b => b.Email).HasMaxLength(200);
+            e.Property(b => b.Remarks).HasMaxLength(500);
+            e.HasQueryFilter(b => !b.IsDeleted);
+            // Prevent duplicate active bank records with the same name (case-insensitive
+            // comparison is enforced in the controller before insert; this index is the
+            // last-line-of-defense DB-level guard against races/duplicates).
+            e.HasIndex(b => b.BankName)
+                .IsUnique()
+                .HasFilter("\"IsDeleted\" = false")
+                .HasDatabaseName("IX_Banks_BankName_Unique_Active");
         });
 
         mb.Entity<Team>(e => {
@@ -188,10 +230,31 @@ public class AppDbContext : DbContext
             e.Property(d => d.Name).HasMaxLength(150).IsRequired();
             e.Property(d => d.Code).HasMaxLength(20).IsRequired();
             e.Property(d => d.PartnerType).HasConversion<string>().HasMaxLength(20);
+            e.Property(d => d.Pan).HasMaxLength(20);
+            e.Property(d => d.OfficeAddress).HasMaxLength(300);
+            e.Property(d => d.OfficeState).HasMaxLength(100);
+            e.Property(d => d.OfficePin).HasMaxLength(10);
+            e.Property(d => d.OfficeAddressType).HasMaxLength(30);
+            e.Property(d => d.Category).HasMaxLength(30);
             e.HasIndex(d => d.LinkedUserId);
+            e.HasIndex(d => d.MappedDsaId);
             e.HasQueryFilter(d => !d.IsDeleted);
             e.HasOne(d => d.MappedSalesUser).WithMany().HasForeignKey(d => d.MappedSalesUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
             e.HasOne(d => d.LinkedUser).WithMany().HasForeignKey(d => d.LinkedUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            // Self-referencing: a Partner record maps to a DSA record. SetNull (not Cascade) —
+            // deleting/soft-deleting a DSA must never cascade-delete the Partners mapped to it.
+            e.HasOne(d => d.MappedDsa).WithMany().HasForeignKey(d => d.MappedDsaId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        mb.Entity<DsaDocument>(e => {
+            e.HasKey(d => d.Id);
+            e.Property(d => d.DocumentName).HasMaxLength(255).IsRequired();
+            e.Property(d => d.DocumentType).HasMaxLength(50).IsRequired();
+            e.Property(d => d.FilePath).HasMaxLength(500).IsRequired();
+            e.Property(d => d.UploadedByUserId).HasMaxLength(50);
+            e.HasIndex(d => d.DsaPartnerId);
+            e.HasQueryFilter(d => !d.IsDeleted);
+            e.HasOne(d => d.DsaPartner).WithMany(p => p.Documents).HasForeignKey(d => d.DsaPartnerId).OnDelete(DeleteBehavior.Cascade);
         });
 
         mb.Entity<AppSetting>(e => {
@@ -208,6 +271,21 @@ public class AppDbContext : DbContext
             e.HasIndex(a => a.CreatedAt);
             e.Property(a => a.Action).HasMaxLength(50).IsRequired();
             e.Property(a => a.EntityName).HasMaxLength(100).IsRequired();
+        });
+
+        mb.Entity<AssignmentLog>(e => {
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => new { a.EntityType, a.EntityId });
+            e.HasIndex(a => a.CreatedAt);
+            e.Property(a => a.EntityType).HasMaxLength(50).IsRequired();
+            e.Property(a => a.FromUserName).HasMaxLength(150);
+            e.Property(a => a.ToUserName).HasMaxLength(150).IsRequired();
+            e.Property(a => a.AssignedByName).HasMaxLength(150);
+            e.Property(a => a.Notes).HasMaxLength(500);
+            // Insert-only audit trail — no query filter needed (no IsDeleted column),
+            // no FK constraints to Users (mirrors AuditLog's UserId, which is also a
+            // plain nullable int, not a navigation property) so a user being removed
+            // later never breaks or cascades against historical assignment records.
         });
 
         mb.Entity<PayoutRule>(e => {

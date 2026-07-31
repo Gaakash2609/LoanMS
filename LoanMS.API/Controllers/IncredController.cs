@@ -15,21 +15,33 @@ namespace LoanMS.API.Controllers;
 
 /// <summary>
 /// InCred API Proxy Controller — mirrors incred_mixin.py exactly.
-/// Credentials: read from DB (encrypted). Falls back to built-in defaults
-/// so the app works on fresh install without any Settings configuration.
+/// Credentials: read from DB (encrypted), configured via Settings.
 /// </summary>
-[AllowAnonymous] // InCred proxy — secured by InCred's own OAuth2 (client_credentials)
+// PHASE 6 SECURITY FIX (two issues found in the same controller):
+//  1) This controller was [AllowAnonymous] at the class level, with the
+//     comment that it's "secured by InCred's own OAuth2 (client_credentials)".
+//     That reasoning only covers InCred's side — it does not stop an anonymous
+//     internet caller from hitting LoanMS's own proxy endpoints (application
+//     init, offer request/status, loan creation, document upload, disbursement
+//     lookup, ...) using LoanMS's own stored InCred credentials, with zero
+//     LoanMS-side authentication. Changed to [Authorize] so only logged-in
+//     LoanMS users can invoke it, consistent with every other business
+//     controller in this API.
+//  2) The class previously carried hardcoded, real-looking InCred
+//     client_id/client_secret constants as a "built-in fallback" so the app
+//     "works on fresh install without Settings configuration". A secret
+//     committed to source control is a leaked credential regardless of who
+//     can currently see the repo, and should be rotated with InCred and
+//     stored only in AppSettings from now on. The hardcoded fallback has been
+//     removed; _loadCreds() below now throws if InCred is not configured in
+//     Settings, the same fail-closed pattern already used for Jwt:Key in
+//     Program.cs, instead of silently operating with a shipped secret.
+[Authorize]
 public class IncredController : BaseController
 {
     private const string KEY_BASE_URL      = "incred_base_url";
     private const string KEY_CLIENT_ID     = "incred_client_id";
     private const string KEY_CLIENT_SECRET = "incred_client_secret_enc";
-
-    // ── Built-in fallback credentials (same as incred_mixin.py hardcoded values) ──
-    // These match: client_id="5251599593571026P" / client_secret="VGCm5yu8wSCfog4zL8gdqf353Rj08gXi"
-    private const string DEFAULT_BASE_URL       = "https://api.incred.com/v3";
-    internal const string DEFAULT_CLIENT_ID      = "5251599593571026P";
-    private const string DEFAULT_CLIENT_SECRET  = "VGCm5yu8wSCfog4zL8gdqf353Rj08gXi";
 
     private readonly AppDbContext _db;
     private readonly IHttpClientFactory _http;
@@ -47,7 +59,7 @@ public class IncredController : BaseController
         _cache = cache;
     }
 
-    // ── Load credentials from DB; fall back to built-in if not configured ────
+    // ── Load credentials from DB (Settings); no built-in fallback — see PHASE 6 fix ──
     private async Task<(string baseUrl, string clientId, string clientSecret)> _loadCreds()
     {
         var baseUrl   = await _db.AppSettings
@@ -72,13 +84,20 @@ public class IncredController : BaseController
             }
             catch (Exception ex)
             {
-                _log.LogWarning(ex, "Failed to decrypt InCred secret from DB — using built-in defaults");
+                _log.LogWarning(ex, "Failed to decrypt InCred secret from DB — treating InCred as unconfigured");
             }
         }
 
-        // Fall back to built-in defaults (matches incred_mixin.py hardcoded values)
-        _log.LogInformation("InCred credentials not in DB — using built-in defaults");
-        return (DEFAULT_BASE_URL, DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET);
+        // PHASE 6 SECURITY FIX: previously fell back to hardcoded, committed
+        // InCred credentials here. That fallback has been removed — InCred
+        // access must now be configured via Settings (incred_base_url,
+        // incred_client_id, incred_client_secret_enc). Fail closed instead of
+        // silently operating with a shipped secret, matching how Program.cs
+        // already refuses to start without a configured Jwt:Key.
+        _log.LogError("InCred credentials are not configured in Settings.");
+        throw new InvalidOperationException(
+            "InCred is not configured. Set incred_base_url, incred_client_id, and " +
+            "incred_client_secret_enc in Settings before using InCred integration endpoints.");
     }
 
     // ── Token caching (Item 4) ──────────────────────────────────────────────
@@ -955,6 +974,15 @@ public class IncredController : BaseController
     // ─────────────────────────────────────────────────────────────────────────
     private const string KEY_WEBHOOK_LOGS = "incred_webhook_logs";
 
+    // PHASE 6 FIX: the class was changed from [AllowAnonymous] to [Authorize]
+    // (see class-level comment above) to stop anonymous internet callers from
+    // driving the InCred proxy endpoints. That change would have also broken
+    // THIS endpoint — InCred's own server calls this URL directly with no
+    // LoanMS login, so it must stay reachable without a JWT. [AllowAnonymous]
+    // on a method always overrides a class-level [Authorize], so this one
+    // endpoint is deliberately re-opened while everything else in the
+    // controller now requires authentication.
+    [AllowAnonymous]
     [HttpPost]
     [Route("/incred/loan/webhook")]
     public async Task<IActionResult> ReceiveWebhook([FromBody] JsonElement payload)
@@ -1059,11 +1087,13 @@ public class IncredController : BaseController
 
     // NOTE: webhook logs are now served by the Admin-only
     // GET /api/settings/webhook-logs endpoint (SettingsController) instead of
-    // from here — this controller is class-level [AllowAnonymous] (required
-    // for the POST webhook receiver above, which InCred's server calls without
-    // a login), so a GET action placed here would have been readable by anyone,
-    // logged in or not. Settings → System & Data → Webhook Logs now points at
-    // the properly Admin-gated endpoint.
+    // from here — the inbound webhook receiver above is individually marked
+    // [AllowAnonymous] (required since InCred's server calls it without a
+    // login), while the rest of this controller now requires authentication
+    // (see PHASE 6 fix above), so a GET action placed here would previously
+    // have been readable by anyone via the old class-wide anonymous access.
+    // Settings → System & Data → Webhook Logs now points at the properly
+    // Admin-gated endpoint.
     private class WebhookLogEntry
     {
         [JsonPropertyName("appId")]  public string? AppId  { get; set; }

@@ -306,10 +306,15 @@ public class SettingsController : BaseController
     // ── Webhook Logs — Admin only (Settings → System & Data) ─────────────────
     // Reads the same "incred_webhook_logs" AppSettings key that IncredController's
     // webhook receiver writes to. Added here (instead of using IncredController's
-    // own GET /api/incred/webhook/logs) because that controller is class-level
-    // [AllowAnonymous] — needed for the inbound InCred webhook callback itself —
-    // which meant the logs endpoint was unintentionally readable by anyone,
-    // including unauthenticated requests. This controller enforces Admin-only.
+    // own GET /api/incred/webhook/logs) because, at the time, that controller was
+    // class-level [AllowAnonymous] — needed for the inbound InCred webhook
+    // callback itself — which meant a logs GET placed there would have been
+    // unintentionally readable by anyone, including unauthenticated requests.
+    // PHASE 6 UPDATE: IncredController is now [Authorize] at the class level,
+    // with [AllowAnonymous] narrowed down to just the one inbound webhook
+    // receiver method — but this Admin-gated copy here remains the correct,
+    // intentionally-separate home for the logs view regardless, so it's kept
+    // as-is rather than moved.
     private const string KEY_INCRED_WEBHOOK_LOGS = "incred_webhook_logs";
 
     [HttpGet("webhook-logs")]

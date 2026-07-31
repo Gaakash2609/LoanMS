@@ -61,6 +61,7 @@ public class CustomerService : ICustomerService
             State          = request.State,
             PinCode        = request.PinCode,
             MonthlyIncome  = request.MonthlyIncome,
+            MonthlyObligations = request.MonthlyObligations,
             EmploymentType = request.EmploymentType,
             CompanyName    = request.CompanyName,
             CibilScore     = request.CibilScore,
@@ -94,6 +95,7 @@ public class CustomerService : ICustomerService
         customer.State          = request.State;
         customer.PinCode        = request.PinCode;
         customer.MonthlyIncome  = request.MonthlyIncome;
+        customer.MonthlyObligations = request.MonthlyObligations;
         customer.EmploymentType = request.EmploymentType;
         customer.CompanyName    = request.CompanyName;
         customer.CibilScore     = request.CibilScore;
@@ -160,6 +162,7 @@ public class CustomerService : ICustomerService
             State          = c.State,
             PinCode        = c.PinCode,
             MonthlyIncome  = c.MonthlyIncome,
+            MonthlyObligations = c.MonthlyObligations,
             EmploymentType = c.EmploymentType,
             CompanyName    = c.CompanyName,
             CibilScore     = c.CibilScore,

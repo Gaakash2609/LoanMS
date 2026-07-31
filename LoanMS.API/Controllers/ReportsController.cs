@@ -13,6 +13,76 @@ public class ReportsController : BaseController
     private readonly AppDbContext _db;
     public ReportsController(AppDbContext db) => _db = db;
 
+    // ── Phase 5C — RPT Targets ────────────────────────────────────────────────
+    // Reuses the existing AppSettings key-value table (already in production
+    // since an earlier phase — same table SettingsController uses for InCred/AI
+    // credentials) instead of introducing a new table for two numbers. Falls
+    // back to the original hardcoded defaults (7.0 / 95.0) whenever a value
+    // hasn't been configured yet, so Summary()'s existing behavior is
+    // unchanged for every environment until an Admin explicitly sets a target.
+    private const string KEY_TAT_TARGET_DAYS = "rpt_tat_target_days";
+    private const string KEY_DDR_TARGET_PCT  = "rpt_ddr_target_pct";
+    private const double DEFAULT_TAT_TARGET_DAYS = 7.0;
+    private const double DEFAULT_DDR_TARGET_PCT  = 95.0;
+
+    private async Task<(double tatTarget, double ddrTarget)> GetReportTargetsAsync()
+    {
+        var tatRaw = await _db.AppSettings.Where(s => s.Key == KEY_TAT_TARGET_DAYS).Select(s => s.Value).FirstOrDefaultAsync();
+        var ddrRaw = await _db.AppSettings.Where(s => s.Key == KEY_DDR_TARGET_PCT).Select(s => s.Value).FirstOrDefaultAsync();
+        var tat = double.TryParse(tatRaw, out var t) ? t : DEFAULT_TAT_TARGET_DAYS;
+        var ddr = double.TryParse(ddrRaw, out var d) ? d : DEFAULT_DDR_TARGET_PCT;
+        return (tat, ddr);
+    }
+
+    // Read: any authenticated user with report access can view current targets
+    // (same as Summary below, which already embeds these values).
+    [HttpGet("targets")]
+    public async Task<IActionResult> GetTargets()
+    {
+        var (tat, ddr) = await GetReportTargetsAsync();
+        return Ok(ApiResponseDto<object>.Ok(new { tatTargetDays = tat, ddrTargetPct = ddr }));
+    }
+
+    // Write: Admin only, matching the RBAC convention already used for
+    // Settings/Locations/Banks mutation endpoints.
+    [HttpPut("targets")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateTargets([FromBody] ReportTargetsDto dto)
+    {
+        if (dto.TatTargetDays.HasValue && dto.TatTargetDays.Value <= 0)
+            return BadRequest(ApiResponseDto<object>.Fail("TAT target must be a positive number of days."));
+        if (dto.DdrTargetPct.HasValue && (dto.DdrTargetPct.Value < 0 || dto.DdrTargetPct.Value > 100))
+            return BadRequest(ApiResponseDto<object>.Fail("DDR target must be between 0 and 100."));
+        if (!dto.TatTargetDays.HasValue && !dto.DdrTargetPct.HasValue)
+            return BadRequest(ApiResponseDto<object>.Fail("Provide at least one of tatTargetDays or ddrTargetPct."));
+
+        if (dto.TatTargetDays.HasValue)
+            await UpsertReportTargetSetting(KEY_TAT_TARGET_DAYS, dto.TatTargetDays.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (dto.DdrTargetPct.HasValue)
+            await UpsertReportTargetSetting(KEY_DDR_TARGET_PCT, dto.DdrTargetPct.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        await _db.SaveChangesAsync();
+        var (tat, ddr) = await GetReportTargetsAsync();
+        return Ok(ApiResponseDto<object>.Ok(new { tatTargetDays = tat, ddrTargetPct = ddr }, "Targets updated."));
+    }
+
+    private async Task UpsertReportTargetSetting(string key, string value)
+    {
+        var existing = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == key);
+        if (existing != null)
+        {
+            existing.Value = value; existing.Category = "reports";
+            existing.UpdatedAt = DateTime.UtcNow; existing.IsDeleted = false;
+        }
+        else
+        {
+            _db.AppSettings.Add(new LoanMS.Domain.Entities.AppSetting
+            {
+                Key = key, Value = value, Category = "reports", CreatedAt = DateTime.UtcNow
+            });
+        }
+    }
+
     [HttpGet("pipeline")]
     public async Task<IActionResult> Pipeline([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
@@ -293,6 +363,10 @@ public class ReportsController : BaseController
         var conversionRate = stats?.Total > 0 ? Math.Round((stats.Disbursed / (double)stats.Total) * 100, 2) : 0;
         var averageLoanAmount = stats?.Total > 0 ? Math.Round((double)stats.TotalReq / (double)stats.Total, 0) : 0;
 
+        // Phase 5C: targets now come from AppSettings (DB), falling back to the
+        // original hardcoded defaults when unconfigured — see GetReportTargetsAsync.
+        var (tatTarget, ddrTarget) = await GetReportTargetsAsync();
+
         return Ok(ApiResponseDto<object>.Ok(new {
             loans = stats,
             loansByStatus = loansByStatus,
@@ -304,14 +378,20 @@ public class ReportsController : BaseController
             openTickets = tickets,
             // TAT and DDR metrics (Real calculations from DB)
             avgTatDays = Math.Round(avgTatDays, 2),
-            tatTarget = 7.0,
+            tatTarget = tatTarget,
             disbursedLoans = disbursedCount,
             ddrRatio = Math.Round(ddrRatio, 2),
-            ddrTarget = 95.0,
+            ddrTarget = ddrTarget,
             conversionRate = conversionRate,
             averageLoanAmount = (long)averageLoanAmount,
             totalPortfolio = stats?.TotalDisb ?? 0,
             asOf = now
         }));
     }
+}
+
+public class ReportTargetsDto
+{
+    public double? TatTargetDays { get; set; }
+    public double? DdrTargetPct { get; set; }
 }

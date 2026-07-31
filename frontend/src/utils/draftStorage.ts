@@ -1,29 +1,29 @@
-// ── Wizard Draft Storage ──────────────────────────────────────────────────
-// Lightweight local persistence for in-progress "New Application" wizard
-// sessions so users can leave and Resume later from Applications → Drafts.
+// ── Wizard Draft Index (metadata only — NOT business data) ─────────────────
+// The actual in-progress "New Application" wizard data (name, PAN, Aadhar,
+// address, salary, references, ...) is business/PII data and is persisted
+// ONLY server-side, via wizardApi.saveDraft -> POST /api/wizard/draft, into
+// the real Loan+Customer tables. Resuming a draft reads that same data back
+// from the server via wizardApi.getDraft -> GET /api/wizard/draft/{loanId}.
 //
-// Scope note: this is purely additive — it does not touch the wizard's
-// business logic, validation, or submit workflow. A draft is only ever
-// read/written through the functions below, and a draft is only removed
-// when (a) its own Resume flow is submitted successfully, (b) the user
-// explicitly discards it from the Drafts list, or (c) it has expired
-// (> 7 days old). Starting a new application always gets its own fresh
-// draft id, so it can never overwrite or delete another draft.
+// What lives here in localStorage is a small, non-sensitive index — just
+// enough to render the "Applications -> Drafts" list (which draft ids exist,
+// what step they're on, when they were touched) and to remember which
+// backend loanId a given local draft id maps to. If localStorage is cleared,
+// nothing is lost except this convenience list: every draft still exists,
+// and is still fully recoverable, in the database.
 
-const PREFIX = 'wizard_draft:'
+const PREFIX = 'wizard_draft_meta:'
 const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-export interface WizardDraft<T = unknown> {
+export interface WizardDraftMeta {
   id: string
   step: number
-  data: T
-  // Small denormalized fields for display in the Drafts list, so we don't
-  // need to deserialize/inspect `data` just to render a table row.
+  // Small denormalized field for display in the Drafts list only.
   label: string
   loanType?: string
-  // Links this local draft to its backend Draft Loan record (see
-  // wizardApi.saveDraft) so resuming completes/updates that same database
-  // row instead of only ever reading from localStorage.
+  // Links this local draft id to its backend Draft Loan record (see
+  // wizardApi.saveDraft/getDraft) — this is what resuming actually uses to
+  // fetch the real form data from the database.
   loanId?: number
   createdAt: number
   updatedAt: number
@@ -40,58 +40,58 @@ export function createDraftId(): string {
   return `d_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function isExpired(draft: WizardDraft): boolean {
+function isExpired(draft: WizardDraftMeta): boolean {
   return Date.now() - draft.updatedAt > DRAFT_TTL_MS
 }
 
-export function saveDraft<T>(
-  id: string, step: number, data: T, label: string, loanType?: string, loanId?: number
+/** Record/update the draft's index entry (step, label, loanId) — no form data. */
+export function saveDraftMeta(
+  id: string, step: number, label: string, loanType?: string, loanId?: number
 ): void {
   try {
     const existingRaw = localStorage.getItem(key(id))
-    const existing = existingRaw ? (JSON.parse(existingRaw) as WizardDraft<T>) : null
-    const draft: WizardDraft<T> = {
-      id, step, data, label, loanType,
-      // Keep whichever loanId we already know about if this particular call
-      // doesn't have a fresher one to report.
+    const existing = existingRaw ? (JSON.parse(existingRaw) as WizardDraftMeta) : null
+    const meta: WizardDraftMeta = {
+      id, step, label, loanType,
       loanId: loanId ?? existing?.loanId,
       createdAt: existing?.createdAt ?? Date.now(),
       updatedAt: Date.now(),
     }
-    localStorage.setItem(key(id), JSON.stringify(draft))
+    localStorage.setItem(key(id), JSON.stringify(meta))
   } catch {
-    // Storage errors (quota, privacy mode, etc.) should never break the wizard.
+    // Storage errors (quota, privacy mode, etc.) should never break the wizard —
+    // the backend draft (wizardApi.saveDraft) is the real persistence layer.
   }
 }
 
-export function getDraft<T>(id: string): WizardDraft<T> | null {
+export function getDraftMeta(id: string): WizardDraftMeta | null {
   try {
     const raw = localStorage.getItem(key(id))
     if (!raw) return null
-    const draft = JSON.parse(raw) as WizardDraft<T>
-    if (isExpired(draft)) {
+    const meta = JSON.parse(raw) as WizardDraftMeta
+    if (isExpired(meta)) {
       localStorage.removeItem(key(id))
       return null
     }
-    return draft
+    return meta
   } catch {
     return null
   }
 }
 
-/** Active (non-expired) drafts, newest first. Expired drafts are purged as a side effect. */
-export function listDrafts<T = unknown>(): WizardDraft<T>[] {
-  const drafts: WizardDraft<T>[] = []
+/** Active (non-expired) draft index entries, newest first. Expired entries are purged as a side effect. */
+export function listDraftMetas(): WizardDraftMeta[] {
+  const drafts: WizardDraftMeta[] = []
   try {
     for (const k of Object.keys(localStorage)) {
       if (!k.startsWith(PREFIX)) continue
       try {
-        const draft = JSON.parse(localStorage.getItem(k) || '') as WizardDraft<T>
-        if (isExpired(draft)) {
+        const meta = JSON.parse(localStorage.getItem(k) || '') as WizardDraftMeta
+        if (isExpired(meta)) {
           localStorage.removeItem(k)
           continue
         }
-        drafts.push(draft)
+        drafts.push(meta)
       } catch {
         // Corrupt entry — drop it rather than let it break the list.
         localStorage.removeItem(k)
@@ -103,7 +103,7 @@ export function listDrafts<T = unknown>(): WizardDraft<T>[] {
   return drafts.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
-export function deleteDraft(id: string): void {
+export function deleteDraftMeta(id: string): void {
   try {
     localStorage.removeItem(key(id))
   } catch {

@@ -75,6 +75,11 @@ public class ChangePasswordRequestDto
     [Required] [MinLength(6)] public string NewPassword { get; set; } = string.Empty;
 }
 
+public class AdminResetPasswordRequestDto
+{
+    [Required] [MinLength(6)] public string NewPassword { get; set; } = string.Empty;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // CUSTOMER DTOs
 // ══════════════════════════════════════════════════════════════════════════════
@@ -93,6 +98,7 @@ public class CustomerDto
     public string? State { get; set; }
     public string? PinCode { get; set; }
     public decimal? MonthlyIncome { get; set; }
+    public decimal? MonthlyObligations { get; set; }
     public string? EmploymentType { get; set; }
     public string? CompanyName { get; set; }
     public int? CibilScore { get; set; }
@@ -116,6 +122,7 @@ public class CreateCustomerRequestDto
     public string? State { get; set; }
     public string? PinCode { get; set; }
     public decimal? MonthlyIncome { get; set; }
+    public decimal? MonthlyObligations { get; set; }
     public string? EmploymentType { get; set; }
     public string? CompanyName { get; set; }
     public int? CibilScore { get; set; }
@@ -299,6 +306,9 @@ public class WizardSubmitDto
     public string? CompName    { get; set; }
     public string? CompType    { get; set; }
     public decimal Salary      { get; set; }
+    /// <summary>Existing monthly EMI/debt obligations declared on the Employment step — persisted
+    /// onto Customer.MonthlyObligations (Phase 5A). Defaults to 0 (no existing obligations).</summary>
+    public decimal Obligations { get; set; }
     public string? Desig       { get; set; }
     public string? OfficeEmail { get; set; }
     public string  LoanType    { get; set; } = "personal_loan";

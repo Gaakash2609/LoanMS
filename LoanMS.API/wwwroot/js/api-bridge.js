@@ -15,7 +15,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   var LS_TOKEN   = 'loanms_token';
   var LS_REFRESH = 'loanms_refresh';
   var LS_USER    = 'loanms_user';
-  var UA_STORE   = 'efin_ua_creds_v2';
 
   var ROLE_MAP   = { Admin:'admin', Manager:'manager', Sales:'sales_executive', Operations:'login_team', Partner:'partner' };
   var STATUS_MAP = { Draft:'wip', Submitted:'login', UnderReview:'underwriting', Approved:'approved', Rejected:'rejected', Disbursed:'disbursed', Closed:'disbursed', Hold:'hold' };
@@ -361,8 +360,331 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   }
 
   /* ══════════════════════════════════════════════════════════
+     5b. DSA / PARTNERS — Sync from API into twDSAList / twPartnerList
+     Backend: DsaController → DsaPartner table, split by PartnerType
+     ('Dsa' / 'Partner', sent as strings — Newtonsoft's default enum
+     binder accepts member names without a StringEnumConverter, same
+     convention already used for User.role above).
+     Phase 2: backend DsaDto now carries PAN, office address/state/
+     pin/addrType, IsActive, Category (Partner individual/company
+     sub-type) and MappedDsaId (Partner→DSA mapping). All of these
+     now round-trip through the API instead of staying local-only.
+     REMAINING GAP: linkedPartners on the DSA side is still computed
+     client-side (derived from twPartnerList.mappedDsaId) rather than
+     coming from the API — that's fine, it's a view, not stored data.
+     Uploaded documents are handled separately via _syncDsaDocs /
+     _uploadStagedDsaDocs below.
+  ══════════════════════════════════════════════════════════ */
+  function _dsaToLocal(d) {
+    return {
+      id: 'API' + d.id, _apiId: d.id,
+      name: d.name, code: d.code || '', mobile: d.phone || '', email: d.email || '',
+      pan: d.pan || '',
+      officeCity: d.city || '', officeAddr: d.officeAddress || '',
+      officeState: d.officeState || '', officePin: d.officePin || '',
+      officeAddrType: d.officeAddressType || '',
+      status: d.isActive === false ? 'inactive' : 'active',
+      type: d.category || 'individual',
+      mappedDsaId: d.mappedDsaId ? ('API' + d.mappedDsaId) : ''
+    };
+  }
+  function _syncDsaPartners() {
+    return apiReq('GET', '/dsa').then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      var dsaItems     = res.data.filter(function(d){ return d.partnerType === 'Dsa'; });
+      var partnerItems = res.data.filter(function(d){ return d.partnerType === 'Partner'; });
+
+      function merge(apiList, store, extraDefaults) {
+        if (!Array.isArray(store)) return;
+        apiList.forEach(function(d) {
+          var mapped = _dsaToLocal(d);
+          var existing = store.findIndex(function(x){ return x._apiId === d.id; });
+          if (existing >= 0) store[existing] = Object.assign({}, store[existing], mapped);
+          else store.push(Object.assign({}, extraDefaults, mapped));
+        });
+      }
+      if (typeof window.twDSAList !== 'undefined')     merge(dsaItems,     window.twDSAList,     { linkedPartners:[] });
+      if (typeof window.twPartnerList !== 'undefined') merge(partnerItems, window.twPartnerList, {});
+      if (typeof window.dsaRender === 'function') { try { window.dsaRender(''); } catch(e){} }
+      if (typeof window.pmRender  === 'function') { try { window.pmRender('');  } catch(e){} }
+      if (typeof window.dsaStatsRefresh === 'function') { try { window.dsaStatsRefresh(); } catch(e){} }
+      if (typeof window.pmStatsRefresh  === 'function') { try { window.pmStatsRefresh();  } catch(e){} }
+    }).catch(function(e){ console.warn('[Bridge] syncDsaPartners:', e); });
+  }
+
+  /* Upload any staged (in-memory File objects) DSA/Partner documents to
+     /api/dsa/{id}/documents once the record has a real backend id. Staged
+     docs live in window._dsaDocs / window._pmDocs (see efin-app.js
+     dsaDocUpload/pmDocUpload) keyed by docKey (+ '_back' for two-sided
+     docs). Silently skips anything already uploaded or not a real File. */
+  function _uploadStagedDsaDocs(apiId, docsMap) {
+    if (!apiId || !docsMap) return;
+    var keys = Object.keys(docsMap);
+    keys.forEach(function(k) {
+      var file = docsMap[k];
+      if (!file || typeof File === 'undefined' || !(file instanceof File)) return;
+      var fd = new FormData();
+      fd.append('file', file, file.name);
+      fd.append('documentType', k);
+      apiReq('POST', '/dsa/' + apiId + '/documents', fd).then(function(r) {
+        if (r && r.success) delete docsMap[k]; // uploaded — stop re-sending on next save
+      }).catch(function(e){ console.warn('[Bridge] dsaDocUpload:', k, e); });
+    });
+  }
+
+  /* Patch: dsaSave → POST/PUT /api/dsa (PartnerType: Dsa) */
+  function _patchDsaSave() {
+    if (window._bridgeDsaSavePatched) return;
+    window._bridgeDsaSavePatched = true;
+    var _orig = window.dsaSave;
+    if (typeof _orig !== 'function') return;
+    window.dsaSave = function() {
+      // _dsaEditId is a top-level `let` in efin-app.js — not on window, but
+      // shared global lexical scope since both load as classic (non-module)
+      // scripts, api-bridge.js after efin-app.js. Capture it before the
+      // original save handler resets it to null.
+      var editId = (typeof _dsaEditId !== 'undefined') ? _dsaEditId : null;
+      var nameEl = document.getElementById('dsa-f-name');
+      var wasValid = nameEl && nameEl.value.trim() && document.getElementById('dsa-f-mobile') && document.getElementById('dsa-f-mobile').value.trim().length === 10;
+      var result = _orig.apply(this, arguments);
+      if (!wasValid) return result; // original would have shown a validation toast and returned early
+      setTimeout(function() {
+        var record = (window.twDSAList || []).find(function(d) {
+          return editId ? d.id === editId : (d.name === nameEl.value.trim() && !d._apiId);
+        });
+        var payload = {
+          name:  nameEl.value.trim(),
+          code:  (document.getElementById('dsa-f-code')  || {}).value || '',
+          email: (document.getElementById('dsa-f-email') || {}).value || '',
+          phone: (document.getElementById('dsa-f-mobile')|| {}).value || '',
+          city:  (document.getElementById('dsa-f-office-city') || {}).value || '',
+          pan:               (document.getElementById('dsa-f-pan')              || {}).value || '',
+          officeAddress:     (document.getElementById('dsa-f-office-addr')      || {}).value || '',
+          officeState:       (document.getElementById('dsa-f-office-state')     || {}).value || '',
+          officePin:         (document.getElementById('dsa-f-office-pin')       || {}).value || '',
+          officeAddressType: (document.getElementById('dsa-f-office-addr-type')|| {}).value || '',
+          isActive: (document.getElementById('dsa-f-status') || {}).value !== 'inactive',
+          partnerType: 'Dsa'
+        };
+        var apiId = record && record._apiId;
+        var req = apiId ? apiReq('PUT', '/dsa/' + apiId, payload) : apiReq('POST', '/dsa', payload);
+        req.then(function(r) {
+          if (r && r.success) {
+            if (record && !apiId && r.data && r.data.id) record._apiId = r.data.id;
+            var savedId = apiId || (r.data && r.data.id);
+            if (savedId && typeof window._dsaDocs !== 'undefined') _uploadStagedDsaDocs(savedId, window._dsaDocs);
+            if (typeof window.showToast === 'function') window.showToast('DSA saved to database ✓', 'success');
+            setTimeout(_syncDsaPartners, 300);
+          } else if (typeof window.showToast === 'function') {
+            window.showToast('DSA saved locally, but database sync failed — will retry on next refresh', 'warn');
+          }
+        });
+      }, 200);
+      return result;
+    };
+  }
+
+  /* Patch: pmSave → POST/PUT /api/dsa (PartnerType: Partner) */
+  function _patchPartnerSave() {
+    if (window._bridgePartnerSavePatched) return;
+    window._bridgePartnerSavePatched = true;
+    var _orig = window.pmSave;
+    if (typeof _orig !== 'function') return;
+    window.pmSave = function() {
+      var editId = (typeof _pmEditId !== 'undefined') ? _pmEditId : null;
+      var nameEl = document.getElementById('pm-f-name');
+      var wasValid = nameEl && nameEl.value.trim() && document.getElementById('pm-f-mobile') && document.getElementById('pm-f-mobile').value.trim().length === 10;
+      var result = _orig.apply(this, arguments);
+      if (!wasValid) return result;
+      setTimeout(function() {
+        var record = (window.twPartnerList || []).find(function(p) {
+          return editId ? p.id === editId : (p.name === nameEl.value.trim() && !p._apiId);
+        });
+        var payload = {
+          name:  nameEl.value.trim(),
+          code:  (document.getElementById('pm-f-code')  || {}).value || '',
+          email: (document.getElementById('pm-f-email') || {}).value || '',
+          phone: (document.getElementById('pm-f-mobile')|| {}).value || '',
+          category: (document.getElementById('pm-f-type')   || {}).value || '',
+          isActive: (document.getElementById('pm-f-status') || {}).value !== 'inactive',
+          partnerType: 'Partner'
+        };
+        // mappedDsaId in the DOM/local list is the DSA's local id (e.g. 'API3' or
+        // a not-yet-synced 'DSA172...'); the backend needs the numeric DsaPartner
+        // id, so resolve it against twDSAList before sending.
+        var mappedDsaLocalId = (document.getElementById('pm-f-dsa-id') || {}).value || '';
+        if (mappedDsaLocalId) {
+          var mappedDsaRecord = (window.twDSAList || []).find(function(x){ return x.id === mappedDsaLocalId; });
+          if (mappedDsaRecord && mappedDsaRecord._apiId) payload.mappedDsaId = mappedDsaRecord._apiId;
+        }
+        var apiId = record && record._apiId;
+        var req = apiId ? apiReq('PUT', '/dsa/' + apiId, payload) : apiReq('POST', '/dsa', payload);
+        req.then(function(r) {
+          if (r && r.success) {
+            if (record && !apiId && r.data && r.data.id) record._apiId = r.data.id;
+            var savedId = apiId || (r.data && r.data.id);
+            if (savedId && typeof window._pmDocs !== 'undefined') _uploadStagedDsaDocs(savedId, window._pmDocs);
+            if (typeof window.showToast === 'function') window.showToast('Partner saved to database ✓', 'success');
+            setTimeout(_syncDsaPartners, 300);
+          } else if (typeof window.showToast === 'function') {
+            window.showToast('Partner saved locally, but database sync failed — will retry on next refresh', 'warn');
+          }
+        });
+      }, 200);
+      return result;
+    };
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     5c. PAYOUT CLAIMS — submit the CURRENT user's own claims
+     Backend: PayoutController.Submit (PayoutClaim table).
+     SCOPE (confirmed with product owner): only the logged-in
+     user's own auto-created claims are submitted, and only for
+     loans that already exist in the backend (real _apiId). Claims
+     auto-created locally for OTHER claimants (sales/dsa/partner/
+     login users other than the current one) and claims tied to
+     local-only demo loans stay local-only by design:
+       • the API enforces ClaimedByUserId = the caller's own id,
+         so one user can never submit a claim on another's behalf;
+       • a demo loan has no row in the Loans table for the API to
+         attach a claim to.
+     The server recalculates ClaimAmount itself from the configured
+     PayoutRule (ignores whatever the client sends unless the
+     caller is Admin/Manager) — so the locally-shown amount is
+     only an estimate until this sync confirms/replaces it.
+  ══════════════════════════════════════════════════════════ */
+  /* Pull claims FROM the database into the local PAYOUT_CLAIMS cache, so that:
+     - F5 / Ctrl+F5 / browser close-reopen always show the server's copy of
+       claim status/amount (server is the source of truth), and
+     - claims created server-side for OTHER eligible claimants on the same
+       loan (e.g. the DSA/Partner linked-user claim generated automatically
+       alongside the current user's own claim — see Phase 3 multi-claimant
+       logic in WizardController) become visible wherever the API scope
+       (myOnly / role-based self-scoping, enforced server-side) allows it. */
+  function _syncPayoutClaimsFromServer() {
+    if (typeof window.PAYOUT_CLAIMS === 'undefined' || !Array.isArray(window.PAYOUT_CLAIMS)) return;
+    return apiReq('GET', '/payout').then(function(res) {
+      if (!res || !res.success || !Array.isArray(res.data)) return;
+      res.data.forEach(function(c) {
+        var existing = PAYOUT_CLAIMS.find(function(p) { return p._apiId === c.id; });
+        if (existing) {
+          // Server is authoritative for status/amount/month once a claim is synced.
+          existing.status       = (c.status || existing.status || 'Pending').toLowerCase();
+          existing.claimAmount  = typeof c.claimAmount === 'number' ? c.claimAmount : existing.claimAmount;
+          existing.payoutAmount = typeof c.claimAmount === 'number' ? c.claimAmount : existing.payoutAmount;
+          existing.claimMonth   = c.month || existing.claimMonth;
+          existing.userType     = (c.claimType || existing.userType || '').toLowerCase();
+          existing.vendorRemark = c.notes || existing.vendorRemark;
+          return;
+        }
+        // A backend claim not yet mirrored locally — add it so it's visible
+        // (e.g. after a fresh browser session, or a multi-claimant claim
+        // created for a different claimant than the one currently logged in).
+        PAYOUT_CLAIMS.push({
+          id: 'API' + c.id, _apiId: c.id,
+          partner: c.claimedBy || '',
+          loanApac: c.loanNumber || '',
+          loanRefId: c.loanNumber || '',
+          customerName: c.customerName || '',
+          claimMonth: c.month || '',
+          claimAmount: c.claimAmount || 0,
+          payoutAmount: c.claimAmount || 0,
+          userType: (c.claimType || '').toLowerCase(),
+          status: (c.status || 'pending').toLowerCase(),
+          vendorRemark: c.notes || '',
+          createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : '',
+          isAuto: true,
+          _fromServer: true
+        });
+      });
+      if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
+      if (typeof window.renderPayoutPage === 'function') { try { window.renderPayoutPage(); } catch(e){} }
+      if (typeof window.renderPayoutMgmt === 'function') { try { window.renderPayoutMgmt(); } catch(e){} }
+    }).catch(function(e){ console.warn('[Bridge] syncPayoutClaimsFromServer:', e); });
+  }
+
+  function _syncOwnPayoutClaims() {
+    if (typeof window.PAYOUT_CLAIMS === 'undefined' || !Array.isArray(window.PAYOUT_CLAIMS)) return;
+    if (!window.currentUser || !window.currentUser.name) return;
+    var myName = window.currentUser.name;
+    var apps = window.APPLICATIONS || [];
+
+    var pending = window.PAYOUT_CLAIMS.filter(function(c) {
+      return c.partner === myName && !c._apiId && !c._apiSyncFailed;
+    });
+    if (!pending.length) return;
+
+    pending.forEach(function(claim) {
+      var app = apps.find(function(a){ return a.id === claim.loanApac || a.id === claim.loanRefId; });
+      if (!app || !app._apiId) return; // local-only demo loan — nothing to attach the claim to yet
+
+      apiReq('POST', '/payout', {
+        loanId: app._apiId,
+        claimAmount: claim.claimAmount || 0,
+        month: claim.claimMonth || undefined,
+        notes: claim.vendorRemark || '',
+        // Hint only — the server derives/validates the real ClaimType from the
+        // caller's own authenticated role and ignores this for non-Admin/Manager.
+        claimType: claim.userType ? claim.userType.charAt(0).toUpperCase() + claim.userType.slice(1) : undefined
+      }).then(function(r) {
+        if (r && r.success && r.data) {
+          claim._apiId = r.data.id;
+          if (typeof r.data.claimAmount === 'number') claim.claimAmount = r.data.claimAmount;
+          if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
+          if (typeof window.showToast === 'function') window.showToast('Payout claim submitted to database ✓', 'success');
+          if (typeof window.renderPayoutPage === 'function') { try { window.renderPayoutPage(); } catch(e){} }
+          if (typeof window.renderPayoutMgmt === 'function') { try { window.renderPayoutMgmt(); } catch(e){} }
+        } else {
+          // A duplicate-claim rejection means the loan already has a claim for
+          // this user in this capacity — most likely the backend already
+          // auto-created it (Phase 3 multi-claimant generation at submission
+          // time). Reconcile from the server instead of treating it as a
+          // failure so the local record still ends up linked to its real row.
+          var msg = (r && r.message) || '';
+          if (/already exists/i.test(msg)) {
+            _syncPayoutClaimsFromServer();
+          } else {
+            // Don't retry a claim the server is actively rejecting (e.g. no
+            // PayoutRule configured for this loan type) on every sync cycle.
+            claim._apiSyncFailed = true;
+          }
+          console.warn('[Bridge] payout claim submit rejected:', msg);
+        }
+      }).catch(function(e){ console.warn('[Bridge] payout claim submit error:', e); });
+    });
+  }
+
+  /* Patch: initPayoutFromDisbursed / autoCreatePayoutClaim → try syncing
+     right after local claims are (re)computed, in addition to the
+     regular post-loan-sync call below. */
+  function _patchPayoutClaimCreate() {
+    if (window._bridgePayoutClaimCreatePatched) return;
+    window._bridgePayoutClaimCreatePatched = true;
+    ['initPayoutFromDisbursed', 'autoCreatePayoutClaim'].forEach(function(fnName) {
+      var _orig = window[fnName];
+      if (typeof _orig !== 'function') return;
+      window[fnName] = function() {
+        var result = _orig.apply(this, arguments);
+        setTimeout(_syncOwnPayoutClaims, 400);
+        return result;
+      };
+    });
+  }
+
+  /* ══════════════════════════════════════════════════════════
      6. TICKETS — Sync from API into TK_STORE
   ══════════════════════════════════════════════════════════ */
+  // Backend Status values are "Open" / "Closed" / "Resolved" / "In Progress"
+  // (see TicketsController). The frontend badges/filters/labels
+  // (TK_STATUS_BADGE etc. in efin-app.js) key off lowercase-underscore
+  // strings ('open' / 'closed' / 'resolved' / 'in_progress'). Without this
+  // mapping, a ticket closed or reopened via the API would sync back with a
+  // status the UI doesn't recognize and silently fall back to a default
+  // badge/filter bucket.
+  function _tkNormalizeStatus(s) {
+    return String(s || 'Open').trim().toLowerCase().replace(/\s+/g, '_');
+  }
+
   function _syncTickets() {
     return apiReq('GET', '/tickets').then(function(res) {
       if (!res || !res.success || !res.data) return;
@@ -371,53 +693,216 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           var mapped = {
             id:'API'+t.id, _apiId:t.id,
             subject:t.title, desc:t.description||'',
-            priority:t.priority||'medium', status:t.status||'open',
+            priority:(t.priority||'medium').toLowerCase(), status:_tkNormalizeStatus(t.status),
             loan:t.loanId?'API'+t.loanId:null,
             customer:t.createdBy||'', assigned:t.assignedTo||'',
+            assignedToUserId:t.assignedToUserId||null,
             date:_fmtDate(t.createdAt)
           };
           var existing = window.TK_STORE.findIndex(function(tk){ return tk._apiId === t.id; });
           if (existing >= 0) window.TK_STORE[existing] = Object.assign(window.TK_STORE[existing], mapped);
           else window.TK_STORE.push(mapped);
         });
+        if (typeof window.twTickets !== 'undefined' && Array.isArray(window.twTickets)) {
+          window.TK_STORE.forEach(function(t) {
+            var tw = window.twTickets.find(function(x){ return x.id === t.id; });
+            var twMapped = { id:t.id, loan:t.loan, team:(tw&&tw.team)||'General Support', customer:t.customer, assigned:t.assigned, status:t.status, date:t.date };
+            if (tw) Object.assign(tw, twMapped); else window.twTickets.push(twMapped);
+          });
+          if (typeof window.twUpdateCounts === 'function') { try { window.twUpdateCounts(); } catch(e){} }
+        }
         if (typeof window.tkRenderTable === 'function') { try { window.tkRenderTable(); } catch(e){} }
       }
     }).catch(function(e){ console.warn('[Bridge] syncTickets:',e); });
   }
 
-  /* Patch: tkSaveTicket → POST /api/tickets */
+  /* Patch: tkSaveTicket → POST/PUT /api/tickets
+     Phase 4A fix — the previous version read tk-subject/tk-desc/tk-loan
+     AFTER a 200ms delay, but the original tkSaveTicket() already clears
+     those same fields synchronously as its last step. So subjectEl.value
+     was always '' by the time this ran, the `if (!subjectEl.value.trim())
+     return;` guard fired every time, and the POST to /api/tickets never
+     actually happened — every ticket silently stayed localStorage-only
+     despite the UI showing a "created" toast. Fix: capture every field
+     (and the resolved loanId/assignedToUserId) BEFORE calling _orig, the
+     same pattern already used by dsaSave/pmSave in this file. */
   function _patchTicketSave() {
     if (window._bridgeTicketSavePatched) return;
     window._bridgeTicketSavePatched = true;
     var _orig = window.tkSaveTicket;
     if (typeof _orig !== 'function') return;
     window.tkSaveTicket = function() {
+      var subjectEl  = document.getElementById('tk-subject');
+      var descEl     = document.getElementById('tk-desc');
+      var priorityEl = document.getElementById('tk-priority');
+      var loanEl     = document.getElementById('tk-loan');
+      var assignEl   = document.getElementById('tk-assigned');
+
+      var subject = subjectEl ? subjectEl.value.trim() : '';
+      var wasValid = !!subject; // tkSaveTicket itself requires a non-empty subject
+
+      var loanId = null;
+      if (loanEl && loanEl.value) {
+        var app = (window.APPLICATIONS || []).find(function(a){ return a.id === loanEl.value; });
+        if (app && app._apiId) loanId = app._apiId;
+      }
+      var assignedToUserId = null;
+      if (assignEl && assignEl.value) {
+        var assignee = (window.twUsers || []).find(function(u){ return u.name === assignEl.value && u._apiId; });
+        if (assignee) assignedToUserId = assignee._apiId;
+      }
+
       var result = _orig.apply(this, arguments);
+      if (!wasValid) return result; // original already showed a validation toast and returned early
+
       setTimeout(function() {
-        var subjectEl  = document.getElementById('tk-subject');
-        var descEl     = document.getElementById('tk-desc');
-        var priorityEl = document.getElementById('tk-priority');
-        var loanEl     = document.getElementById('tk-loan');
-        if (!subjectEl || !subjectEl.value.trim()) return;
-        var loanId = null;
-        if (loanEl && loanEl.value) {
-          var app = (window.APPLICATIONS || []).find(function(a){ return a.id === loanEl.value; });
-          if (app && app._apiId) loanId = app._apiId;
-        }
+        // tkSaveTicket() does TK_STORE.unshift(ticket), so the row we just
+        // created is the newest one still lacking an _apiId.
+        var record = (window.TK_STORE || []).find(function(t) {
+          return !t._apiId && t.subject === subject;
+        });
         apiReq('POST', '/tickets', {
-          title:       subjectEl.value.trim(),
-          description: descEl ? descEl.value.trim() : '',
-          priority:    priorityEl ? priorityEl.value : 'medium',
-          loanId:      loanId
+          title:            subject,
+          description:      descEl ? descEl.value.trim() : '',
+          priority:         priorityEl ? priorityEl.value : 'medium',
+          loanId:           loanId,
+          assignedToUserId: assignedToUserId
         }).then(function(r) {
-          if (r && r.success) {
+          if (r && r.success && r.data && r.data.id) {
+            if (record) record._apiId = r.data.id;
             if (typeof window.showToast === 'function') window.showToast('Ticket saved to database ✓', 'success');
+            if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(_) {} }
             setTimeout(_syncTickets, 300);
+          } else if (typeof window.showToast === 'function') {
+            window.showToast('Ticket saved locally, but database sync failed — will retry on next refresh', 'warn');
+          }
+        }).catch(function() {
+          if (typeof window.showToast === 'function') {
+            window.showToast('Ticket saved locally, but database sync failed — will retry on next refresh', 'warn');
           }
         });
       }, 200);
       return result;
     };
+  }
+
+  /* Phase 4B — Close/Reopen/Resolve → real PATCH/PUT calls.
+     Previously these three only mutated TK_STORE/twTickets in memory (and
+     tkClose even deleted the row outright) with no server call at all, so
+     the status "persisted" only in localStorage and reverted on the next
+     API sync / another browser. Same capture-before-call pattern as
+     _patchTicketSave: read what's needed, call _orig for instant UI
+     feedback, then persist — rolling the local state back and toasting an
+     error if the server rejects it (wrong role, already-closed race, etc).
+     window._bridgeTicketStatusPatched flags to efin-app.js that these are
+     wired, so its own fallback "(local only)" toast doesn't double up. */
+  function _patchTicketStatusActions() {
+    if (window._bridgeTicketStatusPatched) return;
+    window._bridgeTicketStatusPatched = true;
+
+    function wrap(fnName, apply) {
+      var _orig = window[fnName];
+      if (typeof _orig !== 'function') return;
+      window[fnName] = function(id, btnEl) {
+        var t = (window.TK_STORE || []).find(function(x){ return x.id === id; });
+        var prevStatus = t ? t.status : null;
+        var prevTwStatus = null;
+        var tw = t ? (window.twTickets || []).find(function(x){ return x.id === id; }) : null;
+        if (tw) prevTwStatus = tw.status;
+
+        var result = _orig.apply(this, arguments);
+        if (!t || !t._apiId) return result; // not synced yet — local-only, nothing to call
+        if (t.status === prevStatus) return result; // tkClose/tkReopen's confirm() was cancelled — nothing changed, don't call the API
+
+        if (btnEl) btnEl.disabled = true;
+        apply(t._apiId).then(function(res) {
+          if (btnEl) btnEl.disabled = false;
+          if (res && res.success) {
+            if (typeof window.showToast === 'function') window.showToast('Saved to database ✓', 'success');
+            setTimeout(_syncTickets, 300);
+          } else {
+            // Roll back the optimistic local change and re-render.
+            if (t) t.status = prevStatus;
+            if (tw) tw.status = prevTwStatus;
+            if (typeof window.twUpdateCounts === 'function') { try { window.twUpdateCounts(); } catch(e){} }
+            if (typeof window.tkRenderTable === 'function') { try { window.tkRenderTable(); } catch(e){} }
+            if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
+            var msg = (res && res.errors && res.errors[0]) || 'Could not update ticket — reverted.';
+            if (typeof window.showToast === 'function') window.showToast(msg, 'error');
+          }
+        }).catch(function() {
+          if (btnEl) btnEl.disabled = false;
+          if (t) t.status = prevStatus;
+          if (tw) tw.status = prevTwStatus;
+          if (typeof window.twUpdateCounts === 'function') { try { window.twUpdateCounts(); } catch(e){} }
+          if (typeof window.tkRenderTable === 'function') { try { window.tkRenderTable(); } catch(e){} }
+          if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
+          if (typeof window.showToast === 'function') window.showToast('Network error — ticket status reverted.', 'error');
+        });
+        return result;
+      };
+    }
+
+    wrap('tkClose',   function(apiId){ return apiReq('PATCH', '/tickets/'+apiId+'/close'); });
+    wrap('tkReopen',  function(apiId){ return apiReq('PATCH', '/tickets/'+apiId+'/reopen'); });
+    wrap('tkResolve', function(apiId){ return apiReq('PUT', '/tickets/'+apiId, { status: 'Resolved' }); });
+  }
+
+  /* Phase 4B — Ticket comments/notes/activity. */
+  window._tkFetchComments = function(apiTicketId) {
+    return apiReq('GET', '/tickets/'+apiTicketId+'/comments').then(function(res) {
+      return (res && res.success && res.data) ? res.data : [];
+    });
+  };
+  window._tkPostComment = function(apiTicketId, content) {
+    return apiReq('POST', '/tickets/'+apiTicketId+'/comments', { content: content }).then(function(res) {
+      return !!(res && res.success);
+    });
+  };
+
+  /* Phase 4B — safe one-time migration of pre-4B localStorage ticket data.
+     Data-safety rule: never silently delete a locally-held ticket that
+     never made it to the server. On first run after upgrade, read the OLD
+     ticket localStorage keys directly (persistLoad/persistSave no longer
+     touch them), find entries with no _apiId (i.e. created before the
+     Phase 4A create-sync existed, or created while offline), and POST each
+     one to /api/tickets. Only clear the legacy key once every entry in it
+     is confirmed synced; otherwise leave it in place and warn so the data
+     is never silently lost. */
+  function tkMigrateLegacyLocalTickets() {
+    if (window._bridgeTicketMigrationDone) return;
+    window._bridgeTicketMigrationDone = true;
+    try {
+      var raw = localStorage.getItem('efin_v22_ticket_store');
+      var legacy = raw ? JSON.parse(raw) : null;
+      if (!Array.isArray(legacy) || !legacy.length) { if (raw) localStorage.removeItem('efin_v22_ticket_store'); return; }
+
+      var unsynced = legacy.filter(function(t) { return t && !t._apiId; });
+      if (!unsynced.length) { localStorage.removeItem('efin_v22_ticket_store'); return; }
+
+      console.info('[Bridge] Migrating '+unsynced.length+' pre-Phase-4B local-only ticket(s) to the server…');
+      Promise.all(unsynced.map(function(t) {
+        return apiReq('POST', '/tickets', {
+          title: t.subject || '(untitled ticket)',
+          description: t.desc || '',
+          priority: t.priority || 'medium'
+        }).then(function(r){ return !!(r && r.success); }).catch(function(){ return false; });
+      })).then(function(results) {
+        var allOk = results.every(Boolean);
+        if (allOk) {
+          localStorage.removeItem('efin_v22_ticket_store');
+          if (typeof window.showToast === 'function') window.showToast(unsynced.length+' local ticket(s) migrated to the database ✓', 'success');
+          setTimeout(_syncTickets, 300);
+        } else {
+          // Leave the legacy key in place — do NOT delete unsynced data —
+          // and report clearly instead of pretending it succeeded.
+          console.warn('[Bridge] Ticket migration incomplete — some local tickets could not be synced and were left in localStorage (key: efin_v22_ticket_store) for retry.');
+          if (typeof window.showToast === 'function') window.showToast('Some local tickets could not be migrated to the database — will retry next load', 'warn');
+        }
+      });
+    } catch (e) {
+      console.warn('[Bridge] Ticket migration check failed:', e);
+    }
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -457,37 +942,25 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
   /* ══════════════════════════════════════════════════════════
      8. CHANGE PASSWORD — Route to /api/users/change-password
+     ------------------------------------------------------------
+     Historically this attached a SECOND, independent click listener
+     to the same "Update Password" button that efin-app.js's
+     cpSavePassword() is wired to (onclick="cpSavePassword()"), which
+     matched here via the [onclick*="cpSave"] selector. Both handlers
+     fired on every click: this one made the real backend call, while
+     cpSavePassword() separately wrote a password hash straight into
+     localStorage and showed its own "success" toast unconditionally
+     — so a backend failure could still be reported to the user as a
+     success. cpSavePassword() in efin-app.js is now the single,
+     backend-driven source of truth for this flow (it calls
+     /api/users/change-password itself and only reports success after
+     the backend confirms it), so this duplicate listener has been
+     removed. Left as a no-op stub so the DOMContentLoaded call site
+     below doesn't need to change and nothing else that references
+     window._bridgeCpPatched breaks.
   ══════════════════════════════════════════════════════════ */
   function _patchChangePassword() {
-    if (window._bridgeCpPatched) return;
     window._bridgeCpPatched = true;
-    var _orig = window.openChangePassword;
-    // Override the save action of the change password modal
-    document.addEventListener('click', function(e) {
-      var btn = e.target.closest('#cp-save-btn, [onclick*="changePassword"], [onclick*="cpSave"]');
-      if (!btn) return;
-      var curr = document.getElementById('cp-current') || document.getElementById('current-password');
-      var newp = document.getElementById('cp-new')     || document.getElementById('new-password');
-      var conf = document.getElementById('cp-confirm') || document.getElementById('confirm-password');
-      if (!curr || !newp || !conf) return;
-      if (newp.value !== conf.value) {
-        if (typeof window.showToast === 'function') window.showToast('Passwords do not match', 'error');
-        return;
-      }
-      apiReq('POST', '/users/change-password', {
-        currentPassword: curr.value,
-        newPassword:     newp.value,
-        confirmPassword: conf.value
-      }).then(function(r) {
-        if (r && r.success) {
-          if (typeof window.showToast === 'function') window.showToast('Password changed successfully ✓', 'success');
-          if (typeof window.closeModal === 'function') window.closeModal('modal-change-password');
-        } else {
-          var msg = (r && r.message) ? r.message : 'Failed to change password.';
-          if (typeof window.showToast === 'function') window.showToast(msg, 'error');
-        }
-      });
-    });
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -569,89 +1042,17 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     }
     if (btn) { btn.disabled=true; btn.textContent='Signing in…'; }
 
-    // ── Local hash-based fallback login (works without backend) ──
-    function _localFallbackLogin(email, password, btn, errEl, passEl) {
-      var _BUILTIN = {
-        'admin@efin.com':        'e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7',
-        'manager@efin.com':      'e8392925a98c9c22795d1fc5d0dfee5b9a6943f6b768ec5a2a0c077e5ed119cf',
-        'sales@efin.com':        'b0131d869ccf6c9ae9c2d66a8ddb367c7022a554e8477f18068bfb81271ebd90',
-        'login@efin.com':        '302e4ade65334f76887ffb76dddfade52a293b8ae8c995c0c3eb03d4f81f9794',
-        'tl@efin.com':           'aef3d605618615cae1e51760bda170ba3ef5fe175f9f95017f822787fdd59fb4',
-        'partner@efin.com':      '7658d201cff9989480d422a9fad0970bd036df504a0baa0ce6e1187df49b2381',
-        'accounts@efin.com':     '934975bf2a884e397d6e3f50ded9d96221b82ec6af04565a5917ff74b8347c2c',
-        'product@efin.com':      '874c610ba950209dc44157b57b7ff209eebf70f5c8edf183e28537a0681d3a23',
-        'locationhead@efin.com': 'dbb0c00fc6784a219eb2310320598e56f1a52db00eb5da607473a6f189e022b7',
-        'opmanager@efin.com':    '167178921ce5119f3e049f4591e1e3ea9d5973279e535c122b2c2d3e0cc69004',
-        'dsa@efin.com':          '3e6f142c7143c6faca4fd558338d30624e964affd360f1b635e5486e5d58680d'
-      };
-      // Compute SHA-256 via Web Crypto
-      crypto.subtle.digest('SHA-256', new TextEncoder().encode(password)).then(function(buf) {
-        var inputHash = Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
-        // Merge localStorage creds with builtins
-        var storedMap = {};
-        try { storedMap = JSON.parse(localStorage.getItem(UA_STORE)||'{}'); } catch(e) {}
-        var merged = Object.assign({}, _BUILTIN, storedMap);
-        // Persist merged so future logins also work
-        try { localStorage.setItem(UA_STORE, JSON.stringify(merged)); } catch(e) {}
-
-        var storedHash = merged[email];
-        if (!storedHash || inputHash !== storedHash) {
-          if (btn) { btn.disabled=false; btn.textContent='Sign In →'; }
-          if (errEl) { errEl.textContent='✕ Invalid email or password.'; errEl.style.display='block'; }
-          if (passEl) { passEl.value=''; }
-          return;
-        }
-        // Valid — find account info
-        var account = (typeof window.USER_ACCOUNTS !== 'undefined')
-          ? window.USER_ACCOUNTS.find(function(u){ return u.email===email; })
-          : null;
-        var name  = account ? account.name : email;
-        var role  = account ? account.role : 'admin';
-
-        _lsSet('efin_session', JSON.stringify({ name:name, role:role, email:email, loginTs:Date.now() }));
-        window.currentUser = { name:name, role:role, email:email };
-        if (errEl) errEl.style.display='none';
-        var ls = document.getElementById('login-screen');
-        if (ls) ls.style.display='none';
-        if (typeof window.applySession==='function') window.applySession();
-        if (typeof window.updateGreeting==='function') window.updateGreeting();
-        if (typeof window.renderPipeline==='function') window.renderPipeline();
-        if (typeof window.renderChart==='function') window.renderChart();
-        if (typeof window.renderLoanTypeChart==='function') window.renderLoanTypeChart();
-        if (typeof window.updateDashboardStats==='function') window.updateDashboardStats();
-        if (typeof window.renderActivity==='function') window.renderActivity();
-        if (typeof window.renderBanksTable==='function') window.renderBanksTable();
-        if (typeof window.updateNotifBadge==='function') window.updateNotifBadge();
-        if (typeof window.updateTasksNavBadge==='function') window.updateTasksNavBadge();
-        // No real JWT was issued by this login (backend unreachable), so
-        // every subsequent create/approve/reject/disburse call will fail to
-        // persist. Tell the user plainly rather than showing a normal
-        // "Welcome back" success toast that hides this.
-        var offlineWarning = function(){
-          if (typeof window.showToast==='function') {
-            window.showToast('⚠ Signed in offline — server unreachable. Changes made now will NOT be saved until you sign in again with the server online.', 'warn');
-          }
-        };
-        if (typeof window.animateLoginOut==='function') {
-          window.animateLoginOut(function() {
-            var ls2 = document.getElementById('login-screen');
-            if (ls2) ls2.style.display='none';
-            setTimeout(offlineWarning, 200);
-          });
-        } else {
-          setTimeout(offlineWarning, 200);
-        }
-        if (btn) { btn.disabled=false; btn.textContent='Sign In →'; }
-      });
-    }
-
     fetch(BASE+'/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:email,password:password}) })
       .then(function(r){ return r.json(); })
       .then(function(data) {
         if (btn) { btn.disabled=false; btn.textContent='Sign In →'; }
         if (!data || !data.success) {
-          // API returned error — try local fallback before showing error
-          _localFallbackLogin(email, password, btn, errEl, passEl);
+          // API is the only source of truth for auth — no local/offline
+          // fallback. Surface the server's actual error and stop; never
+          // grant a session from anything stored client-side.
+          var msg = (data && (data.message || (data.errors && data.errors.join(' ')))) || 'Invalid email or password.';
+          if (errEl) { errEl.textContent = '✕ ' + msg; errEl.style.display = 'block'; }
+          if (passEl) { passEl.value = ''; }
           return;
         }
         _lsSet(LS_TOKEN, data.data.accessToken);
@@ -666,11 +1067,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           if (existing.length===0) window.USER_ACCOUNTS.push({ email:userEmail, name:u.fullName, role:efinRole, _hash:'bridge_auth' });
           else { existing[0].name=u.fullName; existing[0].role=efinRole; existing[0]._hash='bridge_auth'; }
         }
-        try {
-          var cm = JSON.parse(localStorage.getItem(UA_STORE)||'{}');
-          cm[userEmail] = 'bridge_auth';
-          localStorage.setItem(UA_STORE, JSON.stringify(cm));
-        } catch(e) {}
 
         _lsSet('efin_session', JSON.stringify({ name:u.fullName, role:efinRole, email:userEmail, loginTs:Date.now(), _apiId:u.id }));
         window.currentUser = { name:u.fullName, role:efinRole, email:userEmail };
@@ -689,12 +1085,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           _syncLocations();
           _syncTasks();
           _syncTickets();
+          _syncDsaPartners();
+          setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500); // after loans have _apiId populated
+          setTimeout(tkMigrateLegacyLocalTickets, 1000);
         }, 800);
       })
       .catch(function(err) {
-        // Network error (backend down) — use local fallback login
-        console.warn('[Bridge] API unreachable, using local login fallback:', err);
-        _localFallbackLogin(email, password, btn, errEl, passEl);
+        // Network error (backend unreachable). No local/offline fallback —
+        // the API is the only source of truth for auth, so we surface the
+        // failure instead of silently granting a client-side-only session.
+        console.warn('[Bridge] API unreachable, login cannot proceed:', err);
+        if (btn) { btn.disabled=false; btn.textContent='Sign In →'; }
+        if (errEl) { errEl.textContent = '✕ Could not reach the server. Please check your connection and try again.'; errEl.style.display = 'block'; }
       });
   };
 
@@ -719,6 +1121,10 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       _patchLocationSave();
       _patchTaskDone();
       _patchTicketSave();
+      _patchTicketStatusActions();
+      _patchDsaSave();
+      _patchPartnerSave();
+      _patchPayoutClaimCreate();
       _patchReports();
       _patchChangePassword();
       _patchWizardSubmit();
@@ -763,9 +1169,19 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             _syncLocations();
             _syncTasks();
             _syncTickets();
+            _syncDsaPartners();
+            setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500);
+            setTimeout(tkMigrateLegacyLocalTickets, 1400);
           }, 1200);
         } else {
+          // Invalid/expired JWT — clear the auth tokens AND the locally
+          // cached session display data (name/role/email), so no stale
+          // per-user info is left behind after a failed restore. (Manual
+          // logout via window._apiLogout already did this; automatic
+          // invalidation during session-restore previously did not.)
           _clearAuth();
+          _lsRemove('efin_session');
+          if (typeof window.applySession === 'function') { try { window.currentUser = null; window.applySession(); } catch (e) {} }
         }
       });
     }
@@ -1189,7 +1605,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
 
   // Expose sync functions for manual refresh
-  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); };
+  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
+  window._syncPayoutClaimsFromServer = _syncPayoutClaimsFromServer;
   window._apiSyncLoans  = _syncLoans;
   window._apiSyncUsers  = _syncUsers;
   window._apiSyncTeams  = _syncTeams;

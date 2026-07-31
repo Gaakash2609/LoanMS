@@ -54,7 +54,17 @@ public class TasksController : BaseController
             CreatedByUserId = CurrentUserId, CreatedAt = DateTime.UtcNow
         };
         _db.Tasks.Add(task);
+        await _db.SaveChangesAsync(); // assigns task.Id, needed for the log entry below
+
+        // Phase 5C: record the initial assignment. FromUserId is null — this is
+        // a new task, not a reassignment. Actor (AssignedByUserId) is always the
+        // authenticated creator, never taken from the request body.
+        var assignee = await _db.Users.FindAsync(dto.AssignedToUserId);
+        AssignmentLogHelper.Log(_db, "Task", task.Id, null, null,
+            dto.AssignedToUserId, assignee?.FullName ?? "Unknown",
+            CurrentUserId, CurrentUserEmail);
         await _db.SaveChangesAsync();
+
         return Ok(ApiResponseDto<object>.Ok(new { task.Id }, "Task created."));
     }
 

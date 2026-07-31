@@ -31,6 +31,21 @@ public class IncredControllerTests
 {
     private const string TokenSuccessBody = "{\"access_token\":\"tok-1\",\"expires_in\":3600}";
 
+    // PHASE 6 SECURITY FIX: IncredController._loadCreds() no longer falls back
+    // to a hardcoded, committed InCred client secret (that fallback was a
+    // leaked-credential finding and has been removed from the controller).
+    // These tests now seed AppSettings explicitly, the same way the real app
+    // must be configured, instead of relying on the removed built-in default.
+    private const string TestClientId = "test-incred-client-id";
+    // Must be syntactically valid base64url (no padding) — IDataProtector's
+    // string-based Unprotect() extension calls WebEncoders.Base64UrlDecode on
+    // this value BEFORE the mocked byte[]-based Unprotect() below ever runs,
+    // so an arbitrary non-base64 string here would throw during decode.
+    // The mock ignores the actual decoded bytes and always returns
+    // TestDecryptedSecret regardless of what this decodes to.
+    private const string TestEncSecret = "dGVzdC1zZWNyZXQ";
+    private const string TestDecryptedSecret = "test-incred-secret";
+
     private static (IncredController controller, QueuedHttpMessageHandler handler, FakeCacheService cache, AppDbContext db) CreateController()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -38,12 +53,22 @@ public class IncredControllerTests
             .Options;
         var db = new AppDbContext(options);
 
+        // Seed InCred configuration in Settings — required now that
+        // IncredController no longer has a hardcoded fallback (see fix above).
+        db.AppSettings.AddRange(
+            new AppSetting { Key = "incred_base_url", Value = "https://api.incred.test/v3" },
+            new AppSetting { Key = "incred_client_id", Value = TestClientId },
+            new AppSetting { Key = "incred_client_secret_enc", Value = TestEncSecret });
+        db.SaveChanges();
+
         var handler = new QueuedHttpMessageHandler();
         var httpFactory = new Mock<IHttpClientFactory>();
         httpFactory.Setup(f => f.CreateClient("incred")).Returns(() => new HttpClient(handler));
 
+        var protectorMock = new Mock<IDataProtector>();
+        protectorMock.Setup(p => p.Unprotect(It.IsAny<byte[]>())).Returns(System.Text.Encoding.UTF8.GetBytes(TestDecryptedSecret));
         var dpProvider = new Mock<IDataProtectionProvider>();
-        dpProvider.Setup(p => p.CreateProtector(It.IsAny<string>())).Returns(Mock.Of<IDataProtector>());
+        dpProvider.Setup(p => p.CreateProtector(It.IsAny<string>())).Returns(protectorMock.Object);
 
         var cache = new FakeCacheService();
 
@@ -212,10 +237,11 @@ public class IncredControllerTests
     public async Task TokenCache_ExpiredEntry_TriggersRefetch()
     {
         var (controller, handler, cache, _) = CreateController();
-        // Pre-seed an already-expired cached token for the built-in fallback credentials
-        // (no AppSettings row is seeded, so _loadCreds() falls back to DEFAULT_CLIENT_ID).
+        // Pre-seed an already-expired cached token for the seeded test credentials
+        // (CreateController() now seeds AppSettings — see PHASE 6 fix above —
+        // so _loadCreds() resolves TestClientId rather than a hardcoded default).
         await cache.SetAsync(
-            IncredController.TOKEN_CACHE_KEY_PREFIX + IncredController.DEFAULT_CLIENT_ID,
+            IncredController.TOKEN_CACHE_KEY_PREFIX + TestClientId,
             new IncredController.CachedIncredToken { AccessToken = "stale", ExpiresAtUtc = DateTime.UtcNow.AddMinutes(-5) });
 
         handler.Enqueue(HttpStatusCode.OK, TokenSuccessBody);

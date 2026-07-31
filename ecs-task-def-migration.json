@@ -1,0 +1,31 @@
+{
+  "family": "loanms-migration",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::664418956749:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::664418956749:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "loanms-migration-runner",
+      "image": "664418956749.dkr.ecr.ap-south-1.amazonaws.com/loanms-migration:latest",
+      "essential": true,
+      "secrets": [
+        {
+          "name": "ConnectionStrings__PostgreSQL",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:664418956749:secret:loanms/staging/db:ConnectionString::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/loanms-migration",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

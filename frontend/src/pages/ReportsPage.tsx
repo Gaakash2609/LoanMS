@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import PageHeader from '@/components/shared/PageHeader'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency } from '@/utils/format'
-import { TrendingUp, BarChart3, Users, Award, Clock, Zap, Target, AlertCircle } from 'lucide-react'
+import { TrendingUp, BarChart3, Users, Award, Clock, Zap, Target } from 'lucide-react'
 
 export default function ReportsPage() {
   const [dateRange, setDateRange] = useState({ from: '', to: '' })

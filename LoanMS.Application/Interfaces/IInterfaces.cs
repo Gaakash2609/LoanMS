@@ -85,6 +85,7 @@ public interface IUserService
     Task<ApiResponseDto<UserDto>> UpdateAsync(int id, UpdateUserRequestDto request);
     Task<ApiResponseDto<bool>> DeleteAsync(int id);
     Task<ApiResponseDto<bool>> ChangePasswordAsync(int id, ChangePasswordRequestDto request);
+    Task<ApiResponseDto<bool>> AdminResetPasswordAsync(int targetUserId, AdminResetPasswordRequestDto request);
 }
 
 public interface ICustomerService

@@ -16,7 +16,7 @@ export interface Customer {
   id: number; fullName: string; email: string; phone: string
   panNumber?: string; aadhaarNumber?: string; dateOfBirth?: string
   address?: string; city?: string; state?: string; pinCode?: string
-  monthlyIncome?: number; employmentType?: string; companyName?: string
+  monthlyIncome?: number; monthlyObligations?: number; employmentType?: string; companyName?: string
   cibilScore?: number; gender?: string; fatherName?: string; residenceType?: string
   totalLoans: number; createdAt: string
 }
@@ -95,7 +95,7 @@ export interface CreateCustomerRequest {
   fullName: string; email: string; phone: string; panNumber?: string
   aadhaarNumber?: string; dateOfBirth?: string; address?: string
   city?: string; state?: string; pinCode?: string
-  monthlyIncome?: number; employmentType?: string; companyName?: string
+  monthlyIncome?: number; monthlyObligations?: number; employmentType?: string; companyName?: string
   cibilScore?: number
 }
 

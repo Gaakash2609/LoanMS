@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -7,8 +8,25 @@ using LoanMS.Domain.Entities;
 
 namespace LoanMS.API.Controllers
 {
+    // PHASE 6 SECURITY FIX: this controller previously had no [Authorize] anywhere
+    // (class or method level) and no global fallback authorization policy is
+    // configured in Program.cs, so every bureau/credit-report endpoint here
+    // (upload, credit-score, risk-analysis, payment-history, etc.) was reachable
+    // by anyone with no login at all.
+    //
+    // RBAC decision (evidence: CustomersController/LoansController conventions):
+    // - Class-level bare [Authorize] covers all read-only GET endpoints — same
+    //   pattern CustomersController uses for day-to-day PII access by any
+    //   authenticated role, including Sales, who need to view credit reports
+    //   while processing a loan application.
+    // - The one cost-bearing/controlled mutating action (UploadBureauFile,
+    //   which triggers processing of an external CIBIL/Equifax pull) is
+    //   restricted to Admin,Manager below — same restriction level
+    //   LoansController/CustomersController apply to their comparably
+    //   impactful mutating actions.
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class BureauController : ControllerBase
     {
         private readonly IBureauService _bureauService;
@@ -23,6 +41,14 @@ namespace LoanMS.API.Controllers
         /// <summary>
         /// Upload bureau file (XML/JSON from CIBIL, Equifax, etc.)
         /// </summary>
+        // PHASE 6 RBAC: triggering a bureau pull/upload is a controlled,
+        // cost-bearing external-data action — restricted to Admin,Manager,
+        // matching how LoansController/CustomersController restrict their
+        // comparably impactful mutating actions. Read endpoints below stay at
+        // the class-level bare [Authorize] (any authenticated user, including
+        // Sales), matching CustomersController's convention for day-to-day
+        // read access to customer/PII-adjacent data.
+        [Authorize(Roles = "Admin,Manager")]
         [HttpPost("upload")]
         public async Task<IActionResult> UploadBureauFile([FromBody] BureauUploadRequestDto request)
         {

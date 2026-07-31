@@ -1,11 +1,18 @@
 using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 #nullable disable
 
 namespace LoanMS.Infrastructure.Migrations
 {
     /// <inheritdoc />
+    // PHASE 6 FIX: this migration was missing the [DbContext]/[Migration]
+    // attributes that dotnet-ef normally generates (see PHASE6 report for
+    // why this matters — without them EF Core cannot register/order this
+    // migration for AppDbContext at runtime).
+    [DbContext(typeof(LoanMS.Infrastructure.Data.AppDbContext))]
+    [Migration("20250101000000_InitialCreate")]
     public partial class InitialCreate : Migration
     {
         /// <inheritdoc />

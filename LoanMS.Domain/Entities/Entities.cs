@@ -49,6 +49,10 @@ public class Customer : BaseEntity
     public string? State { get; set; }
     public string? PinCode { get; set; }
     public decimal? MonthlyIncome { get; set; }
+    /// <summary>Existing monthly EMI/debt obligations declared by the applicant — used for FOIR
+    /// (Fixed Obligation to Income Ratio) calculations. Captured on the New Application wizard's
+    /// Employment step (Phase 5A) and persisted server-side alongside MonthlyIncome.</summary>
+    public decimal? MonthlyObligations { get; set; }
     public string? EmploymentType { get; set; }
     public string? CompanyName { get; set; }
     public int? CibilScore { get; set; }
@@ -213,6 +217,23 @@ public class Ticket : BaseEntity
     public User? AssignedTo { get; set; }
 }
 
+// ── Ticket Comment / Activity ───────────────────────────────────────────────
+// Phase 4B: backs the helpdesk ticket comment/notes/activity panel.
+// Type "Comment" = user-authored note. Type "Activity" = system-generated
+// record written automatically on status or assignment change (Close, Reopen,
+// reassignment). Both share one table/timeline so the UI can render them in
+// chronological order.
+public class TicketComment : BaseEntity
+{
+    public int TicketId { get; set; }
+    public int UserId { get; set; }
+    public string Content { get; set; } = string.Empty;
+    public string Type { get; set; } = "Comment";
+
+    public Ticket Ticket { get; set; } = null!;
+    public User User { get; set; } = null!;
+}
+
 // ── Payout Claim ──────────────────────────────────────────────────────────────
 public class PayoutClaim : BaseEntity
 {
@@ -226,10 +247,21 @@ public class PayoutClaim : BaseEntity
     public DateTime? PaidAt { get; set; }
     public int? ProcessedByUserId { get; set; }
 
+    /// <summary>
+    /// Phase 3: the capacity in which ClaimedByUserId is claiming on this loan —
+    /// "Sales" | "Dsa" | "Partner" | "Login" | "Manager" | "Admin". Lets the same
+    /// loan carry one claim per eligible claimant (multi-claimant business logic)
+    /// instead of a single claim per loan. Combined with (LoanId, ClaimedByUserId)
+    /// this forms the idempotency key that prevents duplicate claims — see the
+    /// unique index in AppDbContext.
+    /// </summary>
+    public string ClaimType { get; set; } = "Sales";
+
     public Loan Loan { get; set; } = null!;
     public User ClaimedBy { get; set; } = null!;
     public User? ProcessedBy { get; set; }
 }
+
 
 // ── Location ──────────────────────────────────────────────────────────────────
 public class Location : BaseEntity
@@ -284,8 +316,43 @@ public class DsaPartner : BaseEntity
     /// a linked login.</summary>
     public int? LinkedUserId { get; set; }
 
+    // ── Phase 2: fields previously local-only (frontend efin-app.js dsa-f-*/pm-f-*) ──
+    /// <summary>PAN card number (frontend: dsa-f-pan).</summary>
+    public string? Pan { get; set; }
+    /// <summary>Office address line (frontend: dsa-f-office-addr).</summary>
+    public string? OfficeAddress { get; set; }
+    /// <summary>Office state (frontend: dsa-f-office-state). Office city already
+    /// covered by <see cref="City"/>.</summary>
+    public string? OfficeState { get; set; }
+    /// <summary>Office PIN code (frontend: dsa-f-office-pin).</summary>
+    public string? OfficePin { get; set; }
+    /// <summary>Office address type — e.g. owned/rented (frontend: dsa-f-office-addr-type).</summary>
+    public string? OfficeAddressType { get; set; }
+    /// <summary>Partner sub-category — e.g. individual/company (frontend: pm-f-type).
+    /// Distinct from <see cref="PartnerType"/>, which distinguishes DSA vs Partner.</summary>
+    public string? Category { get; set; }
+    /// <summary>For records where PartnerType = Partner: the DSA this Partner is
+    /// mapped under (frontend: pm-f-dsa-id / mappedDsaId). Self-referencing FK.</summary>
+    public int? MappedDsaId { get; set; }
+
     public User? MappedSalesUser { get; set; }
     public User? LinkedUser { get; set; }
+    public DsaPartner? MappedDsa { get; set; }
+    public ICollection<DsaDocument> Documents { get; set; } = new List<DsaDocument>();
+}
+
+// ── DSA/Partner uploaded documents (KYC/onboarding docs) ───────────────────────
+public class DsaDocument : BaseEntity
+{
+    public int DsaPartnerId { get; set; }
+    public string DocumentName { get; set; } = string.Empty;
+    public string DocumentType { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public long FileSizeBytes { get; set; }
+    public string UploadedByUserId { get; set; } = string.Empty;
+
+    // Navigation
+    public DsaPartner DsaPartner { get; set; } = null!;
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -294,6 +361,34 @@ public class AppSetting : BaseEntity
     public string Key { get; set; } = string.Empty;
     public string Value { get; set; } = string.Empty;
     public string? Category { get; set; }
+}
+
+// ── Assignment Log (Phase 5C) ────────────────────────────────────────────────
+/// <summary>
+/// Immutable, insert-only audit trail of "who assigned what to whom" across
+/// the app's existing assignment-capable flows (Task creation, Ticket
+/// creation/reassignment). Mirrors AuditLog's shape deliberately — same
+/// "no BaseEntity, no soft-delete, no update, only ever inserted" pattern —
+/// since this is a specialised, structured view of the same kind of event
+/// the generic AuditMiddleware already captures for every write, but with
+/// the from/to user identities pulled out into dedicated columns instead of
+/// being buried in a raw JSON request body.
+/// AssignedByUserId is always populated from the authenticated JWT user
+/// (BaseController.CurrentUserId) at the call site — never from client input.
+/// </summary>
+public class AssignmentLog
+{
+    public int Id { get; set; }
+    public string EntityType { get; set; } = string.Empty; // "Task" | "Ticket"
+    public int EntityId { get; set; }
+    public int? FromUserId { get; set; }
+    public string? FromUserName { get; set; }
+    public int ToUserId { get; set; }
+    public string ToUserName { get; set; } = string.Empty;
+    public int AssignedByUserId { get; set; }
+    public string? AssignedByName { get; set; }
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
 // ── Audit Log ─────────────────────────────────────────────────────────────────
@@ -350,5 +445,28 @@ public class PasswordResetToken : BaseEntity
 
     // Navigation
     public User User { get; set; } = null!;
+}
+
+// ── Bank Master (Phase 5B) ──────────────────────────────────────────────────
+/// <summary>
+/// Master list of lender/partner banks (RM contact + IFSC prefix + emp code)
+/// managed from the Banks screen. Standalone master data — not currently
+/// referenced by Loan/Customer/Payout via foreign key, so no existing
+/// relationships are affected by this addition.
+/// </summary>
+public class BankMaster : BaseEntity
+{
+    public string  BankName    { get; set; } = string.Empty;
+    public string? IfscPrefix  { get; set; }
+    public string? EmpCode     { get; set; }
+    public string? Location    { get; set; }
+    public string? RmName      { get; set; }
+    public string? RmMobile    { get; set; }
+    public string? Email       { get; set; }
+    public string? Remarks     { get; set; }
+    public bool    IsActive    { get; set; } = true;
+
+    /// <summary>User who created this bank record (for audit; not used for ownership checks).</summary>
+    public int? CreatedByUserId { get; set; }
 }
 

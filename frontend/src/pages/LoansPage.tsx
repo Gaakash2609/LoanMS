@@ -8,7 +8,7 @@ import { StatusBadge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency, formatDate } from '@/utils/format'
 import { Plus, Search, RefreshCw, ChevronLeft, ChevronRight, FileClock, Play, Trash2 } from 'lucide-react'
-import { listDrafts, deleteDraft, type WizardDraft } from '@/utils/draftStorage'
+import { listDraftMetas, deleteDraftMeta, type WizardDraftMeta } from '@/utils/draftStorage'
 
 const STATUSES = ['', 'Draft', 'Submitted', 'UnderReview', 'Approved', 'Disbursed', 'Rejected', 'Closed']
 
@@ -17,16 +17,16 @@ export default function LoansPage() {
   const { data, isLoading, refetch } = useLoans(filter)
   const [search, setSearch] = useState(filter.search ?? '')
   const [section, setSection] = useState<'applications' | 'drafts'>('applications')
-  const [drafts, setDrafts] = useState<WizardDraft[]>([])
+  const [drafts, setDrafts] = useState<WizardDraftMeta[]>([])
 
-  const refreshDrafts = () => setDrafts(listDrafts())
+  const refreshDrafts = () => setDrafts(listDraftMetas())
 
   useEffect(() => {
     if (section === 'drafts') refreshDrafts()
   }, [section])
 
   const handleDiscardDraft = (id: string) => {
-    deleteDraft(id)
+    deleteDraftMeta(id)
     refreshDrafts()
   }
 
@@ -181,7 +181,7 @@ export default function LoansPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left border-b border-gray-100">
-                    {['Applicant', 'Loan Type', 'Progress', 'Last Saved', ''].map((h) => (
+                    {['Draft', 'Loan Type', 'Progress', 'Last Saved', ''].map((h) => (
                       <th key={h} className="pb-3 pr-4 text-xs font-medium text-gray-500 uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
