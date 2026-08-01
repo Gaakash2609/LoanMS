@@ -36,6 +36,24 @@
       --sidebar-w: 260px;
       --sidebar-collapsed-w: 64px;
       --transition: 0.24s cubic-bezier(.4, 0, .2, 1);
+
+      /* -- Shared topbar height, kept in sync with the real rendered height
+         of #main-topbar by js/boot.js (ResizeObserver), since the topbar's
+         padding changes across breakpoints. Any in-page sticky element must
+         offset by this instead of using top:0, or it will collide with the
+         topbar/hamburger. Fallback below is the pre-JS first-paint estimate. -- */
+      --topbar-h: 68px;
+
+      /* -- Z-index scale: single source of truth so the shared header (and
+         the hamburger button inside it) always stacks above ordinary page
+         content, regardless of DOM order. Page-level components must stay
+         under --z-topbar. -- */
+      --z-page-sticky: 10;
+      --z-topbar: 100;
+      --z-sidebar-overlay: 199;
+      --z-sidebar: 200;
+      --z-dropdown: 300;
+      --z-modal: 9998;
     }
 
     * {
@@ -1393,7 +1411,7 @@
       flex-direction: column;
       position: fixed;
       top: 0; left: 0; bottom: 0;
-      z-index: 200;
+      z-index: var(--z-sidebar);
       overflow: hidden;
       /* Smooth expand/collapse */
       transition: width .28s cubic-bezier(.4,0,.2,1),
@@ -1421,7 +1439,15 @@
       flex-direction: column;
       min-height: 100vh;
       min-width: 0;           /* critical: flex child must not overflow */
-      overflow-x: hidden;     /* clip anything that escapes a table-wrap */
+      /* NOTE: overflow-x:hidden was removed from here — setting it forces the
+         browser to also compute overflow-y as 'auto' on this element (CSS
+         overflow interop rule), which makes .main register as the sticky
+         topbar's scrolling ancestor even though .main itself never actually
+         scrolls (the document does). That silently breaks position:sticky on
+         #main-topbar, making the hamburger/topbar disappear on any page tall
+         enough to scroll. Horizontal clipping is already handled by
+         .page{max-width:100%} and .table-wrap{overflow-x:auto} below, so it
+         is safe to drop it here. */
       transition: margin-left .28s cubic-bezier(.4,0,.2,1);
     }
 
@@ -1872,7 +1898,7 @@
       gap: 16px;
       position: sticky;
       top: 0;
-      z-index: 50;
+      z-index: var(--z-topbar);
       overflow: visible;
       flex-wrap: nowrap;
       min-width: 0;
@@ -4830,7 +4856,6 @@
 
     /* Prevent any page from exceeding viewport width */
     .main {
-      overflow-x: hidden;
       min-width: 0;
     }
 
@@ -6563,7 +6588,7 @@
       flex-shrink: 0;
       transition: all .2s;
       position: relative;
-      z-index: 51;
+      z-index: 2;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
     }
@@ -6582,7 +6607,7 @@
       inset: 0;
       background: rgba(8, 18, 52, .5);
       backdrop-filter: blur(4px);
-      z-index: 199;
+      z-index: var(--z-sidebar-overlay);
       opacity: 0;
       pointer-events: none;
       transition: opacity .3s;
@@ -6935,7 +6960,7 @@
         left: -280px !important;
         transform: none !important;
         transition: left .3s cubic-bezier(.4, 0, .2, 1), box-shadow .3s;
-        z-index: 200;
+        z-index: var(--z-sidebar);
       }
 
       .sidebar.open {
@@ -7012,6 +7037,14 @@
 
       .topbar-search {
         display: none;
+      }
+
+      #topbar-search-wrap {
+        display: none !important;
+      }
+
+      #topbar-all-users-btn {
+        display: none !important;
       }
 
       .topbar-title {
@@ -7102,6 +7135,24 @@
       .filter-bar {
         flex-wrap: wrap;
         gap: 6px;
+      }
+
+      /* Reports: date-range filter — was overflowing the viewport on
+         mobile because it never wrapped and the two native date inputs
+         don't shrink below their intrinsic width. Let it drop to its own
+         full-width row and wrap internally instead. */
+      #rpt-date-range-wrap {
+        margin-left: 0 !important;
+        flex-wrap: wrap !important;
+        width: 100% !important;
+      }
+
+      /* EMI Calculator: mode tabs (Standard / Compare / Prepayment /
+         Reverse EMI) were laid out in a single non-wrapping row and
+         overflowed the viewport on mobile. Allow them to wrap. */
+      .calc-mode-tabs {
+        flex-wrap: wrap !important;
+        width: 100% !important;
       }
 
       .filter-chip {
@@ -9031,8 +9082,8 @@
 /* LEW action bar inside the timeline tab */
 #lew-action-bar {
   position: sticky;
-  top: 0;
-  z-index: 5;
+  top: var(--topbar-h, 68px);
+  z-index: var(--z-page-sticky, 10);
 }
 #lew-action-bar button:hover {
   opacity: 0.88;

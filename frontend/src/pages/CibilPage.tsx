@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/Button'
 import PageHeader from '@/components/shared/PageHeader'
 import { 
   AlertCircle, Clock, TrendingUp, 
-  Download, RefreshCw, PrinterIcon, Shield
+  Download, RefreshCw, PrinterIcon, Shield,
+  BarChart3, User, Landmark, ClipboardList, AlertTriangle
 } from 'lucide-react'
 
 interface CibilReport {
@@ -143,7 +144,7 @@ export default function CibilPage() {
   return (
     <div className="max-w-6xl">
       <div className="flex items-center justify-between mb-6">
-        <PageHeader title="📊 CIBIL Report" subtitle={`${reportData.customerProfile?.fullName || 'Customer'}'s Credit Profile`} />
+        <PageHeader title={<><BarChart3 size={22} className="text-gray-700" /> CIBIL Report</>} subtitle={`${reportData.customerProfile?.fullName || 'Customer'}'s Credit Profile`} />
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-4 h-4 mr-2" /> Refresh
@@ -260,7 +261,7 @@ export default function CibilPage() {
       {activeTab === 'overview' && (
         <div className="space-y-6">
           <Card>
-            <CardHeader title="👤 Customer Information" />
+            <CardHeader title={<><User size={16} className="text-gray-500" /> Customer Information</>} />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Full Name</p>
@@ -278,7 +279,7 @@ export default function CibilPage() {
           </Card>
 
           <Card>
-            <CardHeader title="🏦 Account Summary" />
+            <CardHeader title={<><Landmark size={16} className="text-gray-500" /> Account Summary</>} />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6">
               <div className="bg-blue-50 p-4 rounded-lg">
                 <p className="text-xs text-gray-600 mb-1">Total Accounts</p>
@@ -306,7 +307,7 @@ export default function CibilPage() {
       {/* Other tabs - placeholder for brevity */}
       {activeTab === 'accounts' && (
         <Card>
-          <CardHeader title="📋 Loan Accounts" />
+          <CardHeader title={<><ClipboardList size={16} className="text-gray-500" /> Loan Accounts</>} />
           <div className="p-6 text-center text-gray-500">
             {accountsData && accountsData.length > 0 ? `${accountsData.length} accounts` : 'No accounts found'}
           </div>
@@ -315,14 +316,14 @@ export default function CibilPage() {
 
       {activeTab === 'history' && (
         <Card>
-          <CardHeader title="📈 Payment History" />
+          <CardHeader title={<><TrendingUp size={16} className="text-gray-500" /> Payment History</>} />
           <div className="p-6 text-center text-gray-500">Loading payment history...</div>
         </Card>
       )}
 
       {activeTab === 'risk' && (
         <Card>
-          <CardHeader title="⚠️ Risk Assessment" />
+          <CardHeader title={<><AlertTriangle size={16} className="text-amber-500" /> Risk Assessment</>} />
           <div className="p-6 text-center text-gray-500">Loading risk analysis...</div>
         </Card>
       )}

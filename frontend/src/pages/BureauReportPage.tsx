@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Download, RefreshCw, Printer } from 'lucide-react'
+import { Download, RefreshCw, Printer, CheckCircle2, XCircle, BarChart3, Briefcase, Calendar, AlertTriangle, IndianRupee, CreditCard, Check, X } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/utils/format'
 
 // API Interface
@@ -135,8 +135,8 @@ Generated: ${new Date(report.generatedAt).toLocaleString()}
               <div className="text-lg font-bold text-green-600 mt-1 print:mt-0 print:text-base">
                 {report.creditScore.category}
               </div>
-              <div className="text-xs text-green-600 mt-2 print:text-xs">✓ Live CIBIL Score</div>
-              <div className="text-xs text-green-600 print:text-xs">✓ Eligible for Loan</div>
+              <div className="text-xs text-green-600 mt-2 print:text-xs flex items-center gap-1"><CheckCircle2 size={12} /> Live CIBIL Score</div>
+              <div className="text-xs text-green-600 print:text-xs flex items-center gap-1"><CheckCircle2 size={12} /> Eligible for Loan</div>
             </div>
           </div>
 
@@ -215,10 +215,10 @@ Generated: ${new Date(report.generatedAt).toLocaleString()}
       <div className="bg-white border-b border-gray-200 print:hidden">
         <div className="flex gap-6 px-6">
           {[
-            { id: 'overview', label: '📊 Overview' },
-            { id: 'accounts', label: '💼 Accounts' },
-            { id: 'payments', label: '📅 Payment History' },
-            { id: 'risk', label: '⚠️ Risk Analysis' },
+            { id: 'overview', label: <span className="flex items-center gap-1.5"><BarChart3 size={16} /> Overview</span> },
+            { id: 'accounts', label: <span className="flex items-center gap-1.5"><Briefcase size={16} /> Accounts</span> },
+            { id: 'payments', label: <span className="flex items-center gap-1.5"><Calendar size={16} /> Payment History</span> },
+            { id: 'risk', label: <span className="flex items-center gap-1.5"><AlertTriangle size={16} /> Risk Analysis</span> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -264,12 +264,12 @@ Generated: ${new Date(report.generatedAt).toLocaleString()}
 
 function AccountSummarySection({ summary }: any) {
   const cards = [
-    { label: 'TOTAL ACCOUNTS', value: summary.totalAccounts, icon: '📊' },
-    { label: 'ACTIVE ACCOUNTS', value: summary.activeAccounts, icon: '✓' },
-    { label: 'CLOSED ACCOUNTS', value: summary.closedAccounts, icon: '✕' },
-    { label: 'TOTAL SANCTION', value: formatCurrency(summary.totalSanctionAmount), icon: '💰' },
-    { label: 'CURRENT OUTSTANDING', value: formatCurrency(summary.currentOutstanding), icon: '💳' },
-    { label: 'OVERDUE AMOUNT', value: formatCurrency(summary.overdueAmount), icon: '⚠️', color: 'red' },
+    { label: 'TOTAL ACCOUNTS', value: summary.totalAccounts, icon: <BarChart3 size={22} className="text-gray-500" /> },
+    { label: 'ACTIVE ACCOUNTS', value: summary.activeAccounts, icon: <CheckCircle2 size={22} className="text-green-500" /> },
+    { label: 'CLOSED ACCOUNTS', value: summary.closedAccounts, icon: <XCircle size={22} className="text-gray-400" /> },
+    { label: 'TOTAL SANCTION', value: formatCurrency(summary.totalSanctionAmount), icon: <IndianRupee size={22} className="text-gray-500" /> },
+    { label: 'CURRENT OUTSTANDING', value: formatCurrency(summary.currentOutstanding), icon: <CreditCard size={22} className="text-gray-500" /> },
+    { label: 'OVERDUE AMOUNT', value: formatCurrency(summary.overdueAmount), icon: <AlertTriangle size={22} className="text-red-500" />, color: 'red' },
   ]
 
   return (
@@ -278,7 +278,7 @@ function AccountSummarySection({ summary }: any) {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 print:gap-2">
         {cards.map((card, i) => (
           <div key={i} className="bg-gray-50 rounded-lg p-4 print:p-2 border border-gray-200 print:border-gray-300">
-            <div className="text-2xl mb-1 print:text-xl">{card.icon}</div>
+            <div className="mb-1">{card.icon}</div>
             <div className="text-xs text-gray-600 font-semibold print:text-xs">{card.label}</div>
             <div className={`text-lg font-bold mt-1 print:text-base ${
               card.color === 'red' ? 'text-red-600' : 'text-gray-900'
@@ -300,7 +300,7 @@ function ScoreFactorsSection({ creditScore }: any) {
         {/* Positive Factors */}
         <div>
           <h3 className="font-semibold text-green-600 mb-3 print:mb-2 print:text-sm flex items-center gap-2">
-            <span>✓</span> Positive Factors
+            <Check size={16} className="text-green-600" /> Positive Factors
           </h3>
           <div className="space-y-2 print:space-y-1">
             {creditScore.positiveFactors?.map((factor: any, i: number) => (
@@ -316,7 +316,7 @@ function ScoreFactorsSection({ creditScore }: any) {
         {/* Negative Factors */}
         <div>
           <h3 className="font-semibold text-red-600 mb-3 print:mb-2 print:text-sm flex items-center gap-2">
-            <span>✕</span> Negative Factors
+            <X size={16} className="text-red-600" /> Negative Factors
           </h3>
           <div className="space-y-2 print:space-y-1">
             {creditScore.negativeFactors?.map((factor: any, i: number) => (
@@ -473,7 +473,7 @@ function PaymentHistorySection({ payment }: any) {
               }`}>
                 {m.dpdStatus}
               </div>
-              {m.isMissedPayment && <span className="text-red-600 font-semibold">⚠️ Missed</span>}
+              {m.isMissedPayment && <span className="text-red-600 font-semibold flex items-center gap-1"><AlertTriangle size={12} /> Missed</span>}
             </div>
           ))}
         </div>
@@ -514,7 +514,9 @@ function RiskAnalysisSection({ risk, behaviour, enquiry }: any) {
         <div className="space-y-2 print:space-y-1">
           {risk.riskFactors?.map((factor: any, i: number) => (
             <div key={i} className="flex items-start gap-3 print:gap-2">
-              <span className={`text-lg print:text-base ${factor.impact === 'Positive' ? '✓' : '✕'}`}></span>
+              {factor.impact === 'Positive'
+                ? <Check size={18} className="text-green-600 shrink-0 mt-0.5" />
+                : <X size={18} className="text-red-600 shrink-0 mt-0.5" />}
               <div className="flex-1 text-sm print:text-xs">
                 <div className="font-semibold text-gray-900">{factor.factor}</div>
                 <div className="text-gray-600">{factor.description}</div>
@@ -587,7 +589,7 @@ function RiskAnalysisSection({ risk, behaviour, enquiry }: any) {
         </div>
         {(enquiry.highEnquiryFrequency || enquiry.loanShoppingDetected || enquiry.creditHungryCustomer) && (
           <div className="bg-yellow-50 border border-yellow-200 rounded p-4 print:p-2 print:bg-white print:border-gray-300">
-            <div className="font-semibold text-yellow-900 mb-2 print:mb-1 print:text-sm text-yellow-900">⚠️ Warnings</div>
+            <div className="font-semibold text-yellow-900 mb-2 print:mb-1 print:text-sm text-yellow-900 flex items-center gap-1.5"><AlertTriangle size={15} /> Warnings</div>
             <ul className="space-y-1 print:space-y-0 text-sm print:text-xs text-yellow-900">
               {enquiry.highEnquiryFrequency && <li>• High enquiry frequency detected</li>}
               {enquiry.loanShoppingDetected && <li>• Loan shopping behavior detected</li>}

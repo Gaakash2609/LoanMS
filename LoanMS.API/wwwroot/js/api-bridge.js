@@ -24,7 +24,19 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
   function _token()   { return _lsGet(LS_TOKEN); }
   function _refresh() { return _lsGet(LS_REFRESH); }
-  function _clearAuth() { [LS_TOKEN, LS_REFRESH, LS_USER].forEach(function(k){ _lsRemove(k); }); }
+  // Also removes efin_session (the display-only cache read by boot.js/efin-app.js
+  // to paint the topbar name/avatar on restore). Previously this only cleared the
+  // real auth keys (LS_TOKEN/LS_REFRESH/LS_USER) and left efin_session behind.
+  // session-preload.js hides the login screen based on efin_session alone, so a
+  // token wipe without also clearing efin_session left the dashboard shell
+  // visible but never populated — the user's name/avatar reverted to the raw
+  // static HTML placeholders ("User Name" / "AG"), which looked like the account
+  // had silently switched to a different, blank one. Clearing efin_session here
+  // too means that state can no longer persist across a refresh.
+  function _clearAuth() {
+    [LS_TOKEN, LS_REFRESH, LS_USER].forEach(function(k){ _lsRemove(k); });
+    _lsRemove('efin_session');
+  }
 
   /* ── Core API request with auto token refresh ──
      apiReqRaw() is the SINGLE centralized implementation of the auth flow
@@ -35,7 +47,38 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
      fetch(). apiReq() is kept as a thin JSON-parsing wrapper over it so all
      existing callers keep working unchanged. There is intentionally only
      ONE refresh implementation — nothing here starts a second, independent
-     refresh cycle. */
+     refresh cycle.
+
+     _pendingRefresh caches the in-flight /auth/refresh promise so that a
+     burst of concurrent requests (e.g. the _syncLoans/_syncUsers/_syncTeams/
+     _syncLocations/_syncTasks/_syncTickets/_syncDsaPartners calls fired
+     together on every session restore) that all hit a 401 at once share ONE
+     refresh call instead of each independently POSTing /auth/refresh with the
+     same refresh token. The backend rotates the refresh token on every
+     successful refresh (invalidating the old one), so without this dedupe,
+     only the first of those concurrent refresh calls could ever succeed —
+     every other one would race in with the now-invalidated old refresh token,
+     get rejected, and call _clearAuth(), wiping out the fresh token the
+     winner had just obtained a moment earlier. */
+  var _pendingRefresh = null;
+  function _doRefresh(rt) {
+    if (_pendingRefresh) return _pendingRefresh;
+    _pendingRefresh = fetch(BASE + '/auth/refresh', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ refreshToken: rt }) })
+      .then(function(r2){ return r2.json(); })
+      .then(function(d2) {
+        if (d2 && d2.success) {
+          _lsSet(LS_TOKEN, d2.data.accessToken);
+          _lsSet(LS_REFRESH, d2.data.refreshToken);
+          return d2.data.accessToken;
+        }
+        _clearAuth();
+        return null;
+      })
+      .catch(function(){ _clearAuth(); return null; })
+      .finally(function(){ _pendingRefresh = null; });
+    return _pendingRefresh;
+  }
+
   function apiReqRaw(method, path, body) {
     var isForm = (typeof FormData !== 'undefined') && (body instanceof FormData);
     var headers = isForm ? {} : { 'Content-Type': 'application/json' };
@@ -48,23 +91,15 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         if (res.status !== 401) return res;
         var rt = _refresh();
         if (!rt) { _clearAuth(); return res; } // no refresh token — surface the 401 as-is, no loop
-        return fetch(BASE + '/auth/refresh', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ refreshToken: rt }) })
-          .then(function(r2){ return r2.json(); })
-          .then(function(d2) {
-            if (d2 && d2.success) {
-              _lsSet(LS_TOKEN, d2.data.accessToken);
-              _lsSet(LS_REFRESH, d2.data.refreshToken);
-              headers['Authorization'] = 'Bearer ' + d2.data.accessToken;
-              // Exactly one retry with the fresh token. Whatever this returns
-              // (even another 401) is handed back as-is — we never recurse
-              // back into the refresh branch again, so a bad/expired refresh
-              // token can never cause a repeated request loop.
-              return fetch(BASE + path, { method: method, headers: headers, body: fetchBody });
-            }
-            _clearAuth();
-            return res; // refresh rejected — surface the original 401, no loop
-          })
-          .catch(function(){ _clearAuth(); return res; });
+        return _doRefresh(rt).then(function(freshToken) {
+          if (!freshToken) return res; // refresh rejected/failed — surface the original 401, no loop
+          headers['Authorization'] = 'Bearer ' + freshToken;
+          // Exactly one retry with the fresh token. Whatever this returns
+          // (even another 401) is handed back as-is — we never recurse
+          // back into the refresh branch again, so a bad/expired refresh
+          // token can never cause a repeated request loop.
+          return fetch(BASE + path, { method: method, headers: headers, body: fetchBody });
+        });
       });
   }
 
@@ -212,6 +247,9 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           if (r && r.success) {
             if (typeof window.showToast === 'function') window.showToast('User saved to database ✓', 'success');
             setTimeout(_syncUsers, 500);
+          } else if (typeof window.showToast === 'function') {
+            var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+            window.showToast('⚠ User saved locally, but database sync failed: ' + msg, 'warn');
           }
         });
       }, 300);
@@ -245,26 +283,70 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     }).catch(function(e){ console.warn('[Bridge] syncTeams:',e); });
   }
 
-  /* Patch: twSaveSalesTeamDetail / twSaveLoginTeamDetail → PUT /api/teams */
+  /* Patch: twSaveSalesTeamDetail / twSaveLoginTeamDetail → POST/PUT /api/teams
+     twSaveSalesTeamDetail()/twSaveLoginTeamDetail() take NO arguments — they
+     read the pending edit id off the module-level _twEditSalesId/_twEditLoginId
+     and the form fields directly. The previous version of this patch expected
+     a `teamId` argument that never arrives (always undefined), so its lookup
+     never matched any team and NOTHING was ever sent to the backend — new or
+     edited teams stayed local-only forever despite the misleading comment. */
   function _patchTeamSave() {
     if (window._bridgeTeamSavePatched) return;
     window._bridgeTeamSavePatched = true;
-    ['twSaveSalesTeamDetail','twSaveLoginTeamDetail'].forEach(function(fnName) {
+    var _cfg = {
+      twSaveSalesTeamDetail: { type: 'Sales', store: 'twSalesTeams', editVar: '_twEditSalesId', nameEl: 'tw-st-name', leaderEl: 'tw-st-leader', locEl: 'tw-st-loc' },
+      twSaveLoginTeamDetail: { type: 'Login', store: 'twLoginTeams', editVar: '_twEditLoginId', nameEl: 'tw-lt-name', leaderEl: 'tw-lt-leader', locEl: 'tw-lt-loc' }
+    };
+    Object.keys(_cfg).forEach(function(fnName) {
       var _orig = window[fnName];
       if (typeof _orig !== 'function') return;
-      window[fnName] = function(teamId) {
+      var c = _cfg[fnName];
+      window[fnName] = function() {
+        // Capture the pending edit id + form values BEFORE the original
+        // handler runs, since it resets the edit id to null and may hide
+        // the form once it's done (same pattern as _patchDsaSave/_patchPartnerSave).
+        var editId    = (typeof window[c.editVar] !== 'undefined') ? window[c.editVar] : null;
+        var nameEl    = document.getElementById(c.nameEl);
+        var leaderEl  = document.getElementById(c.leaderEl);
+        var locEl     = document.getElementById(c.locEl);
+        var nameVal   = nameEl ? nameEl.value.trim() : '';
+        var leaderVal = leaderEl ? leaderEl.value : '';
+        var locVal    = locEl ? locEl.value : '';
+        var wasValid  = !!nameVal;
+
         var result = _orig.apply(this, arguments);
+        if (!wasValid) return result; // original already showed its own validation toast
+
         setTimeout(function() {
-          var team = (window.twSalesTeams || []).concat(window.twLoginTeams || [])
-            .find(function(t){ return t.id === teamId || t._apiId === teamId; });
-          if (team && team._apiId) {
-            apiReq('PUT', '/teams/' + team._apiId, {
-              name: team.name, type: fnName.includes('Sales') ? 'Sales' : 'Login',
-              locationId: team.location || null, teamLeadUserId: null
-            }).then(function(r) {
-              if (r && r.success) setTimeout(_syncTeams, 300);
-            });
-          }
+          var store = window[c.store];
+          if (!Array.isArray(store)) return;
+          var team = editId
+            ? store.find(function(t){ return t.id === editId; })
+            : store.find(function(t){ return t.name === nameVal && !t._apiId; });
+          if (!team) return;
+
+          var locRec    = (window.twLocations || []).find(function(l){ return l.name === locVal; });
+          var leaderRec = (window.twUsers || []).find(function(u){ return u.name === leaderVal; });
+          var payload = {
+            name: nameVal,
+            type: c.type,
+            locationId: locRec ? locRec._apiId : null,
+            teamLeadUserId: leaderRec ? leaderRec._apiId : null
+          };
+
+          var apiId = team._apiId;
+          var req = apiId ? apiReq('PUT', '/teams/' + apiId, payload) : apiReq('POST', '/teams', payload);
+          req.then(function(r) {
+            if (r && r.success) {
+              if (!apiId && r.data && r.data.id) team._apiId = r.data.id;
+              if (typeof window.showToast === 'function') window.showToast('Team saved to database ✓', 'success');
+              if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
+              setTimeout(_syncTeams, 300);
+            } else if (typeof window.showToast === 'function') {
+              var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+              window.showToast('⚠ Team saved locally, but database sync failed: ' + msg, 'warn');
+            }
+          });
         }, 200);
         return result;
       };
@@ -289,31 +371,96 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     }).catch(function(e){ console.warn('[Bridge] syncLocations:',e); });
   }
 
-  /* Patch: twSaveLocation → POST/PUT /api/locations */
+  /* Patch: twSaveLocation → POST /api/locations (create only — twSaveLocation()
+     takes no arguments; there is no separate "edit" form for locations, only
+     add/rename/delete). The previous version expected a `locId` argument that
+     never arrives, so its lookup never matched the new location and nothing
+     was ever sent to the backend. */
   function _patchLocationSave() {
     if (window._bridgeLocSavePatched) return;
     window._bridgeLocSavePatched = true;
     var _orig = window.twSaveLocation;
     if (typeof _orig !== 'function') return;
-    window.twSaveLocation = function(locId) {
-      var result = _orig.apply(this, arguments);
+    window.twSaveLocation = function() {
+      // Capture the name BEFORE the original runs — it clears the input
+      // field itself as part of closing the modal.
+      var nameEl  = document.getElementById('tw-loc-name');
+      var nameVal = nameEl ? nameEl.value.trim() : '';
+      var result  = _orig.apply(this, arguments);
+      if (!nameVal) return result; // original already showed its own validation toast
+
       setTimeout(function() {
-        var loc = (window.twLocations || []).find(function(l){ return l.id === locId; });
-        if (!loc) { _syncLocations(); return; }
-        var payload = { name:loc.name, city:loc.city||'', state:loc.state||'', pinCode:loc.pin||'' };
-        var req = loc._apiId
-          ? apiReq('PUT', '/locations/' + loc._apiId, payload)
-          : apiReq('POST', '/locations', payload);
-        req.then(function(r) {
+        var loc = (window.twLocations || []).find(function(l){ return l.name === nameVal && !l._apiId; });
+        if (!loc) return;
+        var payload = { name: loc.name, city: loc.city || '', state: loc.state || '', pinCode: loc.pin || '' };
+        apiReq('POST', '/locations', payload).then(function(r) {
           if (r && r.success) {
-            if (typeof window.showToast === 'function') window.showToast('Location saved ✓', 'success');
+            if (r.data && r.data.id) loc._apiId = r.data.id;
+            if (typeof window.showToast === 'function') window.showToast('Location saved to database ✓', 'success');
+            if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
             setTimeout(_syncLocations, 300);
+          } else if (typeof window.showToast === 'function') {
+            var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+            window.showToast('⚠ Location saved locally, but database sync failed: ' + msg, 'warn');
           }
         });
       }, 200);
       return result;
     };
   }
+
+  /* Patch: twRenameLocation → PUT /api/locations/{id} (only for locations
+     that already have a real backend id — a rename on a still-local-only
+     location just updates the name that _patchLocationSave's create call
+     will pick up). */
+  function _patchLocationRename() {
+    if (window._bridgeLocRenamePatched) return;
+    window._bridgeLocRenamePatched = true;
+    var _orig = window.twRenameLocation;
+    if (typeof _orig !== 'function') return;
+    window.twRenameLocation = function(id) {
+      var loc = (window.twLocations || []).find(function(l){ return l.id === id; });
+      var apiId = loc && loc._apiId;
+      var result = _orig.apply(this, arguments);
+      if (!apiId || !loc) return result;
+      setTimeout(function() {
+        apiReq('PUT', '/locations/' + apiId, { name: loc.name, city: loc.city || '', state: loc.state || '', pinCode: loc.pin || '' }).then(function(r) {
+          if (r && r.success) {
+            if (typeof window.showToast === 'function') window.showToast('Location renamed in database ✓', 'success');
+            setTimeout(_syncLocations, 300);
+          } else if (typeof window.showToast === 'function') {
+            var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+            window.showToast('⚠ Location renamed locally, but database sync failed: ' + msg, 'warn');
+          }
+        });
+      }, 100);
+      return result;
+    };
+  }
+
+  /* Patch: twDeleteLocation → DELETE /api/locations/{id} */
+  function _patchLocationDelete() {
+    if (window._bridgeLocDeletePatched) return;
+    window._bridgeLocDeletePatched = true;
+    var _orig = window.twDeleteLocation;
+    if (typeof _orig !== 'function') return;
+    window.twDeleteLocation = function(id) {
+      var loc = (window.twLocations || []).find(function(l){ return l.id === id; });
+      var apiId = loc && loc._apiId;
+      var result = _orig.apply(this, arguments);
+      if (!apiId) return result;
+      setTimeout(function() {
+        apiReq('DELETE', '/locations/' + apiId).then(function(r) {
+          if (!r || r.success === false) {
+            var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+            if (typeof window.showToast === 'function') window.showToast('⚠ Location deleted locally, but database delete failed: ' + msg, 'warn');
+          }
+        });
+      }, 100);
+      return result;
+    };
+  }
+
 
   /* ══════════════════════════════════════════════════════════
      5. TASKS — Sync from API into TASK_STORE
@@ -1119,6 +1266,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       _patchTwSaveUser();
       _patchTeamSave();
       _patchLocationSave();
+      _patchLocationRename();
+      _patchLocationDelete();
       _patchTaskDone();
       _patchTicketSave();
       _patchTicketStatusActions();
@@ -1156,7 +1305,14 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             var s = JSON.parse(sess);
             var efinRole = ROLE_MAP[r.data.role] || s.role || 'sales_executive';
             var email    = (r.data.email || s.email || '').toLowerCase();
-            window.currentUser = { name: s.name || 'Admin', role: efinRole, email: email };
+            // Fallback when the cached snapshot has no name: derive from the
+            // email's local part rather than a literal 'Admin' string, which
+            // previously displayed the word "Admin" for ANY logged-in user
+            // (not just admins) whenever s.name was missing/empty — the same
+            // class of stale/wrong-placeholder bug this restore path exists
+            // to fix. Mirrors the fallback already used in applySession().
+            var _displayName = s.name || (email ? email.split('@')[0] : 'User');
+            window.currentUser = { name: _displayName, role: efinRole, email: email };
             if (typeof window.applySession === 'function') window.applySession();
             if (typeof window.updateGreeting === 'function') window.updateGreeting();
           } catch (e) {
@@ -1182,6 +1338,25 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           _clearAuth();
           _lsRemove('efin_session');
           if (typeof window.applySession === 'function') { try { window.currentUser = null; window.applySession(); } catch (e) {} }
+          // Also undo the optimistic client-side restore's visual state:
+          // session-preload.js/boot.js already added 'has-session' (which
+          // hides #login-screen via CSS) and rendered the dashboard from the
+          // locally cached snapshot before this async /auth/me check came
+          // back. Without removing 'has-session' and re-showing the login
+          // screen here, an invalid/expired session left the user staring
+          // at a fully rendered (but now unauthenticated) dashboard with no
+          // indication they were logged out. Mirrors doLogout()'s same two
+          // steps (remove has-session, reload) for a consistent logged-out
+          // state, without altering any auth/business logic.
+          document.documentElement.classList.remove('has-session');
+          // Also clear the stale route hash — mirrors doLogout()'s
+          // `location.hash = ''`. Without this, the reload below lands back
+          // on e.g. '/#login-teams' with no session: the URL still shows a
+          // restorable-looking route while the login screen renders, which
+          // looks like "refresh logged me out but kept my page open" rather
+          // than a clean, obvious logout.
+          location.hash = '';
+          location.reload();
         }
       });
     }

@@ -15,8 +15,8 @@ services:
       - Database__Provider=${Database__Provider:-sqlite}
       - ConnectionStrings__DefaultConnection=Data Source=/app/data/loanms.db
       - ConnectionStrings__PostgreSQL=${ConnectionStrings__PostgreSQL:-}
-      - AI__Enabled=${AI__Enabled:-false}
-      - AI__Provider=${AI__Provider:-claude}
+      - AI__Enabled=${AI__Enabled:-true}
+      - AI__Provider=${AI__Provider:-gemini}
       - AI__ApiKey=${AI__ApiKey:-}
       - Redis__Enabled=${Redis__Enabled:-false}
       - Redis__ConnectionString=${Redis__ConnectionString:-}

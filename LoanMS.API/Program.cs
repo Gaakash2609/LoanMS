@@ -170,8 +170,37 @@ try
     builder.Services.AddResponseCaching();
 
     // ── AI Module — modular, optional, graceful fallback ─────────────────────
+    // ROOT CAUSE FIX (KYC Vision "Extract Information" never auto-filling even
+    // with valid Gemini/OpenAI keys saved in Settings): this whole IAIProvider
+    // registration used to be wrapped in `if (aiEnabled)`, where aiEnabled came
+    // from the static, deploy-time "AI:Enabled" config value. In every shipped
+    // deployment path (ecs-task-def.json sets AI__Enabled=false; docker-compose.yml
+    // defaults AI__Enabled to false too) that flag is false, so IAIProvider was
+    // NEVER registered in DI at all — KycController's
+    // `sp.GetService(typeof(IAIProvider))` always came back null, and every
+    // extraction request short-circuited straight to "NOT_CONFIGURED" no matter
+    // what key an Admin saved through Settings → AI Provider Keys. That directly
+    // contradicted the DB-backed key design (AiKeyStore, GeminiAIProvider,
+    // OpenAIProvider) which is explicitly built to activate a saved key on the
+    // very next request with no restart. A second, compounding bug: AI:Provider
+    // was never set anywhere either, so even flipping AI:Enabled=true would have
+    // registered ClaudeAIProvider (default "claude") instead of the Gemini→OpenAI
+    // failover chain — and ClaudeAIProvider reads its key once from static
+    // config, never from AiKeyStore/the database, so Settings-saved Gemini/OpenAI
+    // keys would still never be consulted.
+    //
+    // Fix: always register the Gemini→OpenAI (→Claude if a Claude key exists)
+    // failover chain, independent of the static AI:Enabled flag. This is safe —
+    // GeminiAIProvider/OpenAIProvider already resolve their key dynamically per
+    // request via IAiKeyStore (DB first, config fallback) and already report
+    // "not configured" gracefully via IsAvailableAsync()/InvalidOperationException
+    // when no key exists anywhere, which is exactly the graceful-degradation
+    // behaviour KycController/AIController already handle. AI:Enabled is kept
+    // only as an informational switch for the AI text-completion features
+    // (customer summaries, loan insights — via AIService below), which is a
+    // legitimate, separate on/off toggle unrelated to KYC Vision key resolution.
     var aiEnabled  = builder.Configuration.GetValue<bool>("AI:Enabled");
-    var aiProvider = (builder.Configuration["AI:Provider"] ?? "claude").ToLower();
+    var aiProvider = (builder.Configuration["AI:Provider"] ?? "gemini").ToLower();
 
     builder.Services.AddSingleton<IPromptService, PromptService>();
     builder.Services.AddScoped<IAiKeyStore, LoanMS.Infrastructure.AI.AiKeyStore>();
@@ -183,44 +212,41 @@ try
     })
     .AddHttpMessageHandler<AiResilienceHandler>();
 
-    if (aiEnabled)
+    switch (aiProvider)
     {
-        switch (aiProvider)
-        {
-            case "openai":
-                builder.Services.AddScoped<IAIProvider, OpenAIProvider>();
-                break;
-            case "gemini":
-                // Automatic failover: Gemini stays primary; if it fails (model
-                // deprecated/404/410/429/5xx/timeout/unavailable), requests
-                // automatically retry on OpenAI, and automatically switch back
-                // to Gemini once it's healthy again. See FailoverAIProvider.
-                // OpenAI is always included in the chain — its key may live in
-                // appsettings/env OR be saved later by an Admin through
-                // Settings → AI Provider Keys (IAiKeyStore checks the database
-                // first, at request time). If no key exists anywhere yet,
-                // OpenAIProvider.IsAvailableAsync()/CompleteAsync() report
-                // "not configured" and FailoverAIProvider just skips it — so
-                // this never introduces a hard dependency on a provider that
-                // hasn't been set up.
-                builder.Services.AddScoped<IAIProvider>(sp =>
-                {
-                    var gemini = ActivatorUtilities.CreateInstance<GeminiAIProvider>(sp);
-                    var openai = ActivatorUtilities.CreateInstance<OpenAIProvider>(sp);
-                    var hasClaudeKey = !string.IsNullOrEmpty(builder.Configuration["AI:ClaudeApiKey"]);
+        case "openai":
+            builder.Services.AddScoped<IAIProvider, OpenAIProvider>();
+            break;
+        case "claude":
+            builder.Services.AddScoped<IAIProvider, ClaudeAIProvider>();
+            break;
+        default: // "gemini" — the product default: Gemini primary, automatic OpenAI failover
+            // Automatic failover: Gemini stays primary; if it fails (model
+            // deprecated/404/410/429/5xx/timeout/unavailable), requests
+            // automatically retry on OpenAI, and automatically switch back
+            // to Gemini once it's healthy again. See FailoverAIProvider.
+            // OpenAI is always included in the chain — its key may live in
+            // appsettings/env OR be saved later by an Admin through
+            // Settings → AI Provider Keys (IAiKeyStore checks the database
+            // first, at request time). If no key exists anywhere yet,
+            // OpenAIProvider.IsAvailableAsync()/CompleteAsync() report
+            // "not configured" and FailoverAIProvider just skips it — so
+            // this never introduces a hard dependency on a provider that
+            // hasn't been set up.
+            builder.Services.AddScoped<IAIProvider>(sp =>
+            {
+                var gemini = ActivatorUtilities.CreateInstance<GeminiAIProvider>(sp);
+                var openai = ActivatorUtilities.CreateInstance<OpenAIProvider>(sp);
+                var hasClaudeKey = !string.IsNullOrEmpty(builder.Configuration["AI:ClaudeApiKey"]);
 
-                    var chain = new List<IAIProvider> { gemini, openai };
-                    if (hasClaudeKey) chain.Add(ActivatorUtilities.CreateInstance<ClaudeAIProvider>(sp));
-                    return ActivatorUtilities.CreateInstance<FailoverAIProvider>(
-                        sp, (IReadOnlyList<IAIProvider>)chain);
-                });
-                break;
-            default: // "claude"
-                builder.Services.AddScoped<IAIProvider, ClaudeAIProvider>();
-                break;
-        }
-        Log.Information("AI module enabled. Provider: {Provider}", aiProvider);
+                var chain = new List<IAIProvider> { gemini, openai };
+                if (hasClaudeKey) chain.Add(ActivatorUtilities.CreateInstance<ClaudeAIProvider>(sp));
+                return ActivatorUtilities.CreateInstance<FailoverAIProvider>(
+                    sp, (IReadOnlyList<IAIProvider>)chain);
+            });
+            break;
     }
+    Log.Information("AI provider chain registered: {Provider}. AI:Enabled={Enabled} (gates text-completion features only — KYC Vision key resolution is always live).", aiProvider, aiEnabled);
 
     builder.Services.AddScoped<IAIService>(sp => new AIService(
         sp.GetRequiredService<IPromptService>(),

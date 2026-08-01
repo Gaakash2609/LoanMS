@@ -66,6 +66,11 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             } else if (sess.role === 'accounts') {
               showPage('payout', document.getElementById('nav-access'));
             }
+            // Tell efin-app.js's duplicate restore block (runs moments later,
+            // same DOMContentLoaded tick) that navigation/rendering already
+            // happened, so it doesn't repeat showPage() and role-based
+            // network calls (e.g. initPayoutFromDisbursed()) a second time.
+            window._efinBootRestoreDone = true;
           } else if (sess.loginTs && _sessionAge >= _SESSION_MAX_MS) {
             localStorage.removeItem('efin_session');
           }
@@ -102,3 +107,41 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         });
       }, 200);
     });
+
+    // ── Keep --topbar-h in sync with the real #main-topbar height ──
+    // The shared topbar's padding changes across breakpoints (10px/14px on
+    // mobile up to 20px/80px on large desktop), so its rendered height is
+    // not a fixed number. Page-level sticky elements (e.g. the unsaved
+    // permissions banner, the lender-workflow action bar) offset by
+    // var(--topbar-h) instead of top:0 to avoid colliding with the topbar
+    // and the hamburger button inside it. This keeps that variable accurate
+    // instead of relying on the CSS fallback estimate.
+    (function () {
+      function _applyTopbarHeight(el) {
+        var h = el.offsetHeight;
+        if (h > 0) {
+          document.documentElement.style.setProperty('--topbar-h', h + 'px');
+        }
+      }
+      function _init() {
+        var topbar = document.getElementById('main-topbar');
+        if (!topbar) return;
+        _applyTopbarHeight(topbar);
+        if (typeof ResizeObserver !== 'undefined') {
+          var ro = new ResizeObserver(function (entries) {
+            for (var i = 0; i < entries.length; i++) {
+              _applyTopbarHeight(entries[i].target);
+            }
+          });
+          ro.observe(topbar);
+        } else {
+          // Fallback for browsers without ResizeObserver support
+          window.addEventListener('resize', function () { _applyTopbarHeight(topbar); });
+        }
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _init);
+      } else {
+        _init();
+      }
+    })();

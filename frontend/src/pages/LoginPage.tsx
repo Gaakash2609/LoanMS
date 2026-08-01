@@ -1,9 +1,12 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useLogin } from '@/hooks/useAuth'
+import { useAuthStore } from '@/store/authStore'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { PageLoader } from '@/components/ui/LoadingSpinner'
 
 const schema = z.object({
   email:    z.string().email('Invalid email'),
@@ -16,6 +19,22 @@ export default function LoginPage() {
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
   })
+
+  const { isAuthenticated, hasHydrated } = useAuthStore()
+  const location = useLocation()
+
+  // Same rehydration race as ProtectedRoute: don't render the login form (or
+  // decide to redirect away from it) until the persisted session has
+  // actually been read back from localStorage.
+  if (!hasHydrated) return <PageLoader />
+
+  // Already logged in (e.g. this tab reloaded while sitting on /login, or
+  // the user navigated back here manually) — send them back to whatever
+  // page they came from instead of making them log in again.
+  if (isAuthenticated) {
+    const from = (location.state as { from?: string } | null)?.from
+    return <Navigate to={from || '/dashboard'} replace />
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-efin-blue-dark to-efin-blue flex items-center justify-center p-4">

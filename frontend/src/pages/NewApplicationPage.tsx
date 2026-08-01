@@ -6,7 +6,7 @@ import { wizardApi, type WizardSubmitPayload } from '@/api/wizardApi'
 import { loansApi } from '@/api/loansApi'
 import { kycApi } from '@/api/kycApi'
 import { useAuthStore } from '@/store/authStore'
-import { CheckCircle, ChevronRight, ChevronLeft, AlertCircle, Upload, Loader, CheckCircle2 } from 'lucide-react'
+import { CheckCircle, ChevronRight, ChevronLeft, AlertCircle, Upload, Loader, CheckCircle2, ClipboardList, IdCard, Search, Briefcase, Landmark, AlertTriangle } from 'lucide-react'
 
 import { emiReducing as computeEmiReducing } from '@/utils/emi'
 import { extractPanData, extractAadhaarData } from '@/utils/kycExtraction'
@@ -520,7 +520,7 @@ Extract exactly what is on the card. Be accurate.`,
       {/* PAN Card Upload */}
       <div className="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
         <p className="text-xs font-semibold text-gray-600 uppercase mb-3 flex items-center gap-2">
-          <span>📋 PAN Card</span>
+          <span className="flex items-center gap-1"><ClipboardList size={14} /> PAN Card</span>
           {extractionStatus.pan?.status === 'success' && (
             <span className="flex items-center gap-1 text-green-600 text-xs font-normal">
               <CheckCircle2 size={14} /> Extracted
@@ -568,7 +568,7 @@ Extract exactly what is on the card. Be accurate.`,
                   <Loader size={14} className="animate-spin" /> Extracting...
                 </>
               ) : (
-                '🔍 Extract Data'
+                <><Search size={14} /> Extract Data</>
               )}
             </button>
           </div>
@@ -608,7 +608,7 @@ Extract exactly what is on the card. Be accurate.`,
       {/* Aadhaar Card Upload */}
       <div className="mb-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
         <p className="text-xs font-semibold text-gray-600 uppercase mb-3 flex items-center gap-2">
-          <span>🪪 Aadhaar Card</span>
+          <span className="flex items-center gap-1"><IdCard size={14} /> Aadhaar Card</span>
           {extractionStatus.aadhaar?.status === 'success' && (
             <span className="flex items-center gap-1 text-green-600 text-xs font-normal">
               <CheckCircle2 size={14} /> Extracted
@@ -656,7 +656,7 @@ Extract exactly what is on the card. Be accurate.`,
                   <Loader size={14} className="animate-spin" /> Extracting...
                 </>
               ) : (
-                '🔍 Extract Data'
+                <><Search size={14} /> Extract Data</>
               )}
             </button>
           </div>
@@ -1075,11 +1075,11 @@ function Step8({ documents, onDocumentChange, errors }: {
         </div>
       ))}
 
-      <p className="text-xs font-semibold text-gray-500 uppercase mt-5 mb-2">💼 Income &amp; Employment</p>
+      <p className="text-xs font-semibold text-gray-500 uppercase mt-5 mb-2 flex items-center gap-1.5"><Briefcase size={13} /> Income &amp; Employment</p>
       <MandatoryDoc docKey="salarySlip3mo" label="Last 3 Month Salary Slips"
         documents={documents} onDocumentChange={onDocumentChange} errors={errors} />
 
-      <p className="text-xs font-semibold text-gray-500 uppercase mt-5 mb-2">🏦 Banking</p>
+      <p className="text-xs font-semibold text-gray-500 uppercase mt-5 mb-2 flex items-center gap-1.5"><Landmark size={13} /> Banking</p>
       <MandatoryDoc docKey="bankStatement6mo" label="Last 6 Month Bank Statement"
         documents={documents} onDocumentChange={onDocumentChange} errors={errors} />
 
@@ -1109,7 +1109,7 @@ function Step9({ data }: { data: WizardData }) {
   if (!data.mobile || !data.pan || !data.firstName || !data.amount) {
     return (
       <div className="space-y-4 p-6 bg-amber-50 border border-amber-200 rounded-lg">
-        <p className="text-sm font-semibold text-amber-900">⚠️ Incomplete Application</p>
+        <p className="text-sm font-semibold text-amber-900 flex items-center gap-1.5"><AlertTriangle size={15} /> Incomplete Application</p>
         <p className="text-xs text-amber-800">Some required fields are missing. Please go back and complete all steps:</p>
         <ul className="text-xs text-amber-800 list-disc list-inside space-y-1">
           {!data.mobile && <li>Step 1: Contact information (Mobile, PAN)</li>}
@@ -1150,8 +1150,8 @@ function Step9({ data }: { data: WizardData }) {
           </div>
         ))}
       </div>
-      <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-100 text-xs text-green-700">
-        ✓ Review all details before submitting. Once submitted, a loan application will be created and assigned to the selected sales person.
+      <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-100 text-xs text-green-700 flex items-start gap-1.5">
+        <CheckCircle2 size={14} className="mt-0.5 shrink-0" /> Review all details before submitting. Once submitted, a loan application will be created and assigned to the selected sales person.
       </div>
     </div>
   )
@@ -1669,7 +1669,7 @@ export default function NewApplicationPage() {
             : submit.isPending
               ? <><Loader size={16} className="animate-spin" /> Submitting...</>
               : step === TOTAL_STEPS
-                ? '✓ Submit Application'
+                ? <><CheckCircle2 size={16} /> Submit Application</>
                 : <>Continue <ChevronRight size={16} /></>
           }
         </button>

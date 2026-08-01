@@ -11,11 +11,11 @@ export function Card({ children, className, padding = true }: CardProps) {
   )
 }
 
-export function CardHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) {
+export function CardHeader({ title, subtitle, action }: { title: React.ReactNode; subtitle?: string; action?: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between mb-4">
       <div>
-        <h3 className="text-base font-semibold text-gray-900">{title}</h3>
+        <h3 className="text-base font-semibold text-gray-900 flex items-center gap-1.5">{title}</h3>
         {subtitle && <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>}
       </div>
       {action}

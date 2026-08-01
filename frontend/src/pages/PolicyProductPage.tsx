@@ -1,5 +1,6 @@
 import { Card } from '@/components/ui/Card'
 import PageHeader from '@/components/shared/PageHeader'
+import { Check } from 'lucide-react'
 
 // Legacy page-policy-product: role-action permission matrix + DSA/Partner tables
 // DSA and Partner tables are covered by DsaPage. This page shows the permission matrix.
@@ -58,7 +59,7 @@ export default function PolicyProductPage() {
                   {ROLES.map(role => (
                     <td key={role} className="py-2 px-3 text-center">
                       {MATRIX[action]?.[role]
-                        ? <span className="text-green-500 font-bold text-sm">✓</span>
+                        ? <Check size={16} className="text-green-500 mx-auto" strokeWidth={3} />
                         : <span className="text-gray-200 text-sm">—</span>
                       }
                     </td>

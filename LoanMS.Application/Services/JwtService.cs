@@ -31,9 +31,21 @@ public class JwtService : IJwtService
             new Claim("role", user.Role.ToString())
         };
 
+        // ROOT CAUSE FIX: Jwt:Issuer / Jwt:Audience are not set in any appsettings
+        // file or ECS task definition (only Jwt:Key is). Program.cs's
+        // TokenValidationParameters already falls back to "LoanMS.API" /
+        // "LoanMS.Client" when those config keys are missing, and requires
+        // ValidateIssuer/ValidateAudience = true. This class previously read the
+        // same missing config with NO fallback, so tokens were minted with no
+        // "iss"/"aud" claims at all — which the validator then always rejected
+        // with a 401, on every single request, regardless of how fresh the
+        // login was. The fallback here MUST always match Program.cs exactly.
+        var issuer   = _config["Jwt:Issuer"]   ?? "LoanMS.API";
+        var audience = _config["Jwt:Audience"] ?? "LoanMS.Client";
+
         var token = new JwtSecurityToken(
-            issuer: _config["Jwt:Issuer"],
-            audience: _config["Jwt:Audience"],
+            issuer: issuer,
+            audience: audience,
             claims: claims,
             expires: DateTime.UtcNow.AddMinutes(int.Parse(_config["Jwt:ExpiryMinutes"] ?? "60")),
             signingCredentials: creds

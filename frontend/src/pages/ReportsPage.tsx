@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import PageHeader from '@/components/shared/PageHeader'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency } from '@/utils/format'
-import { TrendingUp, BarChart3, Users, Award, Clock, Zap, Target } from 'lucide-react'
+import { TrendingUp, BarChart3, Users, Award, Clock, Zap, Target, Check, AlertTriangle } from 'lucide-react'
 
 export default function ReportsPage() {
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
@@ -33,9 +33,9 @@ export default function ReportsPage() {
 
   // TAT Status indicator
   const getTatStatus = (actual: number, target: number) => {
-    if (actual <= target) return { status: 'On Track ✓', color: 'bg-green-50 border-green-200', textColor: 'text-green-700' }
-    if (actual <= target * 1.15) return { status: 'Slightly Delayed ⚡', color: 'bg-orange-50 border-orange-200', textColor: 'text-orange-700' }
-    return { status: 'Delayed ⚠️', color: 'bg-red-50 border-red-200', textColor: 'text-red-700' }
+    if (actual <= target) return { status: 'On Track', icon: <Check size={12} />, color: 'bg-green-50 border-green-200', textColor: 'text-green-700' }
+    if (actual <= target * 1.15) return { status: 'Slightly Delayed', icon: <Zap size={12} />, color: 'bg-orange-50 border-orange-200', textColor: 'text-orange-700' }
+    return { status: 'Delayed', icon: <AlertTriangle size={12} />, color: 'bg-red-50 border-red-200', textColor: 'text-red-700' }
   }
 
   const tatStatus = getTatStatus(tatLoginToDisbDays, tatLoginToDisbTarget)
@@ -91,8 +91,8 @@ export default function ReportsPage() {
                       <Clock size={16} /> AVG TAT (LOGIN→DISB)
                     </p>
                   </div>
-                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${tatStatus.textColor} ${tatStatus.color}`}>
-                    {tatStatus.status}
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1 ${tatStatus.textColor} ${tatStatus.color}`}>
+                    {tatStatus.icon} {tatStatus.status}
                   </span>
                 </div>
                 
@@ -152,8 +152,8 @@ export default function ReportsPage() {
                       <Zap size={16} /> LOGIN-TO-DDR RATIO
                     </p>
                   </div>
-                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${ddrStatus.textColor} ${ddrStatus.color}`}>
-                    {ddrStatus.status}
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1 ${ddrStatus.textColor} ${ddrStatus.color}`}>
+                    {ddrStatus.icon} {ddrStatus.status}
                   </span>
                 </div>
                 

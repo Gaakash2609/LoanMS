@@ -6,14 +6,15 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import DataTable, { type Column } from '@/components/shared/DataTable'
 import { formatCurrency, formatDate } from '@/utils/format'
-import { BarChart3, Download, Plus, Search } from 'lucide-react'
+import { BarChart3, Download, Plus, Search, RefreshCw, CheckCircle2, CreditCard, XCircle, Calendar, IndianRupee, Flame, ClipboardList, X } from 'lucide-react'
+import type { ReactNode } from 'react'
 
 const STATUS_VARIANTS: Record<string, 'default'|'success'|'warning'|'danger'|'info'> = {
   Pending: 'warning', Approved: 'success', Paid: 'info', Rejected: 'danger',
 }
 
 interface StatusCardProps {
-  icon: string
+  icon: ReactNode
   count: number
   label: string
   description: string
@@ -23,7 +24,7 @@ interface StatusCardProps {
 function StatusCard({ icon, count, label, description, color }: StatusCardProps) {
   return (
     <div className="bg-white rounded-lg p-4 border border-gray-200 hover:shadow-md transition-shadow">
-      <div className={`text-2xl font-bold mb-1 ${color}`}>{icon}</div>
+      <div className={`mb-1 ${color}`}>{icon}</div>
       <div className="text-2xl font-bold text-gray-900 mb-1">{count}</div>
       <div className="text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">{label}</div>
       <div className="text-xs text-gray-500">{description}</div>
@@ -105,7 +106,7 @@ export default function PayoutPage() {
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            <span className="flex items-center gap-2">🔥 My Claims</span>
+            <span className="flex items-center gap-2"><Flame size={16} /> My Claims</span>
           </button>
           <button
             onClick={() => { setActiveTab('management'); setPage(1) }}
@@ -115,7 +116,7 @@ export default function PayoutPage() {
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            <span className="flex items-center gap-2">📊 Management</span>
+            <span className="flex items-center gap-2"><BarChart3 size={16} /> Management</span>
           </button>
         </div>
 
@@ -135,7 +136,8 @@ export default function PayoutPage() {
                   Earnings
                 </button>
                 <button className="flex items-center gap-2 px-4 py-2 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors">
-                  📋 Export
+                  <ClipboardList className="w-4 h-4" />
+                  Export
                 </button>
                 <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                   <Plus className="w-4 h-4" />
@@ -172,35 +174,35 @@ export default function PayoutPage() {
             {/* Status Cards - Five Column Grid */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <StatusCard
-                icon="🔄"
+                icon={<RefreshCw size={24} />}
                 count={claimsStats.pending}
                 label="PENDING"
                 description="Awaiting review"
                 color="text-orange-600"
               />
               <StatusCard
-                icon="✓"
+                icon={<CheckCircle2 size={24} />}
                 count={claimsStats.approved}
                 label="APPROVED"
                 description="₹0 sanctioned"
                 color="text-blue-600"
               />
               <StatusCard
-                icon="💳"
+                icon={<CreditCard size={24} />}
                 count={claimsStats.paid}
                 label="PAID"
                 description={formatCurrency(claimsStats.paid) + ' disbursed'}
                 color="text-teal-600"
               />
               <StatusCard
-                icon="✕"
+                icon={<XCircle size={24} />}
                 count={claimsStats.rejected}
                 label="REJECTED"
                 description="Claims declined"
                 color="text-red-600"
               />
               <StatusCard
-                icon="📅"
+                icon={<Calendar size={24} />}
                 count={0}
                 label="THIS MONTH"
                 description="₹0 claimed"
@@ -248,8 +250,8 @@ export default function PayoutPage() {
                 </select>
 
                 <div className="flex gap-2">
-                  <button className="flex-1 px-4 py-2 text-red-600 font-medium hover:bg-red-50 rounded-lg transition-colors">
-                    ✕ Clear
+                  <button className="flex-1 px-4 py-2 text-red-600 font-medium hover:bg-red-50 rounded-lg transition-colors flex items-center justify-center gap-1.5">
+                    <X size={16} /> Clear
                   </button>
                 </div>
               </div>
@@ -280,10 +282,12 @@ export default function PayoutPage() {
               </div>
               <div className="flex gap-3">
                 <button className="flex items-center gap-2 px-4 py-2 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors">
-                  📊 Analytics
+                  <BarChart3 className="w-4 h-4" />
+                  Analytics
                 </button>
                 <button className="flex items-center gap-2 px-4 py-2 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors">
-                  📥 Export CSV
+                  <Download className="w-4 h-4" />
+                  Export CSV
                 </button>
                 <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                   <Plus className="w-4 h-4" />
@@ -320,35 +324,35 @@ export default function PayoutPage() {
             {/* Status Cards */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <StatusCard
-                icon="🔄"
+                icon={<RefreshCw size={24} />}
                 count={claimsStats.pending}
                 label="PENDING"
                 description="Declining review"
                 color="text-orange-600"
               />
               <StatusCard
-                icon="✓"
+                icon={<CheckCircle2 size={24} />}
                 count={claimsStats.approved}
                 label="APPROVED"
                 description="₹1,35,000 sanctioned"
                 color="text-blue-600"
               />
               <StatusCard
-                icon="💳"
+                icon={<CreditCard size={24} />}
                 count={claimsStats.paid}
                 label="PAID"
                 description={formatCurrency(claimsStats.paid) + ' disbursed'}
                 color="text-teal-600"
               />
               <StatusCard
-                icon="✕"
+                icon={<XCircle size={24} />}
                 count={claimsStats.rejected}
                 label="REJECTED"
                 description="Declined"
                 color="text-red-600"
               />
               <StatusCard
-                icon="💰"
+                icon={<IndianRupee size={24} />}
                 count={0}
                 label="TOTAL PAYOUT"
                 description="Approved + Paid"
@@ -405,8 +409,8 @@ export default function PayoutPage() {
                 </select>
 
                 <div className="flex gap-2">
-                  <button className="flex-1 px-4 py-2 text-red-600 font-medium hover:bg-red-50 rounded-lg transition-colors">
-                    ✕ Clear
+                  <button className="flex-1 px-4 py-2 text-red-600 font-medium hover:bg-red-50 rounded-lg transition-colors flex items-center justify-center gap-1.5">
+                    <X size={16} /> Clear
                   </button>
                 </div>
               </div>

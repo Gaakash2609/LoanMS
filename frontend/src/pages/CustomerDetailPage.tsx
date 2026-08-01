@@ -3,7 +3,7 @@ import { useCustomer } from '@/hooks/useCustomers'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency, formatDate } from '@/utils/format'
-import { ArrowLeft, Plus } from 'lucide-react'
+import { ArrowLeft, Plus, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 
 export default function CustomerDetailPage() {
@@ -105,7 +105,7 @@ export default function CustomerDetailPage() {
           <Card>
             <div className="flex items-center gap-2 py-1">
               <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center">
-                <span className="text-xs">✨</span>
+                <Sparkles size={14} className="text-purple-500" />
               </div>
               <div>
                 <p className="text-sm font-medium text-gray-900">AI Insights</p>

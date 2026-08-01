@@ -522,8 +522,8 @@
    ────────────────────────────────────────────────────────────────── */
 .perms-unsaved-banner {
   position: sticky;
-  top: 0;
-  z-index: 50;
+  top: var(--topbar-h, 68px);
+  z-index: var(--z-page-sticky, 10);
   display: none;
   align-items: center;
   gap: 10px;

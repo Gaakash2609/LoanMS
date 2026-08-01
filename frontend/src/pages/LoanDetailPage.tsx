@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { StatusBadge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency, formatDate, formatDateTime } from '@/utils/format'
-import { ArrowLeft, User, Upload, Loader, CheckCircle2, Landmark, Zap } from 'lucide-react'
+import { ArrowLeft, User, Upload, Loader, CheckCircle2, Landmark, Zap, Search, AlertTriangle } from 'lucide-react'
 import { useState } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import AIInsightPanel from '@/features/ai/AIInsightPanel'
@@ -111,7 +111,7 @@ Extract exactly what is on the statement. Be accurate.`,
 
   return (
     <Card>
-      <CardHeader title="🏦 Account Details" />
+      <CardHeader title={<><Landmark size={16} className="text-gray-500" /> Account Details</>} />
       
       <div className="space-y-4">
         {/* Document Upload Section */}
@@ -145,15 +145,17 @@ Extract exactly what is on the statement. Be accurate.`,
                     <Loader size={14} className="animate-spin" /> Extracting...
                   </>
                 ) : (
-                  '🔍 Extract Details'
+                  <>
+                    <Search size={14} /> Extract Details
+                  </>
                 )}
               </button>
             </div>
           </div>
 
           {statementImages.length > 0 && (
-            <div className="text-xs text-gray-600 mt-2">
-              ✅ {statementImages.length} file(s) selected
+            <div className="text-xs text-gray-600 mt-2 flex items-center gap-1">
+              <CheckCircle2 size={14} className="text-green-600" /> {statementImages.length} file(s) selected
             </div>
           )}
 
@@ -199,8 +201,8 @@ Extract exactly what is on the statement. Be accurate.`,
         </div>
 
         {!accountStatus?.configured && (
-          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
-            ⚠️ Account extraction is not configured. Please enter details manually.
+          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700 flex items-center gap-1.5">
+            <AlertTriangle size={14} /> Account extraction is not configured. Please enter details manually.
           </div>
         )}
       </div>

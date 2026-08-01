@@ -7,7 +7,8 @@
       "launchBrowser": false,
       "applicationUrl": "http://localhost:7070",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_Jwt__Key": "ThisIsALocalDevOnlySecretKey_ChangeMe_32CharsMin"
       }
     },
     "LoanMS.API.HTTPS": {
@@ -16,7 +17,8 @@
       "launchBrowser": false,
       "applicationUrl": "https://localhost:7071;http://localhost:7070",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_Jwt__Key": "ThisIsALocalDevOnlySecretKey_ChangeMe_32CharsMin"
       }
     }
   }

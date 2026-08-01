@@ -18,10 +18,31 @@
   -->
 
   <!-- Application Styles -->
-  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/app.css?v=2">
   <link rel="stylesheet" href="/css/efin-improvements.css">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231a4fa3'/><text x='50%25' y='54%25' font-size='18' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle' dominant-baseline='middle'>M</text></svg>">
   <title>Mudrahub</title>
+
+  <!-- ══ Session pre-check — MUST stay here, in <head>, as a plain
+       blocking <script> (no defer/async) ══
+       app.css above defines `html.has-session .login-screen { display:
+       none !important }`, with .login-screen itself defaulting to
+       visible. This script is what actually adds/omits that
+       `has-session` class on <html> — and it has to run and finish
+       *before* the parser ever reaches the <div id="login-screen"> deep
+       in <body>, or the browser paints that div in its default
+       (visible) state first and only hides it a moment later once this
+       script eventually runs. That was exactly the "login page flashes
+       on every refresh" bug: this same file used to be loaded at the
+       very bottom of <body>, after 9000+ lines of markup — by the time
+       it executed, the login screen had typically already painted.
+       document.documentElement (<html>) exists as soon as the parser
+       opens the <html> tag, so classList access here is always safe
+       even though <body> hasn't been parsed yet. Do not move this back
+       below the stylesheet-defining CSS or down near the other
+       "Application Scripts" at the bottom of <body> — either move
+       reintroduces the flash. -->
+  <script src="/js/session-preload.js"></script>
   <link
     href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap"
     rel="stylesheet">
@@ -233,7 +254,7 @@
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"><path d="M2.5 6.667A2.5 2.5 0 015 4.167h10a2.5 2.5 0 012.5 2.5v6.666a2.5 2.5 0 01-2.5 2.5H5a2.5 2.5 0 01-2.5-2.5V6.667z"/><path d="M2.5 7.5l7.5 4.167 7.5-4.167"/></svg>
               Email Address
             </label>
-            <input class="login-input" type="email" id="login-user" placeholder="you@company.com" value="admin@efin.com"
+            <input class="login-input" type="email" id="login-user" placeholder="you@company.com"
               autocomplete="email" oninput="(function(){var e=document.getElementById('login-error');if(e)e.style.display='none';})()" onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()">
           </div>
 
@@ -3049,7 +3070,7 @@
                   </div>
                 </div>
                 <div class="table-wrap">
-                  <table id="users-table">
+                  <table id="la-companies-table">
                     <thead><tr>
                       <th onclick="laLineSort('company')" style="cursor:pointer;user-select:none">Company <span id="la-lsort-company"></span></th>
                       <th>Category (Company)</th>
@@ -4337,7 +4358,7 @@
           <input type="date" id="rpt-date-from" onchange="renderReports()" style="padding:4px 8px;border:1px solid var(--border2);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)">
           <span style="font-size:12px;color:var(--text3)">→</span>
           <input type="date" id="rpt-date-to" onchange="renderReports()" style="padding:4px 8px;border:1px solid var(--border2);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)">
-          <button onclick="clearRptDateRange()" title="Clear date range" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:2px 4px" id="rpt-date-clear" style="display:none">✕</button>
+          <button onclick="clearRptDateRange()" title="Clear date range" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:2px 4px;display:none" id="rpt-date-clear">✕</button>
         </div>
       </div>
 
@@ -5979,24 +6000,6 @@
 
   <!-- ── MODAL: ADD BANK ── -->
   <!-- ── MODAL: ADD BANK ── -->
-  <div class="modal-overlay" id="modal-resume-draft">
-    <div class="modal" style="max-width:460px">
-      <div class="modal-head">
-        <div class="modal-title">Incomplete Loan Application Found</div>
-        <button class="modal-close" onclick="cancelResumePopup()">✕</button>
-      </div>
-      <div class="modal-body">
-        <div style="font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.5">
-          You have an unfinished application. What would you like to do?
-        </div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <button class="btn btn-primary" style="width:100%" onclick="resumeDraftFromPopup()">Resume Application</button>
-          <button class="btn btn-ghost" style="width:100%" onclick="startNewFromPopup()">Start New Application</button>
-          <button class="btn btn-ghost" style="width:100%" onclick="cancelResumePopup()">Cancel</button>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <div class="modal-overlay" id="modal-add-bank">
     <div class="modal">
@@ -7744,8 +7747,6 @@
           </div>
           </div>
 
-        </div><!-- /tab content wrapper -->
-
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
           <button class="btn btn-ghost" onclick="closeModal('modal-edit-detail')">Cancel</button>
           <button class="btn btn-primary" onclick="saveEditDetail()">💾 Save Changes</button>
@@ -9371,14 +9372,15 @@ Please log in and change your password immediately.
 </div><!-- /pfv9-overlay -->
 
   <!-- ══════════════ Application Scripts ══════════════ -->
-  <script src="/js/session-preload.js"></script>
+  <!-- session-preload.js now loads in <head> (see top of file) so it can
+       set html.has-session before the login-screen div ever paints. -->
   <script src="/js/boot.js"></script>
   <script src="/js/error-handler.js"></script>
   <!-- credential-seed.js: must run before efin-app.js -->
   <script src="/js/credential-seed.js"></script>
   <script src="/js/login-helpers.js"></script>
-  <script src="/js/efin-app.js?v=57"></script>
-  <script src="/js/kyc.js?v=42"></script>
+  <script src="/js/efin-app.js?v=58"></script>
+  <script src="/js/kyc.js?v=43"></script>
   <script src="/js/tasks.js"></script>
   <script src="/js/user-profile.js"></script>
   <script src="/js/efin-improvements.js"></script>

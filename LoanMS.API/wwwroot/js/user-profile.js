@@ -416,6 +416,25 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
     function doLogout() {
       _lsRemove('efin_session');
+      // Also clear the REAL backend auth tokens (loanms_token / loanms_refresh /
+      // loanms_user). These are separate from efin_session (which only gates the
+      // UI) and are what actually authenticates real API calls like Settings →
+      // AI & KYC Vision. Previously only efin_session was cleared here, so a
+      // stale/invalid token could survive "logout → login" indefinitely if the
+      // next login happened to fall back to the offline/local login path instead
+      // of a real /api/auth/login call — the Settings panel would then keep
+      // showing "session expired" no matter how many times you logged out.
+      var _oldTok = localStorage.getItem('loanms_token');
+      _lsRemove('loanms_token');
+      _lsRemove('loanms_refresh');
+      _lsRemove('loanms_user');
+      // Best-effort: tell the server to invalidate the refresh token too (fire
+      // and forget — logout should not be blocked by this network call).
+      try {
+        if (_oldTok) {
+          fetch('/api/auth/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + _oldTok } }).catch(function(){});
+        }
+      } catch (e) {}
       // Remove has-session so CSS re-shows login screen
       document.documentElement.classList.remove('has-session');
       location.hash = '';

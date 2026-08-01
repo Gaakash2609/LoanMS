@@ -22,8 +22,22 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"            Version="10.0.0" />
     <PackageReference Include="FluentValidation"                                     Version="11.11.0" />
     <PackageReference Include="BCrypt.Net-Next"                                      Version="4.0.3" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt"                     Version="8.9.0" />
-    <PackageReference Include="Microsoft.IdentityModel.Tokens"                      Version="8.14.0" />
+    <!-- All Microsoft.IdentityModel.* / System.IdentityModel.* packages pinned to the SAME
+         version (8.22.0) — required, not optional. Microsoft.AspNetCore.Authentication.JwtBearer
+         10.0.0 (see LoanMS.API.csproj) only declares a floor dependency of
+         Microsoft.IdentityModel.Protocols.OpenIdConnect >= 8.0.1, which lets NuGet resolve
+         mismatched/older transitive IdentityModel versions that are missing APIs JwtBearer
+         10.0.x actually calls at runtime (e.g. the newer TokenValidationResult constructor /
+         Base64UrlEncoder.Decode overload) — a known upstream issue (dotnet/aspnetcore#64932).
+         The build even emits an explicit IDX00001 warning if these ever drift apart again.
+         Symptom if this drifts back down: every authenticated request after login fails with
+         "System.MissingMethodException: Method not found: ...TokenValidationResult..ctor(...)"
+         even though /api/auth/login itself succeeds. -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt"                     Version="8.22.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens"                      Version="8.22.0" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens"                Version="8.22.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols"                    Version="8.22.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect"      Version="8.22.0" />
     <PackageReference Include="AutoMapper"                                           Version="14.0.0" />
   </ItemGroup>
   <ItemGroup>

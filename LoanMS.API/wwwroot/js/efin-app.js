@@ -1,9 +1,16 @@
 
     // Runs synchronously before paint — zero flash
+    // Must stay in sync with session-preload.js: gate on BOTH efin_session
+    // (display cache) AND loanms_token (real backend JWT). This block used
+    // to check efin_session alone, which let a stale display-only session
+    // snapshot re-add has-session (hiding the login screen) even after the
+    // real token had been cleared — leaving an unauthenticated dashboard
+    // shell with no user data instead of correctly falling back to login.
     (function() {
       try {
         var s = localStorage.getItem('efin_session');
-        if (s && JSON.parse(s).email) {
+        var t = localStorage.getItem('loanms_token');
+        if (s && t && JSON.parse(s).email) {
           document.documentElement.classList.add('has-session');
         }
       } catch(e) {}
@@ -62,17 +69,22 @@
             updateTasksNavBadge();
             document.getElementById('login-screen').style.display = 'none';
             // Keep has-session so CSS keeps login-screen hidden
-            // Restore last visited page from hash — immediately, no delay
-            const savedHash = location.hash.replace('#', '');
-            if (savedHash && document.getElementById('page-' + savedHash)) {
-              const savedNav = document.querySelector('.nav-item[data-menu-id="' + savedHash + '"]');
-              showPage(savedHash, savedNav);
-              if (savedHash === 'applications' && typeof renderTable === 'function') setTimeout(renderTable, 80);
-            } else if (sess.role === 'partner') {
-              showPage('payout', document.getElementById('nav-access'));
-              initPayoutFromDisbursed();
-            } else if (sess.role === 'accounts') {
-              showPage('payout', document.getElementById('nav-access'));
+            // Restore last visited page from hash — immediately, no delay.
+            // Skipped when boot.js's earlier restore already navigated this
+            // load, so role-routed calls like initPayoutFromDisbursed()
+            // (which hits the network) never fire twice per refresh.
+            if (!window._efinBootRestoreDone) {
+              const savedHash = location.hash.replace('#', '');
+              if (savedHash && document.getElementById('page-' + savedHash)) {
+                const savedNav = document.querySelector('.nav-item[data-menu-id="' + savedHash + '"]');
+                showPage(savedHash, savedNav);
+                if (savedHash === 'applications' && typeof renderTable === 'function') setTimeout(renderTable, 80);
+              } else if (sess.role === 'partner') {
+                showPage('payout', document.getElementById('nav-access'));
+                initPayoutFromDisbursed();
+              } else if (sess.role === 'accounts') {
+                showPage('payout', document.getElementById('nav-access'));
+              }
             }
           } else if (sess.loginTs && _sessionAge >= _SESSION_MAX_MS) {
             // Session expired — clear it silently
@@ -1200,13 +1212,22 @@
       if (!currentUser || !currentUser.role) { console.warn('[applySession] called with no currentUser'); return; }
       const rd = ROLES[currentUser.role] || ROLES['sales_executive'] || Object.values(ROLES)[0];
       if (!rd) { console.warn('[applySession] unknown role:', currentUser.role); return; }
-      const initials = currentUser.name.split(' ').map(w => w[0] || '').join('').toUpperCase().slice(0, 2);
+      // Guard: some stored efin_session snapshots (older/partial format) can lack
+      // a `name`. Previously currentUser.name.split(' ') would throw here and,
+      // since callers wrap this in try/catch, the whole restore silently aborted
+      // before any DOM writes below — leaving the static HTML placeholders
+      // ("AG" / "User Name") on screen even though the session was valid. This
+      // fallback (mirrors the one already used in api-bridge.js's /auth/me path)
+      // ensures applySession() always completes and the UI is never left stuck
+      // on placeholder text.
+      const _displayName = currentUser.name || (currentUser.email ? currentUser.email.split('@')[0] : 'User');
+      const initials = _displayName.split(' ').map(w => w[0] || '').join('').toUpperCase().slice(0, 2) || 'U';
       const _sa = document.getElementById('sidebar-avatar'); if(_sa) _sa.textContent = initials;
-      const _su = document.getElementById('sidebar-uname'); if(_su) _su.textContent = currentUser.name;
+      const _su = document.getElementById('sidebar-uname'); if(_su) _su.textContent = _displayName;
       // Topbar avatar initials
       const _ta = document.getElementById('profile-top-avatar'); if(_ta) _ta.textContent = initials;
       const _da = document.getElementById('profile-dd-avatar'); if(_da) _da.textContent = initials;
-      const _dn = document.getElementById('profile-dd-name'); if(_dn) _dn.textContent = currentUser.name;
+      const _dn = document.getElementById('profile-dd-name'); if(_dn) _dn.textContent = _displayName;
       const _de = document.getElementById('profile-dd-email'); if(_de) _de.textContent = currentUser.email || '—';
       const _srb = document.getElementById('sidebar-role-badge'); if(_srb) _srb.innerHTML = `<span class="role-badge-sidebar ${rd.badgeClass}">${rd.label}</span>`;
 
@@ -1830,6 +1851,7 @@
         'locations-mgmt': 'Locations', 'users-mgmt': 'Users', 'security-roles': 'Roles & Rules',
         'dsa-mgmt': 'DSA Management', 'partner-mgmt': 'Partner Management',
         'lender-config': 'Lender Configuration',
+        'settings': 'Settings',
       }[name] || 'EFIN';
       if (navEl) { document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); navEl.classList.add('active'); }
       if (name === 'applications') renderTable();
@@ -14877,7 +14899,11 @@ ${printContent}
     function updateGreeting() {
       const h = new Date().getHours();
       const period = h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening';
-      const name = (currentUser && currentUser.name) ? currentUser.name.split(' ')[0] : 'Admin';
+      // Fallback mirrors applySession()'s: derive from email rather than a
+      // literal 'Admin', which previously greeted every non-admin user with
+      // "Good Morning, Admin" whenever currentUser.name was missing/empty.
+      const _greetSrc = (currentUser && currentUser.name) ? currentUser.name : (currentUser && currentUser.email ? currentUser.email.split('@')[0] : 'User');
+      const name = _greetSrc.split(' ')[0];
       const el = document.getElementById('dash-greeting');
       if (el) el.textContent = `Good ${period}, ${name} 👋`;
     }
@@ -26071,6 +26097,15 @@ ${printContent}
     (function() {
       var _isRestoringDraft = false;
       var _activeDraftId = null;
+      // Set true only by the "Register New" entry point (see the
+      // openLoanProductSelector override below) to mean: this wizard session
+      // was deliberately started fresh and must never silently attach itself
+      // to — and thereby overwrite — whatever draft the user already had in
+      // progress. wizardAutoSaveDraft() checks this before falling back to
+      // findMyDraft()'s owner-based lookup. It is cleared the moment this
+      // session gets its own draft id, so it never affects any later
+      // autosave in the same session.
+      var _skipAttachToExistingDraft = false;
       // BUGFIX (Draft recreated right after final submission): set by the
       // submitWizard wrapper below whenever a real application was just
       // successfully created, and read by the wizardNav wrapper further
@@ -26129,7 +26164,7 @@ ${printContent}
         if (!page) return;
         try {
           var draft = _activeDraftId ? APPLICATIONS.find(function(a){return a.id===_activeDraftId;}) : null;
-          if (!draft) draft = findMyDraft();
+          if (!draft && !_skipAttachToExistingDraft) draft = findMyDraft();
           if (!draft) {
             draft = {
               id: 'DRAFT-' + Date.now(),
@@ -26143,6 +26178,7 @@ ${printContent}
             APPLICATIONS.unshift(draft);
           }
           _activeDraftId = draft.id;
+          _skipAttachToExistingDraft = false;
           _snapshotIntoDraft(draft);
           if (typeof persistSave === 'function') persistSave();
         } catch (e) { /* autosave must never break the wizard */ }
@@ -26225,24 +26261,13 @@ ${printContent}
         _activeDraftId = null;
       }
 
-      // ── Resume Draft popup button handlers ──
-      window.resumeDraftFromPopup = function() {
-        var draft = findMyDraft();
-        closeModal('modal-resume-draft');
-        if (draft) _restoreDraftIntoWizard(draft);
-      };
-
-      window.startNewFromPopup = function() {
-        closeModal('modal-resume-draft');
-        if (!confirm('Starting a new application will permanently discard your current draft.\n\nSubmitted applications will NOT be affected.\n\nDo you want to continue?')) return;
-        deleteMyDraft();
-        _wizardHardReset();
-        if (typeof openLoanProductSelector === 'function') openLoanProductSelector();
-      };
-
-      window.cancelResumePopup = function() {
-        closeModal('modal-resume-draft');
-      };
+      // NOTE: The old "Incomplete Loan Application Found" popup (Resume /
+      // Start New / Cancel) and its handlers were removed along with it —
+      // Register New no longer checks for or prompts about an existing
+      // draft at all (see the openLoanProductSelector override below).
+      // Draft continue/resume is now handled exclusively by
+      // resumeDraftFromList, from the Applications page's own "Continue"
+      // button.
 
       // ── Resume a draft directly from the Applications list ──
       window.resumeDraftFromList = function(id) {
@@ -26251,18 +26276,22 @@ ${printContent}
         if (draft) _restoreDraftIntoWizard(draft);
       };
 
-      // ── Intercept the ONE genuine "start new application" entry point ──
-      // Internal navigation (e.g. "← Edit Proposer Details", which calls
-      // showPage('new-application', null) directly) never goes through
-      // openLoanProductSelector(), so it is completely unaffected.
+      // ── The ONE genuine "start new application" entry point ──
+      // "Register New" (sidebar nav, topbar +New, and any other trigger of
+      // showPage('new-application', ...)) must always open a plain, blank
+      // wizard — no "resume your draft?" prompt, no auto-resume, no
+      // create/continue logic tied to it at all. Draft create/list/continue
+      // is exclusively an Applications-page feature (see resumeDraftFromList
+      // above, wired directly to that page's own "Continue" button) — it
+      // never runs through here. Any existing in-progress draft is left
+      // completely untouched in APPLICATIONS; _skipAttachToExistingDraft
+      // (above) is what stops this fresh session's own autosave from
+      // silently grabbing and overwriting it.
       var _origOpenLPS = window.openLoanProductSelector;
       if (typeof _origOpenLPS === 'function') {
         window.openLoanProductSelector = function() {
-          var draft = findMyDraft();
-          var hasMeaningfulData = draft && ((draft.name && draft.name !== '(Draft)') || draft.mobile || draft.pan);
-          if (draft && !hasMeaningfulData) { deleteDraftById(draft.id); draft = null; }
-          if (draft) { if (typeof openModal === 'function') openModal('modal-resume-draft'); return; }
           _wizardHardReset();
+          _skipAttachToExistingDraft = true;
           _origOpenLPS.apply(this, arguments);
         };
       }
@@ -30540,9 +30569,13 @@ function confirmDisburse() {
   window.showPage = function(pageId, navEl) {
     _orig.apply(this, arguments);
     // Hide/show topbar New Application button and search on channel pages
-    const mainTopbar = document.getElementById('main-topbar');
+    // (Only the search box is channel-page-specific — the hamburger, title,
+    // notifications and profile avatar must stay visible on every page.)
     const isChannelPage = pageId === 'dsa-mgmt' || pageId === 'partner-mgmt';
-    if (mainTopbar) mainTopbar.style.display = isChannelPage ? 'none' : '';
+    const searchWrap = document.getElementById('topbar-search-wrap');
+    if (searchWrap) searchWrap.style.display = isChannelPage ? 'none' : '';
+    const newAppBtn = document.getElementById('topbar-new-btn');
+    if (newAppBtn) newAppBtn.style.display = isChannelPage ? 'none' : '';
     if (pageId === 'dsa-mgmt') {
       const btn = document.getElementById('dsa-add-btn');
       if (btn) btn.style.display = dsaCanCreate() ? '' : 'none';
@@ -35679,9 +35712,10 @@ async function invSaveSetup() {
   const preview = document.getElementById('inv-photo-preview');
   if (preview && preview.src && preview.style.display !== 'none') {
     u._photoData = preview.src;
-    // Sync to USER_PROFILES
-    if (!USER_PROFILES[u.email]) USER_PROFILES[u.email] = {};
-    USER_PROFILES[u.email].photoData = preview.src;
+    // Sync to USER_PROFILES (shared window.USER_PROFILES — this is the object
+    // the actual profile page in user-profile.js reads from at render time)
+    if (!window.USER_PROFILES[u.email]) window.USER_PROFILES[u.email] = {};
+    window.USER_PROFILES[u.email].photoData = preview.src;
   }
 
   twRenderUsers();
