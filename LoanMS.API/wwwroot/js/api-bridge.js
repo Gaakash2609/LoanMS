@@ -12,9 +12,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 ;
 
   var BASE       = '/api';
-  var LS_TOKEN   = 'loanms_token';
-  var LS_REFRESH = 'loanms_refresh';
-  var LS_USER    = 'loanms_user';
+  var LS_AUTH    = 'efin_auth';  // React authStore uses 'efin_auth' key
+  var LS_SESSION = 'efin_session'; // Legacy display-only cache
 
   var ROLE_MAP   = { Admin:'admin', Manager:'manager', Sales:'sales_executive', Operations:'login_team', Partner:'partner' };
   var STATUS_MAP = { Draft:'wip', Submitted:'login', UnderReview:'underwriting', Approved:'approved', Rejected:'rejected', Disbursed:'disbursed', Closed:'disbursed', Hold:'hold' };
@@ -22,8 +21,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   var LTYPE_MAP  = { Personal:'personal_loan', Home:'home_loan', Business:'business_loan', Education:'education_loan', Car:'new_car_loan' };
   var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-  function _token()   { return _lsGet(LS_TOKEN); }
-  function _refresh() { return _lsGet(LS_REFRESH); }
+  function _getAuthState() {
+    var authStr = _lsGet(LS_AUTH);
+    try { return authStr ? JSON.parse(authStr) : {}; } catch (e) { return {}; }
+  }
+
+  function _token()   { return _getAuthState().accessToken; }
+  function _refresh() { return _getAuthState().refreshToken; }
   // Also removes efin_session (the display-only cache read by boot.js/efin-app.js
   // to paint the topbar name/avatar on restore). Previously this only cleared the
   // real auth keys (LS_TOKEN/LS_REFRESH/LS_USER) and left efin_session behind.
@@ -34,8 +38,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   // had silently switched to a different, blank one. Clearing efin_session here
   // too means that state can no longer persist across a refresh.
   function _clearAuth() {
-    [LS_TOKEN, LS_REFRESH, LS_USER].forEach(function(k){ _lsRemove(k); });
-    _lsRemove('efin_session');
+    _lsRemove(LS_AUTH);
+    _lsRemove(LS_SESSION);
   }
 
   /* ── Core API request with auto token refresh ──
@@ -67,8 +71,10 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       .then(function(r2){ return r2.json(); })
       .then(function(d2) {
         if (d2 && d2.success) {
-          _lsSet(LS_TOKEN, d2.data.accessToken);
-          _lsSet(LS_REFRESH, d2.data.refreshToken);
+          var authState = _getAuthState();
+          authState.accessToken = d2.data.accessToken;
+          authState.refreshToken = d2.data.refreshToken;
+          _lsSet(LS_AUTH, JSON.stringify(authState));
           return d2.data.accessToken;
         }
         _clearAuth();
