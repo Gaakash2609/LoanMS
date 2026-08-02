@@ -79,11 +79,14 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       .then(function(d2) {
         if (d2 && d2.success) {
           // Update auth state in Zustand persist middleware format
+          // Preserve existing state except hasHydrated (managed by Zustand independently)
           var storedStr = _lsGet(LS_AUTH);
           var zustandardAuthState = { state: {}, version: 0 };
           try { 
             var existing = storedStr ? JSON.parse(storedStr) : {};
             zustandardAuthState.state = existing.state || {};
+            // Explicitly exclude hasHydrated from persistence
+            delete zustandardAuthState.state.hasHydrated;
             zustandardAuthState.version = existing.version !== undefined ? existing.version : 0;
           } catch (e) {}
           
@@ -1225,13 +1228,14 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         }
         // Save auth state in Zustand persist middleware format
         // Zustand wraps persisted state in { state: {...}, version: 0 }
+        // NOTE: hasHydrated is NOT persisted — Zustand manages it independently
+        // on each load. It must always start false so ProtectedRoute waits for rehydration.
         var zustandardAuthState = {
           state: {
             accessToken: data.data.accessToken,
             refreshToken: data.data.refreshToken,
             user: data.data.user,
-            isAuthenticated: true,
-            hasHydrated: false
+            isAuthenticated: true
           },
           version: 0
         };
