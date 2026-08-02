@@ -526,7 +526,8 @@ try
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "DB initialization warning: {Message}", ex.Message);
+            logger.LogError(ex, "FATAL: Database initialization failed: {Message}", ex.Message);
+            throw; // Fail startup if migrations don't apply
         }
     }
 
