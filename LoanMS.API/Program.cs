@@ -369,6 +369,20 @@ try
                 }));
 
         options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        
+        // Return proper JSON response on rate limit rejection (not empty 429)
+        options.OnRejected = async (context, _) =>
+        {
+            context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.HttpContext.Response.ContentType = "application/json";
+            await context.HttpContext.Response.WriteAsJsonAsync(new
+            {
+                success = false,
+                message = "Too many requests. Please try again later.",
+                data = (object?)null,
+                errors = new[] { "Rate limit exceeded. Please try again in a few moments." }
+            });
+        };
     });
 
     // ── Health Checks ─────────────────────────────────────────────────────────
