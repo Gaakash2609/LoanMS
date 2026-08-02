@@ -23,7 +23,14 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
   function _getAuthState() {
     var authStr = _lsGet(LS_AUTH);
-    try { return authStr ? JSON.parse(authStr) : {}; } catch (e) { return {}; }
+    if (!authStr) return {};
+    try {
+      var parsed = JSON.parse(authStr);
+      // Handle Zustand persist middleware format { state: {...}, version: 0 }
+      return parsed.state || parsed; // Fall back to flat structure for compatibility
+    } catch (e) { 
+      return {}; 
+    }
   }
 
   function _token()   { return _getAuthState().accessToken; }
@@ -71,10 +78,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       .then(function(r2){ return r2.json(); })
       .then(function(d2) {
         if (d2 && d2.success) {
-          var authState = _getAuthState();
-          authState.accessToken = d2.data.accessToken;
-          authState.refreshToken = d2.data.refreshToken;
-          _lsSet(LS_AUTH, JSON.stringify(authState));
+          // Update auth state in Zustand persist middleware format
+          var storedStr = _lsGet(LS_AUTH);
+          var zustandardAuthState = { state: {}, version: 0 };
+          try { 
+            var existing = storedStr ? JSON.parse(storedStr) : {};
+            zustandardAuthState.state = existing.state || {};
+            zustandardAuthState.version = existing.version !== undefined ? existing.version : 0;
+          } catch (e) {}
+          
+          zustandardAuthState.state.accessToken = d2.data.accessToken;
+          zustandardAuthState.state.refreshToken = d2.data.refreshToken;
+          _lsSet(LS_AUTH, JSON.stringify(zustandardAuthState));
           return d2.data.accessToken;
         }
         _clearAuth();
@@ -1208,14 +1223,19 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           if (passEl) { passEl.value = ''; }
           return;
         }
-        // Save auth state to efin_auth key (matches React authStore)
-        var authState = {
-          accessToken: data.data.accessToken,
-          refreshToken: data.data.refreshToken,
-          user: data.data.user,
-          isAuthenticated: true
+        // Save auth state in Zustand persist middleware format
+        // Zustand wraps persisted state in { state: {...}, version: 0 }
+        var zustandardAuthState = {
+          state: {
+            accessToken: data.data.accessToken,
+            refreshToken: data.data.refreshToken,
+            user: data.data.user,
+            isAuthenticated: true,
+            hasHydrated: false
+          },
+          version: 0
         };
-        _lsSet(LS_AUTH, JSON.stringify(authState));
+        _lsSet(LS_AUTH, JSON.stringify(zustandardAuthState));
         var u = data.data.user;
         var efinRole = ROLE_MAP[u.role] || 'sales_executive';
         var userEmail = u.email.toLowerCase();
