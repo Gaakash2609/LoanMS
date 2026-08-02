@@ -1208,9 +1208,14 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           if (passEl) { passEl.value = ''; }
           return;
         }
-        _lsSet(LS_TOKEN, data.data.accessToken);
-        _lsSet(LS_REFRESH, data.data.refreshToken);
-        _lsSet(LS_USER, JSON.stringify(data.data.user));
+        // Save auth state to efin_auth key (matches React authStore)
+        var authState = {
+          accessToken: data.data.accessToken,
+          refreshToken: data.data.refreshToken,
+          user: data.data.user,
+          isAuthenticated: true
+        };
+        _lsSet(LS_AUTH, JSON.stringify(authState));
         var u = data.data.user;
         var efinRole = ROLE_MAP[u.role] || 'sales_executive';
         var userEmail = u.email.toLowerCase();
