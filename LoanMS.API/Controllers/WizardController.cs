@@ -193,7 +193,7 @@ public class WizardController : BaseController
                 Phone          = (dto.Mobile ?? string.Empty).Trim(),
                 PanNumber      = dto.Pan?.ToUpper().Trim(),
                 AadhaarNumber  = dto.Aadhar?.Trim(),
-                DateOfBirth    = string.IsNullOrWhiteSpace(dto.Dob) ? null : DateTime.TryParse(dto.Dob, out var dob) ? dob : null,
+                DateOfBirth    = string.IsNullOrWhiteSpace(dto.Dob) ? null : DateTime.TryParse(dto.Dob, out var dob) ? DateTime.SpecifyKind(dob, DateTimeKind.Utc) : null,
                 Address        = dto.Street1,
                 City           = dto.City,
                 State          = dto.State,
