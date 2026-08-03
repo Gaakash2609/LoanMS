@@ -1,4 +1,5 @@
 using LoanMS.Application.DTOs;
+using LoanMS.Application.Interfaces;
 using LoanMS.Domain.Entities;
 using LoanMS.Domain.Enums;
 using LoanMS.Infrastructure.Data;
@@ -17,11 +18,13 @@ public class WizardController : BaseController
 {
     private readonly AppDbContext _db;
     private readonly ILogger<WizardController> _logger;
+    private readonly ICacheService _cache;
 
-    public WizardController(AppDbContext db, ILogger<WizardController> logger)
+    public WizardController(AppDbContext db, ILogger<WizardController> logger, ICacheService cache)
     {
         _db     = db;
         _logger = logger;
+        _cache  = cache;
     }
 
     // NOTE: the wizard frontend sends short keys (new_car, used_car, education, lap)
@@ -471,6 +474,15 @@ public class WizardController : BaseController
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
 
+            // This save goes straight through AppDbContext (not ILoanService), so
+            // it never runs LoanService's own cache-invalidation path. Without this,
+            // the Applications Dashboard's cached loan list/stats (LoanService.
+            // GetAllAsync / GetDashboardStatsAsync) would keep serving the
+            // pre-submission snapshot until their TTL (30s/60s) expired, even
+            // though the row is already committed to the database.
+            await _cache.RemoveByPrefixAsync("loans:list:");
+            await _cache.RemoveByPrefixAsync("dashboard:");
+
             // The loan/customer a user just created is theirs to know about —
             // returning its id here is what lets the wizard show a proper
             // "Application ID" confirmation and upload mandatory documents to
@@ -656,6 +668,13 @@ public class WizardController : BaseController
 
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
+
+            // Same reasoning as Submit() above — this bypasses ILoanService, so
+            // the Applications Dashboard's cached list/stats must be invalidated
+            // explicitly or the draft won't show up under "All Status" until
+            // the cache TTL expires.
+            await _cache.RemoveByPrefixAsync("loans:list:");
+            await _cache.RemoveByPrefixAsync("dashboard:");
 
             return Ok(ApiResponseDto<WizardSubmitResponseDto>.Ok(new WizardSubmitResponseDto
             {

@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import { wizardApi, type WizardSubmitPayload } from '@/api/wizardApi'
 import { loansApi } from '@/api/loansApi'
@@ -11,6 +11,7 @@ import { CheckCircle, ChevronRight, ChevronLeft, AlertCircle, Upload, Loader, Ch
 import { emiReducing as computeEmiReducing } from '@/utils/emi'
 import { extractPanData, extractAadhaarData } from '@/utils/kycExtraction'
 import { createDraftId, saveDraftMeta, getDraftMeta, deleteDraftMeta } from '@/utils/draftStorage'
+import { LOAN_KEYS } from '@/hooks/useLoans'
 
 function fmtINR(n: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
@@ -184,6 +185,99 @@ function payloadToWizardData(p: Partial<WizardSubmitPayload>, fallback: WizardDa
   }
 }
 
+// ── Step field validation (single source of truth) ─────────────────────────
+// Pure function extracted from the wizard's per-step validation so it can be
+// (a) run on every keystroke/blur for real-time inline feedback and
+// (b) run once more on Next/Submit to gate progression — both call sites
+// share this exact same rule set, so they can never disagree.
+function computeStepErrors(
+  step: number,
+  data: WizardData,
+  documents: Record<string, File | null>,
+): Record<string, string> {
+  const errs: Record<string, string> = {}
+
+  if (step === 1) {
+    if (!MOBILE_RE.test(data.mobile)) errs.mobile = 'Enter a valid 10-digit mobile number (numbers only)'
+    if (!PAN_RE.test(data.pan)) errs.pan = 'Enter valid PAN (e.g. ABCDE1234F)'
+    if (!data.location) errs.location = 'Please select a Location'
+    if (!data.salesPerson) errs.salesPerson = 'Please select a Sales Person'
+    if (data.channel === 'dsa' && !data.dsaId) errs.dsaId = 'DSA name is required for DSA channel'
+    if (data.channel === 'agent' && !data.partnerId) errs.partnerId = 'Partner name is required for Partner/Agent channel'
+  }
+  if (step === 2) {
+    if (!AADHAR_RE.test(data.kycAadhar)) errs.kycAadhar = 'Enter a valid 12-digit Aadhaar number'
+    if (!data.kycFirstName && !data.firstName) errs.kycFirstName = 'Name is required from KYC'
+    if (data.kycPin && !PIN_RE.test(data.kycPin)) errs.kycPin = 'Enter a valid 6-digit PIN code'
+  }
+  if (step === 3) {
+    if (!data.firstName) errs.firstName = 'First Name is required'
+    if (!data.lastName) errs.lastName = 'Last Name is required'
+    if (!data.gender) errs.gender = 'Gender is required'
+    if (!data.dob) errs.dob = 'Date of Birth is required'
+    if (data.aadhar && !AADHAR_RE.test(data.aadhar)) errs.aadhar = 'Enter a valid 12-digit Aadhaar number'
+    if (data.email && !EMAIL_RE.test(data.email)) errs.email = 'Enter a valid email address (e.g. name@example.com)'
+    if (data.phone && !MOBILE_RE.test(data.phone)) errs.phone = 'Enter a valid 10-digit mobile number (numbers only)'
+  }
+  if (step === 4) {
+    // Address step validation
+    if (!data.street1) errs.street1 = 'Current street address is required'
+    if (!data.city) errs.city = 'Current city is required'
+    if (!data.state) errs.state = 'Current state is required'
+    if (!PIN_RE.test(data.zip)) errs.zip = 'Enter a valid 6-digit PIN code (numbers only)'
+    if (!data.homeType) errs.homeType = 'Home type is required'
+    if (!data.sameAddr && data.pZip && !PIN_RE.test(data.pZip))
+      errs.pZip = 'Enter a valid 6-digit PIN code (numbers only)'
+  }
+  if (step === 5) {
+    if (!data.empType) errs.empType = 'Employment Type is required'
+    if (!data.salary || parseFloat(data.salary) <= 0) errs.salary = 'Monthly income is required'
+    if (data.obligations && parseFloat(data.obligations) < 0) errs.obligations = 'Obligations cannot be negative'
+    if (data.empType !== 'self_employed') {
+      if (!data.compName) errs.compName = 'Company name is required'
+      if (!data.desig) errs.desig = 'Designation is required'
+      if (!data.officeEmail) errs.officeEmail = 'Official Email ID is required'
+      else if (!EMAIL_RE.test(data.officeEmail)) errs.officeEmail = 'Enter a valid email address (e.g. name@company.com)'
+    }
+  }
+  if (step === 6) {
+    if (!data.loanType) errs.loanType = 'Loan type is required'
+    if (!data.amount || parseFloat(data.amount) <= 0) errs.amount = 'Loan amount must be greater than 0'
+    if (!data.loanRate || parseFloat(data.loanRate) <= 0) errs.loanRate = 'Interest rate must be greater than 0'
+    if (!data.tenure || !/^\d+$/.test(data.tenure) || parseInt(data.tenure) <= 0 || parseInt(data.tenure) > 360)
+      errs.tenure = 'Tenure must be a whole number between 1 and 360 months'
+    if (!data.purpose) errs.purpose = 'Loan purpose is required'
+    if (data.cibil && (parseInt(data.cibil) < 300 || parseInt(data.cibil) > 900))
+      errs.cibil = 'CIBIL score must be between 300 and 900'
+  }
+  if (step === 7) {
+    // References - at least one reference required
+    const hasRef1 = data.r1Name && data.r1Mobile && data.r1Relation
+    const hasRef2 = data.r2Name && data.r2Mobile && data.r2Relation
+    if (!hasRef1 && !hasRef2) {
+      errs.references = 'At least one reference is required'
+    }
+    if (data.r1Name && !data.r1Mobile) errs.r1Mobile = 'Reference 1 mobile is required'
+    else if (data.r1Mobile && !MOBILE_RE.test(data.r1Mobile)) errs.r1Mobile = 'Enter a valid 10-digit mobile number'
+    if (data.r2Name && !data.r2Mobile) errs.r2Mobile = 'Reference 2 mobile is required'
+    else if (data.r2Mobile && !MOBILE_RE.test(data.r2Mobile)) errs.r2Mobile = 'Enter a valid 10-digit mobile number'
+  }
+  if (step === 8) {
+    // Mandatory documents - application cannot proceed/submit without these
+    if (!documents.salarySlip3mo) errs.salarySlip3mo = 'Last 3 Month Salary Slips are required'
+    if (!documents.bankStatement6mo) errs.bankStatement6mo = 'Last 6 Month Bank Statement is required'
+  }
+  // Step 9 (Loan Analytics) - no validation needed, it's summary only
+
+  return errs
+}
+
+// Field keys whose error (if any) should also become visible once the
+// person has interacted with any field in the same logical group — used
+// only for the Step 7 "at least one reference" aggregate message, which
+// isn't tied to a single input.
+const REFERENCE_GROUP_FIELDS = ['r1Name', 'r1Mobile', 'r1Relation', 'r2Name', 'r2Mobile', 'r2Relation']
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 function FormGroup({ label, required, error, children }: {
   label: string; required?: boolean; error?: string; children: React.ReactNode
@@ -200,10 +294,14 @@ function FormGroup({ label, required, error, children }: {
 }
 
 function TextInput({
-  value, onChange, placeholder, type = 'text', inputMode, pattern, maxLength, minLength,
+  value, onChange, onBlur, placeholder, type = 'text', inputMode, pattern, maxLength, minLength,
   className = '', digitsOnly, decimalOnly,
 }: {
   value: string; onChange: (v: string) => void; placeholder?: string
+  // Fires when the field loses focus — used to mark it "touched" so its
+  // real-time validation message becomes visible even if the person never
+  // typed anything (e.g. tabbed through a required field and left it blank).
+  onBlur?: () => void
   type?: string
   inputMode?: 'text' | 'numeric' | 'decimal' | 'tel' | 'email' | 'search' | 'url' | 'none'
   pattern?: string; maxLength?: number; minLength?: number; className?: string
@@ -235,6 +333,7 @@ function TextInput({
       pattern={pattern}
       value={value}
       onChange={e => onChange(filter(e.target.value))}
+      onBlur={onBlur}
       placeholder={placeholder}
       maxLength={maxLength}
       minLength={minLength}
@@ -243,14 +342,18 @@ function TextInput({
   )
 }
 
-function SelectInput({ value, onChange, options, placeholder }: {
+function SelectInput({ value, onChange, onBlur, options, placeholder }: {
   value: string; onChange: (v: string) => void
+  // See TextInput.onBlur — same purpose for dropdowns (e.g. a required
+  // Location/State select the person opened and left on the placeholder).
+  onBlur?: () => void
   options: Array<{ value: string; label: string } | string>; placeholder?: string
 }) {
   return (
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
+      onBlur={onBlur}
       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
     >
       {placeholder && <option value="">{placeholder}</option>}
@@ -264,10 +367,11 @@ function SelectInput({ value, onChange, options, placeholder }: {
 }
 
 // ── Step Components ───────────────────────────────────────────────────────────
-function Step1({ data, onChange, errors }: {
+function Step1({ data, onChange, errors, touch }: {
   data: WizardData
   onChange: (f: Partial<WizardData>) => void
   errors: Record<string, string>
+  touch: (field: string) => void
 }) {
   const { data: locations } = useQuery({
     queryKey: ['wizard-locations'],
@@ -293,13 +397,14 @@ function Step1({ data, onChange, errors }: {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
       <FormGroup label="Mobile Number" required error={errors.mobile}>
-        <TextInput value={data.mobile} onChange={v => onChange({ mobile: v })}
+        <TextInput value={data.mobile} onChange={v => onChange({ mobile: v })} onBlur={() => touch('mobile')}
           placeholder="10-digit mobile" maxLength={10} minLength={10}
           type="tel" inputMode="numeric" pattern="\d{10}" digitsOnly />
       </FormGroup>
 
       <FormGroup label="PAN Card Number" required error={errors.pan}>
         <TextInput value={data.pan} onChange={v => onChange({ pan: v.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
+          onBlur={() => touch('pan')}
           placeholder="ABCDE1234F" maxLength={10} minLength={10}
           pattern="[A-Z]{5}[0-9]{4}[A-Z]" className="uppercase font-mono" />
       </FormGroup>
@@ -308,6 +413,7 @@ function Step1({ data, onChange, errors }: {
         <SelectInput
           value={data.location}
           onChange={v => onChange({ location: v })}
+          onBlur={() => touch('location')}
           options={(locations ?? []).map(l => ({ value: String(l.id), label: `${l.name} — ${l.city}` }))}
           placeholder="— Select Location —"
         />
@@ -317,6 +423,7 @@ function Step1({ data, onChange, errors }: {
         <SelectInput
           value={data.salesPerson}
           onChange={v => onChange({ salesPerson: v })}
+          onBlur={() => touch('salesPerson')}
           options={salesUsers.map(u => ({ value: u.fullName, label: u.fullName }))}
           placeholder="— Select Sales Person —"
         />
@@ -336,6 +443,7 @@ function Step1({ data, onChange, errors }: {
               const selected = dsaList.find(d => String(d.id) === v)
               onChange({ dsaId: v, dsaName: selected?.name ?? '' })
             }}
+            onBlur={() => touch('dsaId')}
             options={dsaList.map(d => ({ value: String(d.id), label: `${d.name} (${d.code})` }))}
             placeholder="— Select DSA —"
           />
@@ -347,6 +455,7 @@ function Step1({ data, onChange, errors }: {
           <SelectInput
             value={data.partnerId}
             onChange={v => onChange({ partnerId: v })}
+            onBlur={() => touch('partnerId')}
             options={partnerList.map(p => ({ value: String(p.id), label: `${p.name} (${p.code})` }))}
             placeholder="— Select Partner —"
           />
@@ -356,8 +465,9 @@ function Step1({ data, onChange, errors }: {
   )
 }
 
-function Step2({ data, onChange, errors }: {
+function Step2({ data, onChange, errors, touch }: {
   data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
+  touch: (field: string) => void
 }) {
   const [panImages, setPanImages] = useState<File[]>([])
   const [aadhaarImages, setAadhaarImages] = useState<File[]>([])
@@ -592,6 +702,7 @@ Extract exactly what is on the card. Be accurate.`,
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-4 mt-4">
           <FormGroup label="First Name (from PAN)" error={errors.kycFirstName}>
             <TextInput value={data.kycFirstName} onChange={v => onChange({ kycFirstName: v, firstName: v })}
+              onBlur={() => touch('kycFirstName')}
               placeholder="—" />
           </FormGroup>
           <FormGroup label="Last Name (from PAN)">
@@ -681,6 +792,7 @@ Extract exactly what is on the card. Be accurate.`,
           <FormGroup label="Aadhaar Number" required error={errors.kycAadhar}>
             <TextInput value={data.kycAadhar}
               onChange={v => onChange({ kycAadhar: v, aadhar: v })}
+              onBlur={() => touch('kycAadhar')}
               placeholder="XXXXXXXXXXXX" maxLength={12} minLength={12}
               inputMode="numeric" pattern="\d{12}" digitsOnly
               className="font-mono" />
@@ -704,6 +816,7 @@ Extract exactly what is on the card. Be accurate.`,
           </FormGroup>
           <FormGroup label="PIN Code" error={errors.kycPin}>
             <TextInput value={data.kycPin} onChange={v => onChange({ kycPin: v, zip: v })}
+              onBlur={() => touch('kycPin')}
               placeholder="6-digit PIN" maxLength={6} minLength={6}
               inputMode="numeric" pattern="\d{6}" digitsOnly />
           </FormGroup>
@@ -713,38 +826,41 @@ Extract exactly what is on the card. Be accurate.`,
   )
 }
 
-function Step3({ data, onChange, errors }: {
+function Step3({ data, onChange, errors, touch }: {
   data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
+  touch: (field: string) => void
 }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
       <FormGroup label="First Name" required error={errors.firstName}>
-        <TextInput value={data.firstName} onChange={v => onChange({ firstName: v })} placeholder="First name" />
+        <TextInput value={data.firstName} onChange={v => onChange({ firstName: v })}
+          onBlur={() => touch('firstName')} placeholder="First name" />
       </FormGroup>
       <FormGroup label="Middle Name">
         <TextInput value={data.middleName} onChange={v => onChange({ middleName: v })} placeholder="Middle name" />
       </FormGroup>
       <FormGroup label="Last Name" required error={errors.lastName}>
-        <TextInput value={data.lastName} onChange={v => onChange({ lastName: v })} placeholder="Last name" />
+        <TextInput value={data.lastName} onChange={v => onChange({ lastName: v })}
+          onBlur={() => touch('lastName')} placeholder="Last name" />
       </FormGroup>
-      <FormGroup label="Date of Birth">
-        <TextInput value={data.dob} onChange={v => onChange({ dob: v })} type="date" />
+      <FormGroup label="Date of Birth" required error={errors.dob}>
+        <TextInput value={data.dob} onChange={v => onChange({ dob: v })} onBlur={() => touch('dob')} type="date" />
       </FormGroup>
-      <FormGroup label="Gender">
-        <SelectInput value={data.gender} onChange={v => onChange({ gender: v })}
+      <FormGroup label="Gender" required error={errors.gender}>
+        <SelectInput value={data.gender} onChange={v => onChange({ gender: v })} onBlur={() => touch('gender')}
           options={['Male', 'Female', 'Other']} placeholder="— Select —" />
       </FormGroup>
       <FormGroup label="Aadhaar Number" error={errors.aadhar}>
-        <TextInput value={data.aadhar} onChange={v => onChange({ aadhar: v })}
+        <TextInput value={data.aadhar} onChange={v => onChange({ aadhar: v })} onBlur={() => touch('aadhar')}
           placeholder="12-digit Aadhaar" maxLength={12} minLength={12}
           inputMode="numeric" pattern="\d{12}" digitsOnly className="font-mono" />
       </FormGroup>
       <FormGroup label="Email Address" error={errors.email}>
-        <TextInput value={data.email} onChange={v => onChange({ email: v })}
+        <TextInput value={data.email} onChange={v => onChange({ email: v })} onBlur={() => touch('email')}
           type="email" inputMode="email" placeholder="email@example.com" />
       </FormGroup>
       <FormGroup label="Alternate Phone" error={errors.phone}>
-        <TextInput value={data.phone} onChange={v => onChange({ phone: v })}
+        <TextInput value={data.phone} onChange={v => onChange({ phone: v })} onBlur={() => touch('phone')}
           type="tel" inputMode="numeric" pattern="\d{10}" digitsOnly
           placeholder="10-digit alternate number" maxLength={10} minLength={10} />
       </FormGroup>
@@ -756,8 +872,9 @@ function Step3({ data, onChange, errors }: {
   )
 }
 
-function Step4({ data, onChange, errors }: {
+function Step4({ data, onChange, errors, touch }: {
   data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
+  touch: (field: string) => void
 }) {
   const handleSameAddr = (checked: boolean) => {
     if (checked) {
@@ -776,25 +893,27 @@ function Step4({ data, onChange, errors }: {
       <p className="text-xs font-semibold text-gray-500 uppercase mb-4">Current Address</p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
         <FormGroup label="House / Flat No." required error={errors.street1}>
-          <TextInput value={data.street1} onChange={v => onChange({ street1: v })} placeholder="Flat no, Floor" />
+          <TextInput value={data.street1} onChange={v => onChange({ street1: v })}
+            onBlur={() => touch('street1')} placeholder="Flat no, Floor" />
         </FormGroup>
         <FormGroup label="Street & Locality">
           <TextInput value={data.street2} onChange={v => onChange({ street2: v })} placeholder="Road, Area, Colony" />
         </FormGroup>
         <FormGroup label="City" required error={errors.city}>
-          <TextInput value={data.city} onChange={v => onChange({ city: v })} placeholder="City" />
+          <TextInput value={data.city} onChange={v => onChange({ city: v })}
+            onBlur={() => touch('city')} placeholder="City" />
         </FormGroup>
         <FormGroup label="Pin Code" required error={errors.zip}>
-          <TextInput value={data.zip} onChange={v => onChange({ zip: v })}
+          <TextInput value={data.zip} onChange={v => onChange({ zip: v })} onBlur={() => touch('zip')}
             placeholder="6-digit pin" maxLength={6} minLength={6}
             inputMode="numeric" pattern="\d{6}" digitsOnly />
         </FormGroup>
         <FormGroup label="State" required error={errors.state}>
-          <SelectInput value={data.state} onChange={v => onChange({ state: v })}
+          <SelectInput value={data.state} onChange={v => onChange({ state: v })} onBlur={() => touch('state')}
             options={STATES} placeholder="— Select State —" />
         </FormGroup>
         <FormGroup label="Home Type" required error={errors.homeType}>
-          <SelectInput value={data.homeType} onChange={v => onChange({ homeType: v })}
+          <SelectInput value={data.homeType} onChange={v => onChange({ homeType: v })} onBlur={() => touch('homeType')}
             options={HOME_TYPES} placeholder="— Select —" />
         </FormGroup>
       </div>
@@ -822,7 +941,7 @@ function Step4({ data, onChange, errors }: {
               <TextInput value={data.pCity} onChange={v => onChange({ pCity: v })} placeholder="City" />
             </FormGroup>
             <FormGroup label="Pin Code" error={errors.pZip}>
-              <TextInput value={data.pZip} onChange={v => onChange({ pZip: v })}
+              <TextInput value={data.pZip} onChange={v => onChange({ pZip: v })} onBlur={() => touch('pZip')}
                 placeholder="6-digit pin" maxLength={6} minLength={6}
                 inputMode="numeric" pattern="\d{6}" digitsOnly />
             </FormGroup>
@@ -841,26 +960,29 @@ function Step4({ data, onChange, errors }: {
   )
 }
 
-function Step5({ data, onChange, errors }: {
+function Step5({ data, onChange, errors, touch }: {
   data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
+  touch: (field: string) => void
 }) {
   return (
     <div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
         <FormGroup label="Employment Type" required error={errors.empType}>
-          <SelectInput value={data.empType} onChange={v => onChange({ empType: v })}
+          <SelectInput value={data.empType} onChange={v => onChange({ empType: v })} onBlur={() => touch('empType')}
             options={EMP_TYPES} placeholder="— Select —" />
         </FormGroup>
         <FormGroup label="Gross Monthly Income (₹)" required error={errors.salary}>
-          <TextInput value={data.salary} onChange={v => onChange({ salary: v })}
+          <TextInput value={data.salary} onChange={v => onChange({ salary: v })} onBlur={() => touch('salary')}
             inputMode="decimal" decimalOnly placeholder="e.g. 50000" />
         </FormGroup>
         <FormGroup label="Existing Monthly EMI Obligations (₹)" error={errors.obligations}>
           <TextInput value={data.obligations} onChange={v => onChange({ obligations: v })}
+            onBlur={() => touch('obligations')}
             inputMode="decimal" decimalOnly placeholder="0 if none" />
         </FormGroup>
-        <FormGroup label="Designation">
-          <TextInput value={data.desig} onChange={v => onChange({ desig: v })} placeholder="e.g. Manager" />
+        <FormGroup label="Designation" required={data.empType !== 'self_employed'} error={errors.desig}>
+          <TextInput value={data.desig} onChange={v => onChange({ desig: v })} onBlur={() => touch('desig')}
+            placeholder="e.g. Manager" />
         </FormGroup>
       </div>
 
@@ -868,7 +990,7 @@ function Step5({ data, onChange, errors }: {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 mt-2">
           <FormGroup label="Employer / Company Name" required error={errors.compName}>
             <TextInput value={data.compName} onChange={v => onChange({ compName: v })}
-              placeholder="e.g. Tata Consultancy" />
+              onBlur={() => touch('compName')} placeholder="e.g. Tata Consultancy" />
           </FormGroup>
           <FormGroup label="Company Type">
             <SelectInput value={data.compType} onChange={v => onChange({ compType: v })}
@@ -876,6 +998,7 @@ function Step5({ data, onChange, errors }: {
           </FormGroup>
           <FormGroup label="Official Email ID" required error={errors.officeEmail}>
             <TextInput value={data.officeEmail} onChange={v => onChange({ officeEmail: v })}
+              onBlur={() => touch('officeEmail')}
               type="email" inputMode="email" placeholder="e.g. name@company.com" />
           </FormGroup>
         </div>
@@ -897,8 +1020,9 @@ function Step5({ data, onChange, errors }: {
   )
 }
 
-function Step6({ data, onChange, errors }: {
+function Step6({ data, onChange, errors, touch }: {
   data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
+  touch: (field: string) => void
 }) {
   const P   = parseFloat(data.amount) || 0
   const r   = parseFloat(data.loanRate) || 0
@@ -908,29 +1032,30 @@ function Step6({ data, onChange, errors }: {
   return (
     <div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
-        <FormGroup label="Loan Type" required>
-          <SelectInput value={data.loanType} onChange={v => onChange({ loanType: v })} options={LOAN_TYPES} />
+        <FormGroup label="Loan Type" required error={errors.loanType}>
+          <SelectInput value={data.loanType} onChange={v => onChange({ loanType: v })} onBlur={() => touch('loanType')}
+            options={LOAN_TYPES} />
         </FormGroup>
         <FormGroup label="CIBIL Score" error={errors.cibil}>
-          <TextInput value={data.cibil} onChange={v => onChange({ cibil: v })}
+          <TextInput value={data.cibil} onChange={v => onChange({ cibil: v })} onBlur={() => touch('cibil')}
             inputMode="numeric" pattern="\d{3}" digitsOnly maxLength={3}
             placeholder="e.g. 750" />
         </FormGroup>
         <FormGroup label="Loan Amount (₹)" required error={errors.amount}>
-          <TextInput value={data.amount} onChange={v => onChange({ amount: v })}
+          <TextInput value={data.amount} onChange={v => onChange({ amount: v })} onBlur={() => touch('amount')}
             inputMode="decimal" decimalOnly placeholder="e.g. 500000" />
         </FormGroup>
         <FormGroup label="Interest Rate (% p.a.)" required error={errors.loanRate}>
-          <TextInput value={data.loanRate} onChange={v => onChange({ loanRate: v })}
+          <TextInput value={data.loanRate} onChange={v => onChange({ loanRate: v })} onBlur={() => touch('loanRate')}
             inputMode="decimal" decimalOnly placeholder="e.g. 12.5" />
         </FormGroup>
         <FormGroup label="Tenure (months)" required error={errors.tenure}>
-          <TextInput value={data.tenure} onChange={v => onChange({ tenure: v })}
+          <TextInput value={data.tenure} onChange={v => onChange({ tenure: v })} onBlur={() => touch('tenure')}
             inputMode="numeric" pattern="\d+" digitsOnly maxLength={3}
             placeholder="e.g. 24" />
         </FormGroup>
-        <FormGroup label="Purpose / Remarks">
-          <TextInput value={data.purpose} onChange={v => onChange({ purpose: v })}
+        <FormGroup label="Purpose / Remarks" required error={errors.purpose}>
+          <TextInput value={data.purpose} onChange={v => onChange({ purpose: v })} onBlur={() => touch('purpose')}
             placeholder="Loan purpose" />
         </FormGroup>
       </div>
@@ -962,8 +1087,9 @@ function Step6({ data, onChange, errors }: {
   )
 }
 
-function Step7({ data, onChange, errors }: {
+function Step7({ data, onChange, errors, touch }: {
   data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
+  touch: (field: string) => void
 }) {
   return (
     <div>
@@ -976,15 +1102,17 @@ function Step7({ data, onChange, errors }: {
         <p className="text-xs font-semibold text-gray-500 uppercase mb-4">Reference 1</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-4">
           <FormGroup label="Name">
-            <TextInput value={data.r1Name} onChange={v => onChange({ r1Name: v })} placeholder="Full name" />
+            <TextInput value={data.r1Name} onChange={v => onChange({ r1Name: v })} onBlur={() => touch('r1Name')}
+              placeholder="Full name" />
           </FormGroup>
           <FormGroup label="Mobile" error={errors.r1Mobile}>
-            <TextInput value={data.r1Mobile} onChange={v => onChange({ r1Mobile: v })}
+            <TextInput value={data.r1Mobile} onChange={v => onChange({ r1Mobile: v })} onBlur={() => touch('r1Mobile')}
               type="tel" inputMode="numeric" pattern="\d{10}" digitsOnly
               placeholder="10-digit mobile" maxLength={10} minLength={10} />
           </FormGroup>
           <FormGroup label="Relationship">
             <SelectInput value={data.r1Relation} onChange={v => onChange({ r1Relation: v })}
+              onBlur={() => touch('r1Relation')}
               options={RELATIONS} placeholder="— Select —" />
           </FormGroup>
         </div>
@@ -993,15 +1121,17 @@ function Step7({ data, onChange, errors }: {
         <p className="text-xs font-semibold text-gray-500 uppercase mb-4">Reference 2</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-4">
           <FormGroup label="Name">
-            <TextInput value={data.r2Name} onChange={v => onChange({ r2Name: v })} placeholder="Full name" />
+            <TextInput value={data.r2Name} onChange={v => onChange({ r2Name: v })} onBlur={() => touch('r2Name')}
+              placeholder="Full name" />
           </FormGroup>
           <FormGroup label="Mobile" error={errors.r2Mobile}>
-            <TextInput value={data.r2Mobile} onChange={v => onChange({ r2Mobile: v })}
+            <TextInput value={data.r2Mobile} onChange={v => onChange({ r2Mobile: v })} onBlur={() => touch('r2Mobile')}
               type="tel" inputMode="numeric" pattern="\d{10}" digitsOnly
               placeholder="10-digit mobile" maxLength={10} minLength={10} />
           </FormGroup>
           <FormGroup label="Relationship">
             <SelectInput value={data.r2Relation} onChange={v => onChange({ r2Relation: v })}
+              onBlur={() => touch('r2Relation')}
               options={RELATIONS} placeholder="— Select —" />
           </FormGroup>
         </div>
@@ -1160,6 +1290,7 @@ function Step9({ data }: { data: WizardData }) {
 // ── Main Wizard Page ──────────────────────────────────────────────────────────
 export default function NewApplicationPage() {
   const navigate    = useNavigate()
+  const qc          = useQueryClient()
   const user        = useAuthStore(s => s.user)
   const [searchParams] = useSearchParams()
 
@@ -1186,7 +1317,14 @@ export default function NewApplicationPage() {
   // person doesn't see a flash of empty fields before their data loads.
   const [isResuming, setIsResuming] = useState(!!(resumeDraftId && resumedMeta?.loanId))
   const [resumeError, setResumeError] = useState('')
-  const [stepErrors, setStepErrors] = useState<Record<string, string>>({})
+  // Which fields the person has actually interacted with (typed into or
+  // blurred), keyed by WizardData field name (or document key for Step 8).
+  // Drives which real-time validation messages are currently visible —
+  // an untouched empty required field doesn't nag the person the instant
+  // the step loads, but starts showing feedback the moment they engage
+  // with it. Next/Submit force every field in the current step to be
+  // touched so nothing stays hidden when they try to move on.
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [submitError, setSubmitError] = useState('')
   const [documents, setDocuments] = useState<Record<string, File | null>>({})
   const [docUploadWarning, setDocUploadWarning] = useState('')
@@ -1321,105 +1459,71 @@ export default function NewApplicationPage() {
 
   const setDocument = useCallback((key: string, file: File | null) => {
     setDocuments(prev => ({ ...prev, [key]: file }))
-    setStepErrors(prev => {
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
+    setTouched(prev => (prev[key] ? prev : { ...prev, [key]: true }))
   }, [])
 
   const update = useCallback((fields: Partial<WizardData>) => {
     setData(prev => ({ ...prev, ...fields }))
-    // Clear errors for changed fields
-    const keys = Object.keys(fields)
-    setStepErrors(prev => {
+    // Real-time validation: mark every changed field touched immediately so
+    // its inline message (if any) appears as the person types, not only
+    // after they try to move on.
+    setTouched(prev => {
       const next = { ...prev }
-      keys.forEach(k => delete next[k])
+      Object.keys(fields).forEach(k => { next[k] = true })
       return next
     })
   }, [])
 
+  // A field is marked touched on change/blur (see update/setDocument/touch).
+  const touch = useCallback((field: string) => {
+    setTouched(prev => (prev[field] ? prev : { ...prev, [field]: true }))
+  }, [])
+
   // ── Step validation (mirrors legacy validateStep) ─────────────────────────
+  // Same rule set as before, now factored out into computeStepErrors so it
+  // can also drive real-time validation below — this is the only place the
+  // rules live, so there's no risk of the two ever disagreeing.
+
+  // Full set of errors for the step currently on screen, recomputed on every
+  // keystroke/selection. Used to (a) gate the Next/Submit button in real
+  // time and (b) reveal every message at once when the person attempts to
+  // proceed with the step still invalid.
+  const liveStepErrors = useMemo(
+    () => computeStepErrors(step, data, documents),
+    [step, data, documents],
+  )
+
+  // Subset of liveStepErrors that's actually visible right now — only for
+  // fields the person has touched (typed into or blurred), so a fresh step
+  // doesn't greet them with a wall of "required" errors before they've done
+  // anything. The Step 7 aggregate "at least one reference is required"
+  // message isn't tied to a single input, so it surfaces once any reference
+  // field has been touched.
+  const stepErrors = useMemo(() => {
+    const visible: Record<string, string> = {}
+    for (const key of Object.keys(liveStepErrors)) {
+      if (key === 'references') {
+        if (REFERENCE_GROUP_FIELDS.some(f => touched[f])) visible[key] = liveStepErrors[key]
+      } else if (touched[key]) {
+        visible[key] = liveStepErrors[key]
+      }
+    }
+    return visible
+  }, [liveStepErrors, touched])
+
   const validateCurrentStep = (): boolean => {
-    const errs: Record<string, string> = {}
-
-    if (step === 1) {
-      if (!MOBILE_RE.test(data.mobile)) errs.mobile = 'Enter a valid 10-digit mobile number (numbers only)'
-      if (!PAN_RE.test(data.pan)) errs.pan = 'Enter valid PAN (e.g. ABCDE1234F)'
-      if (!data.location) errs.location = 'Please select a Location'
-      if (!data.salesPerson) errs.salesPerson = 'Please select a Sales Person'
-      if (data.channel === 'dsa' && !data.dsaId) errs.dsaId = 'DSA name is required for DSA channel'
-      if (data.channel === 'agent' && !data.partnerId) errs.partnerId = 'Partner name is required for Partner/Agent channel'
-    }
-    if (step === 2) {
-      if (!AADHAR_RE.test(data.kycAadhar)) errs.kycAadhar = 'Enter a valid 12-digit Aadhaar number'
-      if (!data.kycFirstName && !data.firstName) errs.kycFirstName = 'Name is required from KYC'
-      if (data.kycPin && !PIN_RE.test(data.kycPin)) errs.kycPin = 'Enter a valid 6-digit PIN code'
-    }
-    if (step === 3) {
-      if (!data.firstName) errs.firstName = 'First Name is required'
-      if (!data.lastName) errs.lastName = 'Last Name is required'
-      if (!data.gender) errs.gender = 'Gender is required'
-      if (!data.dob) errs.dob = 'Date of Birth is required'
-      if (data.aadhar && !AADHAR_RE.test(data.aadhar)) errs.aadhar = 'Enter a valid 12-digit Aadhaar number'
-      if (data.email && !EMAIL_RE.test(data.email)) errs.email = 'Enter a valid email address (e.g. name@example.com)'
-      if (data.phone && !MOBILE_RE.test(data.phone)) errs.phone = 'Enter a valid 10-digit mobile number (numbers only)'
-    }
-    if (step === 4) {
-      // Address step validation
-      if (!data.street1) errs.street1 = 'Current street address is required'
-      if (!data.city) errs.city = 'Current city is required'
-      if (!data.state) errs.state = 'Current state is required'
-      if (!PIN_RE.test(data.zip)) errs.zip = 'Enter a valid 6-digit PIN code (numbers only)'
-      if (!data.homeType) errs.homeType = 'Home type is required'
-      if (!data.sameAddr && data.pZip && !PIN_RE.test(data.pZip))
-        errs.pZip = 'Enter a valid 6-digit PIN code (numbers only)'
-    }
-    if (step === 5) {
-      if (!data.empType) errs.empType = 'Employment Type is required'
-      if (!data.salary || parseFloat(data.salary) <= 0) errs.salary = 'Monthly income is required'
-      if (data.obligations && parseFloat(data.obligations) < 0) errs.obligations = 'Obligations cannot be negative'
-      if (data.empType !== 'self_employed') {
-        if (!data.compName) errs.compName = 'Company name is required'
-        if (!data.desig) errs.desig = 'Designation is required'
-        if (!data.officeEmail) errs.officeEmail = 'Official Email ID is required'
-        else if (!EMAIL_RE.test(data.officeEmail)) errs.officeEmail = 'Enter a valid email address (e.g. name@company.com)'
-      }
-    }
-    if (step === 6) {
-      if (!data.loanType) errs.loanType = 'Loan type is required'
-      if (!data.amount || parseFloat(data.amount) <= 0) errs.amount = 'Loan amount must be greater than 0'
-      if (!data.loanRate || parseFloat(data.loanRate) <= 0) errs.loanRate = 'Interest rate must be greater than 0'
-      if (!data.tenure || !/^\d+$/.test(data.tenure) || parseInt(data.tenure) <= 0 || parseInt(data.tenure) > 360)
-        errs.tenure = 'Tenure must be a whole number between 1 and 360 months'
-      if (!data.purpose) errs.purpose = 'Loan purpose is required'
-      if (data.cibil && (parseInt(data.cibil) < 300 || parseInt(data.cibil) > 900))
-        errs.cibil = 'CIBIL score must be between 300 and 900'
-    }
-    if (step === 7) {
-      // References - at least one reference required
-      const hasRef1 = data.r1Name && data.r1Mobile && data.r1Relation
-      const hasRef2 = data.r2Name && data.r2Mobile && data.r2Relation
-      if (!hasRef1 && !hasRef2) {
-        errs.references = 'At least one reference is required'
-      }
-      if (data.r1Name && !data.r1Mobile) errs.r1Mobile = 'Reference 1 mobile is required'
-      else if (data.r1Mobile && !MOBILE_RE.test(data.r1Mobile)) errs.r1Mobile = 'Enter a valid 10-digit mobile number'
-      if (data.r2Name && !data.r2Mobile) errs.r2Mobile = 'Reference 2 mobile is required'
-      else if (data.r2Mobile && !MOBILE_RE.test(data.r2Mobile)) errs.r2Mobile = 'Enter a valid 10-digit mobile number'
-    }
-    if (step === 8) {
-      // Mandatory documents - application cannot proceed/submit without these
-      if (!documents.salarySlip3mo) errs.salarySlip3mo = 'Last 3 Month Salary Slips are required'
-      if (!documents.bankStatement6mo) errs.bankStatement6mo = 'Last 6 Month Bank Statement is required'
-    }
-    // Step 9 (Loan Analytics) - no validation needed, it's summary only
-
-    if (Object.keys(errs).length > 0) {
-      setStepErrors(errs)
-      return false
-    }
-    return true
+    // Reveal every error for this step's fields, whether or not the person
+    // has touched them yet — this is what makes clicking Next/Submit with
+    // an untouched required field still show the message immediately.
+    setTouched(prev => {
+      const next = { ...prev }
+      Object.keys(liveStepErrors).forEach(k => {
+        if (k === 'references') REFERENCE_GROUP_FIELDS.forEach(f => { next[f] = true })
+        else next[k] = true
+      })
+      return next
+    })
+    return Object.keys(liveStepErrors).length === 0
   }
 
   const submit = useMutation({
@@ -1454,6 +1558,12 @@ export default function NewApplicationPage() {
     onSuccess: (res) => {
       const result = res.data.data
       deleteDraftMeta(draftId) // completed application — no longer a draft
+      // The backend already invalidates its own cache on submit (WizardController.
+      // Submit → ICacheService.RemoveByPrefixAsync), but that doesn't touch this
+      // browser tab's React Query cache. Without this, the Applications list /
+      // Dashboard can keep showing pre-submission data for up to their staleTime
+      // (30s / 60s) if either query was already cached from earlier in the session.
+      qc.invalidateQueries({ queryKey: LOAN_KEYS.all })
       if (result) {
         setSubmissionResult({
           applicationId: result.loanId, eFinId: result.eFinId,
@@ -1491,7 +1601,6 @@ export default function NewApplicationPage() {
   }
 
   const handleBack = () => {
-    setStepErrors({})
     setStep(s => s - 1)
   }
 
@@ -1631,13 +1740,13 @@ export default function NewApplicationPage() {
           {step}. {STEP_LABELS[step - 1]}
         </h2>
 
-        {step === 1 && <Step1 data={data} onChange={update} errors={stepErrors} />}
-        {step === 2 && <Step2 data={data} onChange={update} errors={stepErrors} />}
-        {step === 3 && <Step3 data={data} onChange={update} errors={stepErrors} />}
-        {step === 4 && <Step4 data={data} onChange={update} errors={stepErrors} />}
-        {step === 5 && <Step5 data={data} onChange={update} errors={stepErrors} />}
-        {step === 6 && <Step6 data={data} onChange={update} errors={stepErrors} />}
-        {step === 7 && <Step7 data={data} onChange={update} errors={stepErrors} />}
+        {step === 1 && <Step1 data={data} onChange={update} errors={stepErrors} touch={touch} />}
+        {step === 2 && <Step2 data={data} onChange={update} errors={stepErrors} touch={touch} />}
+        {step === 3 && <Step3 data={data} onChange={update} errors={stepErrors} touch={touch} />}
+        {step === 4 && <Step4 data={data} onChange={update} errors={stepErrors} touch={touch} />}
+        {step === 5 && <Step5 data={data} onChange={update} errors={stepErrors} touch={touch} />}
+        {step === 6 && <Step6 data={data} onChange={update} errors={stepErrors} touch={touch} />}
+        {step === 7 && <Step7 data={data} onChange={update} errors={stepErrors} touch={touch} />}
         {step === 8 && <Step8 documents={documents} onDocumentChange={setDocument} errors={stepErrors} />}
         {step === 9 && <Step9 data={data} />}
       </div>
@@ -1661,7 +1770,7 @@ export default function NewApplicationPage() {
 
         <button
           onClick={handleNext}
-          disabled={submit.isPending || validateMutation.isPending || (step === TOTAL_STEPS && Object.keys(stepErrors).length > 0)}
+          disabled={submit.isPending || validateMutation.isPending || (step === TOTAL_STEPS && Object.keys(liveStepErrors).length > 0)}
           className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
         >
           {validateMutation.isPending
