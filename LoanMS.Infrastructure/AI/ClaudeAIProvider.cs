@@ -1,5 +1,6 @@
 using LoanMS.Application.AI;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using System.Net.Http;
 using System.Text;
