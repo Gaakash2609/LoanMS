@@ -198,9 +198,23 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         return apiReq('GET', '/loans/' + id).then(function(r){ return r && r.success ? r.data : null; });
       })).then(function(detailed) {
         var apiApps = detailed.filter(Boolean).map(_loanToApp);
-        if (typeof window.APPLICATIONS !== 'undefined') {
+        if (typeof window.APPLICATIONS !== 'undefined' && Array.isArray(window.APPLICATIONS)) {
+          // IMPORTANT: mutate the existing array in place rather than
+          // reassigning `window.APPLICATIONS = ...`. The dashboard's
+          // renderTable()/_applyRoleFilter() close over the original
+          // `APPLICATIONS` array binding (declared with `let` inside the
+          // app's IIFE) — it is the SAME array object as `window.APPLICATIONS`
+          // only because of a one-time `window.APPLICATIONS = APPLICATIONS`
+          // export at page init. Reassigning `window.APPLICATIONS` to a brand
+          // new array breaks that shared reference: the dashboard keeps
+          // rendering the old (stale/seed) array forever, while
+          // `window.APPLICATIONS` silently holds the fresh synced data. This
+          // caused the Applications list/Dashboard to appear empty (or stuck
+          // on stale demo data) even though the API sync itself succeeded.
           var demo = window.APPLICATIONS.filter(function(a){ return !String(a.id).startsWith('API'); });
-          window.APPLICATIONS = demo.concat(apiApps);
+          var merged = demo.concat(apiApps);
+          window.APPLICATIONS.length = 0;
+          Array.prototype.push.apply(window.APPLICATIONS, merged);
           _refreshUI();
         }
       });
@@ -733,7 +747,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
        logic in WizardController) become visible wherever the API scope
        (myOnly / role-based self-scoping, enforced server-side) allows it. */
   function _syncPayoutClaimsFromServer() {
-    if (typeof window.PAYOUT_CLAIMS === 'undefined' || !Array.isArray(window.PAYOUT_CLAIMS)) return;
+    if (typeof window.PAYOUT_CLAIMS === 'undefined' || !Array.isArray(window.PAYOUT_CLAIMS)) return Promise.resolve();
     return apiReq('GET', '/payout').then(function(res) {
       if (!res || !res.success || !Array.isArray(res.data)) return;
       res.data.forEach(function(c) {
