@@ -5006,6 +5006,7 @@
     }
 
     function renderPayoutMgmt() {
+      const _pmCanManage = canManagePayout();
       const allClaims = PAYOUT_CLAIMS;
       const now = new Date();
       const thisMonth = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
@@ -14795,6 +14796,16 @@ ${printContent}
         _expertExportApplyVisibility(_expertExportAllowed);
         return _expertExportAllowed;
       }
+      // Safety net: never call the protected endpoint without a real
+      // session token — avoids console-spamming 401s on the login screen
+      // or after logout, no matter which code path triggers this.
+      var hasSession = false;
+      try { hasSession = !!localStorage.getItem('loanms_token'); } catch(e) {}
+      if (!hasSession) {
+        _expertExportAllowed = false;
+        _expertExportApplyVisibility(false);
+        return false;
+      }
       try {
         // Use the shared apiReqRaw() from api-bridge.js — it attaches the
         // Bearer token and, on a 401 (expired access token), transparently
@@ -19672,6 +19683,7 @@ ${printContent}
     window.submitClaim = submitClaim;
     window.viewClaimDetail = viewClaimDetail;
     window.renderPayoutMgmt = renderPayoutMgmt;
+    window.PAYOUT_CLAIMS = PAYOUT_CLAIMS;
     window.onMgmtChkChange = onMgmtChkChange;
     window.toggleAllMgmtChk = toggleAllMgmtChk;
     window.bulkMgmtAction = bulkMgmtAction;
@@ -36441,16 +36453,29 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   function persistLoad() {
     var loaded = false;
 
-    // Applications
-    var savedApps = safeJSON(_lsGet(STORE_KEYS.apps), null);
+    // Applications — localStorage is an OFFLINE CACHE, not a live data
+    // source. Records already confirmed persisted to the database
+    // (_dbSynced / _apiId set by api-bridge.js after a successful backend
+    // save) are skipped here while the browser is online: _syncLoans()
+    // refetches those from the API and is the single source of truth, so a
+    // stale local snapshot can never shadow current server data on this or
+    // any other device/session. Records that are NOT yet confirmed synced
+    // (local drafts, pending backend submits) still restore normally —
+    // and always restore while genuinely offline — so no in-progress work
+    // is ever lost.
+    var savedApps  = safeJSON(_lsGet(STORE_KEYS.apps), null);
+    var _appsOffline = (typeof navigator !== 'undefined' && navigator.onLine === false);
     if (savedApps && Array.isArray(savedApps) && savedApps.length && window.APPLICATIONS) {
+      var _restorableApps = _appsOffline
+        ? savedApps
+        : savedApps.filter(function (a) { return !(a && (a._dbSynced || a._apiId)); });
       var seededIds = new Set(APPLICATIONS.map(function (a) { return a.id; }));
       // Add brand-new apps that don't exist in seed data
-      var newApps = savedApps.filter(function (a) { return !seededIds.has(a.id) && a.id; });
+      var newApps = _restorableApps.filter(function (a) { return !seededIds.has(a.id) && a.id; });
       if (newApps.length) { newApps.forEach(function (a) { if (a.id) APPLICATIONS.push(a); }); loaded = true; }
       // FIX: Also UPDATE existing seeded apps with persisted state (status, tracking, RM, etc.)
       // Without this, any changes to demo applications are lost on page refresh.
-      savedApps.forEach(function (saved) {
+      _restorableApps.forEach(function (saved) {
         if (!saved || !saved.id) return;
         var idx = APPLICATIONS.findIndex(function (a) { return a.id === saved.id; });
         if (idx >= 0) {
@@ -37875,9 +37900,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
   /* ──────────────────────────────────────────────────────────────────
      PERIODIC BADGE REFRESH (every 60 s)
+     Gated on an actual logged-in session (real JWT present) — otherwise
+     this fired forever on the login screen / after logout, spamming
+     protected endpoints like /api/expertexport/access with 401s.
+     NOTE: this is the ONLY periodic-refresh interval — a duplicate copy
+     of this same block used to also live in efin-improvements.js, which
+     doubled the polling frequency. Do not re-add it there.
   ─────────────────────────────────────────────────────────────────── */
 
   setInterval(function () {
+    var hasSession = false;
+    try { hasSession = !!localStorage.getItem('loanms_token'); } catch(e) {}
+    if (!hasSession) return;
     _refreshTaskNavBadge();
     if (typeof updateDashboardStats === 'function') updateDashboardStats();
   }, 60000);

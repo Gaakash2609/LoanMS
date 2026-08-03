@@ -4,8 +4,8 @@ services:
   # ── LoanMS API ───────────────────────────────────────────────────────────────
   loanms:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
     container_name: loanms_app
     ports:
       - "7070:8080"

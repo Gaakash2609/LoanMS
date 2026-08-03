@@ -24,20 +24,23 @@ public class CustomerService : ICustomerService
 
     public async Task<ApiResponseDto<PagedResultDto<CustomerDto>>> GetAllAsync(int page, int pageSize, string? search)
     {
-        // Short-lived cache (30s) for customer list — search queries not cached
-        if (string.IsNullOrEmpty(search))
-        {
-            var cacheKey = $"customers:list:{page}:{pageSize}";
-            var cached   = await _cache.GetAsync<PagedResultDto<CustomerDto>>(cacheKey);
-            if (cached != null) return ApiResponseDto<PagedResultDto<CustomerDto>>.Ok(cached);
-
-            var result = await _uow.Customers.GetPagedAsync(page, pageSize, search);
-            await _cache.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
-            return ApiResponseDto<PagedResultDto<CustomerDto>>.Ok(result);
-        }
-
-        var searchResult = await _uow.Customers.GetPagedAsync(page, pageSize, search);
-        return ApiResponseDto<PagedResultDto<CustomerDto>>.Ok(searchResult);
+        // Same fix as LoanService.GetAllAsync/GetDashboardStatsAsync (Phase 1/3):
+        // this used to cache the no-search page for 30s under a
+        // "customers:list:{page}:{pageSize}" key and rely on
+        // ICacheService.RemoveByPrefixAsync("customers:list:") on Create to
+        // invalidate it. RemoveByPrefixAsync is a no-op on the Redis-backed
+        // DistributedCacheService (see CacheService.cs), and even with the
+        // correctly-implemented MemoryCacheService fallback, ECS runs multiple
+        // Fargate task replicas each with their own independent IMemoryCache —
+        // invalidating on the replica that handled Device A's create does
+        // nothing for the replica that serves Device B's customer-list
+        // request. That let a newly created (or updated — Update never
+        // invalidated this cache at all) customer stay invisible/stale on
+        // other devices/replicas for up to 30s, exactly like the loan-list
+        // bug this mirrors. Reading straight through removes the staleness
+        // window entirely.
+        var result = await _uow.Customers.GetPagedAsync(page, pageSize, search);
+        return ApiResponseDto<PagedResultDto<CustomerDto>>.Ok(result);
     }
 
     public async Task<ApiResponseDto<CustomerDto>> CreateAsync(CreateCustomerRequestDto request)
@@ -71,8 +74,8 @@ public class CustomerService : ICustomerService
         };
 
         await _uow.Customers.AddAsync(customer);
-        await _cache.RemoveByPrefixAsync("customers:list:");
         await _uow.SaveChangesAsync();
+        // No list cache to invalidate — GetAllAsync reads straight through now.
         return ApiResponseDto<CustomerDto>.Ok(MapToDto(customer), "Customer created.");
     }
 

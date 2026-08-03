@@ -190,14 +190,14 @@ aws logs put-retention-policy --log-group-name /ecs/loanms-prod \
 
 ## Step 5 — Update ecs-task-def.json with your account ID
 
-In `ecs-task-def.json` (already in repo root), replace all `ACCOUNT_ID` with your real AWS account ID:
+In `deploy/aws/ecs-task-def.json`, replace all `ACCOUNT_ID` with your real AWS account ID:
 
 ```bash
 # Find your account ID
 aws sts get-caller-identity --query Account --output text
 
 # Replace in the file
-sed -i '' 's/ACCOUNT_ID/YOUR_ACCOUNT_ID/g' ecs-task-def.json
+sed -i '' 's/ACCOUNT_ID/YOUR_ACCOUNT_ID/g' deploy/aws/ecs-task-def.json
 ```
 
 ---
@@ -235,7 +235,7 @@ aws ecs create-cluster --cluster-name loanms-prod \
 
 ```bash
 aws ecs register-task-definition \
-  --cli-input-json file://ecs-task-def.json \
+  --cli-input-json file://deploy/aws/ecs-task-def.json \
   --region ap-south-1
 ```
 

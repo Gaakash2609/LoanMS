@@ -148,27 +148,53 @@ public class LoanServiceTests
             new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Submitted, Comment = "Submitting" }, 1, "Admin");
 
         result.Success.Should().BeTrue();
-        // Verify cache invalidation was called
-        _cacheMock.Verify(c => c.RemoveByPrefixAsync("dashboard:"), Times.Once);
+        // Phase 3 — status changes no longer touch the cache at all (there's no
+        // "dashboard:" or "loans:list:" cache left to invalidate); the repository
+        // save is what makes the change visible on the next read.
+        _cacheMock.Verify(c => c.RemoveByPrefixAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
-    public async Task DashboardStats_CacheMiss_FetchesAndCaches()
+    public async Task GetDashboardStatsAsync_AlwaysReadsThroughToRepository_NeverCaches()
     {
+        // Phase 3 — regression test for the cross-device/cross-replica staleness
+        // bug: dashboard totals must always come straight from the database, not
+        // from a cache that RemoveByPrefixAsync can silently fail to invalidate
+        // (no-op on the Redis-backed implementation; per-replica-only on ECS with
+        // multiple Fargate tasks under the in-memory fallback). Calling this twice
+        // must hit the repository twice — a cache hit on the second call would be
+        // exactly the bug this guards against.
         var stats = new DashboardStatsDto();
         _uowMock.Setup(u => u.Loans).Returns(_loanRepoMock.Object);
         _loanRepoMock.Setup(r => r.GetDashboardStatsAsync(It.IsAny<int?>(), It.IsAny<string?>()))
                      .ReturnsAsync(stats);
 
         var svc = CreateService();
-        var result = await svc.GetDashboardStatsAsync(1, "Admin");
+        var result1 = await svc.GetDashboardStatsAsync(1, "Admin");
+        var result2 = await svc.GetDashboardStatsAsync(1, "Admin");
 
-        result.Success.Should().BeTrue();
-        // Verify cache was populated after miss
-        _cacheMock.Verify(c => c.SetAsync(
-            It.Is<string>(k => k.StartsWith("dashboard:")),
-            It.IsAny<DashboardStatsDto>(),
-            It.Is<TimeSpan?>(t => t == TimeSpan.FromSeconds(60))), Times.Once);
+        result1.Success.Should().BeTrue();
+        result2.Success.Should().BeTrue();
+        _loanRepoMock.Verify(r => r.GetDashboardStatsAsync(1, "Admin"), Times.Exactly(2));
+        _cacheMock.Verify(c => c.GetAsync<DashboardStatsDto>(It.IsAny<string>()), Times.Never);
+        _cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<DashboardStatsDto>(), It.IsAny<TimeSpan?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetAllAsync_NeverTouchesCache()
+    {
+        // Phase 1/3 regression guard — the original bug this whole fix chain is
+        // about. The Application List must never be served from cache.
+        var filter = new LoanFilterDto();
+        _uowMock.Setup(u => u.Loans).Returns(_loanRepoMock.Object);
+        _loanRepoMock.Setup(r => r.GetPagedAsync(filter, It.IsAny<int>(), It.IsAny<string>()))
+                     .ReturnsAsync(new PagedResultDto<LoanListDto>());
+
+        var svc = CreateService();
+        await svc.GetAllAsync(filter, 1, "Admin");
+
+        _cacheMock.Verify(c => c.GetAsync<PagedResultDto<LoanListDto>>(It.IsAny<string>()), Times.Never);
+        _cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<PagedResultDto<LoanListDto>>(), It.IsAny<TimeSpan?>()), Times.Never);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

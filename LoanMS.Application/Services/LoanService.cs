@@ -38,24 +38,18 @@ public class LoanService : ILoanService
 
     public async Task<ApiResponseDto<PagedResultDto<LoanListDto>>> GetAllAsync(LoanFilterDto filter, int currentUserId, string currentUserRole)
     {
-        // Cache simple unfiltered page requests (30s TTL)
-        // Complex filters (search, date range) bypass cache for accuracy
-        var hasComplexFilter = !string.IsNullOrEmpty(filter.Search)
-            || filter.FromDate.HasValue || filter.ToDate.HasValue;
-
-        if (!hasComplexFilter)
-        {
-            var cacheKey = $"loans:list:{filter.Status}:{filter.LoanType}:{filter.Page}:{filter.PageSize}:{currentUserId}:{currentUserRole}";
-            var cached   = await _cache.GetAsync<PagedResultDto<LoanListDto>>(cacheKey);
-            if (cached != null) return ApiResponseDto<PagedResultDto<LoanListDto>>.Ok(cached);
-
-            var result = await _uow.Loans.GetPagedAsync(filter, currentUserId, currentUserRole);
-            await _cache.SetAsync(cacheKey, result, TimeSpan.FromSeconds(30));
-            return ApiResponseDto<PagedResultDto<LoanListDto>>.Ok(result);
-        }
-
-        var searchResult = await _uow.Loans.GetPagedAsync(filter, currentUserId, currentUserRole);
-        return ApiResponseDto<PagedResultDto<LoanListDto>>.Ok(searchResult);
+        // Phase 1 fix: the Application List must always reflect the current
+        // database state, so this always reads straight through to
+        // GetPagedAsync — no response cache in front of it. (The previous
+        // per-user/role cache key relied on ICacheService.RemoveByPrefixAsync
+        // for invalidation, which is a no-op on the Redis-backed
+        // DistributedCacheService, so newly created/updated loans could stay
+        // hidden from the list for up to the old 30s TTL.)
+        // Role-based visibility (ApplyVisibilityScope) is applied inside
+        // GetPagedAsync exactly as before — this change only removes caching,
+        // not authorization.
+        var result = await _uow.Loans.GetPagedAsync(filter, currentUserId, currentUserRole);
+        return ApiResponseDto<PagedResultDto<LoanListDto>>.Ok(result);
     }
 
     public async Task<ApiResponseDto<LoanDto>> CreateAsync(CreateLoanRequestDto request, int createdByUserId)
@@ -100,6 +94,9 @@ public class LoanService : ILoanService
         });
 
         await _uow.SaveChangesAsync();
+        // Phase 3 — no cache invalidation needed here: GetAllAsync and
+        // GetDashboardStatsAsync both read straight through to the database
+        // now (no "loans:list:" or "dashboard:" cache exists to invalidate).
 
         var created = await _uow.Loans.GetWithDetailsAsync(loan.Id);
         return ApiResponseDto<LoanDto>.Ok(MapToDto(created!, "Admin"), "Loan created successfully.");
@@ -132,6 +129,7 @@ public class LoanService : ILoanService
 
         await _uow.Loans.UpdateAsync(loan);
         await _uow.SaveChangesAsync();
+        // No list cache to invalidate — see CreateAsync comment above.
 
         var updated = await _uow.Loans.GetWithDetailsAsync(id);
         return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), "Loan updated.");
@@ -186,7 +184,7 @@ public class LoanService : ILoanService
         });
 
         await _uow.SaveChangesAsync();
-        await _cache.RemoveByPrefixAsync("dashboard:"); // Invalidate dashboard cache
+        // No list/dashboard cache to invalidate — see CreateAsync comment above.
 
         var updated = await _uow.Loans.GetWithDetailsAsync(id);
         return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), $"Loan status updated to {request.NewStatus}.");
@@ -209,17 +207,28 @@ public class LoanService : ILoanService
 
         await _uow.Loans.DeleteAsync(id);
         await _uow.SaveChangesAsync();
+        // No list cache to invalidate — see CreateAsync comment above.
+
         return ApiResponseDto<bool>.Ok(true, "Loan deleted.");
     }
 
     public async Task<ApiResponseDto<DashboardStatsDto>> GetDashboardStatsAsync(int userId, string role)
     {
-        var cacheKey = $"dashboard:{userId}:{role}";
-        var cached = await _cache.GetAsync<DashboardStatsDto>(cacheKey);
-        if (cached != null) return ApiResponseDto<DashboardStatsDto>.Ok(cached);
-
+        // Phase 3 — same fix as GetAllAsync (Phase 1): dashboard totals must
+        // always reflect the current database state, so this reads straight
+        // through to the repository, no cache in front of it.
+        //
+        // The previous per-user/role cache here relied on
+        // ICacheService.RemoveByPrefixAsync("dashboard:") for invalidation on
+        // every create/update/status-change/delete. That is a no-op on the
+        // Redis-backed DistributedCacheService (see CacheService.cs), and even
+        // with the correctly-implemented MemoryCacheService fallback, ECS runs
+        // multiple Fargate task replicas each with their own independent
+        // IMemoryCache — invalidating on the replica that handled Device A's
+        // create does nothing for the replica that serves Device B's dashboard
+        // request. Either way, totals could lag up to the old 60s TTL across
+        // devices/replicas, exactly like the list bug this mirrors.
         var stats = await _uow.Loans.GetDashboardStatsAsync(userId, role);
-        await _cache.SetAsync(cacheKey, stats, TimeSpan.FromSeconds(60));
         return ApiResponseDto<DashboardStatsDto>.Ok(stats);
     }
 

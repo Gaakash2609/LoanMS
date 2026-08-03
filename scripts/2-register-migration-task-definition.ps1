@@ -8,7 +8,7 @@ $Region = "ap-south-1"
 Write-Host "== 6. Register migration task definition ==" -ForegroundColor Cyan
 $registerArgs = @(
     "ecs", "register-task-definition",
-    "--cli-input-json", "file://ecs-task-def-migration.json",
+    "--cli-input-json", "file://deploy/aws/ecs-task-def-migration.json",
     "--region", $Region
 )
 aws @registerArgs

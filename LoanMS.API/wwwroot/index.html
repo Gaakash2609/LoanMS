@@ -235,10 +235,18 @@
 
         <!-- Logo -->
         <div class="lp-logo-wrap" id="login-logo-display">
-          <!-- Wide logo (uploaded via Settings or default Mudrahub logo) -->
-          <img id="login-logo-img" src="Mudrahub-logo.jpg" alt="Mudrahub"
-            style="display:block;max-width:100%;max-height:68px;width:auto;height:auto;object-fit:contain;">
-          <span id="login-logo-letter" style="display:none;font-size:40px;font-weight:900;color:var(--accent);font-family:var(--font-head)">E</span>
+          <!-- Wide logo (uploaded via Settings). No default logo file ships
+               in this build, so there is intentionally no src here — an
+               empty/placeholder src would still trigger a network request
+               and a console 404 even with onerror handling. Default state
+               is the letter avatar below; applyLogoToLogin() (efin-app.js)
+               sets img.src and reveals it only once a real logo (server or
+               localStorage-cached) is found on load, or after an upload
+               via Settings → Branding. -->
+          <img id="login-logo-img" alt="Mudrahub"
+            onerror="this.onerror=null;this.style.display='none';var l=document.getElementById('login-logo-letter');if(l)l.style.display='block';"
+            style="display:none;max-width:100%;max-height:68px;width:auto;height:auto;object-fit:contain;">
+          <span id="login-logo-letter" style="display:block;font-size:40px;font-weight:900;color:var(--accent);font-family:var(--font-head)">M</span>
         </div>
 
 
@@ -9379,11 +9387,11 @@ Please log in and change your password immediately.
   <!-- credential-seed.js: must run before efin-app.js -->
   <script src="/js/credential-seed.js"></script>
   <script src="/js/login-helpers.js"></script>
-  <script src="/js/efin-app.js?v=58"></script>
+  <script src="/js/efin-app.js?v=59"></script>
   <script src="/js/kyc.js?v=43"></script>
   <script src="/js/tasks.js"></script>
   <script src="/js/user-profile.js"></script>
-  <script src="/js/efin-improvements.js"></script>
+  <script src="/js/efin-improvements.js?v=2"></script>
   <script src="/js/incred-rm.js"></script>
   <script src="/js/product-offer-matrix.js"></script>
   <script src="/js/rejection-reasons.js"></script>
@@ -9395,7 +9403,7 @@ Please log in and change your password immediately.
   <script src="/js/cibil-view.js?v=8"></script>
   <script src="/js/ai-agent.js"></script>
   <script src="/js/lender-email-workflow.js"></script>
-  <script src="/js/api-bridge.js?v=2"></script>
+  <script src="/js/api-bridge.js?v=3"></script>
 
   <!-- ══ Login page function safety wrapper ══
        Moved to /js/login-helpers.js (must load after boot.js) -->

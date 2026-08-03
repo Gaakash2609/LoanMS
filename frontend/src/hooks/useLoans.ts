@@ -11,9 +11,13 @@ export const LOAN_KEYS = {
 
 export function useLoans(filter: LoanFilter) {
   return useQuery({
-    queryKey:  LOAN_KEYS.list(filter),
-    queryFn:   () => loansApi.getAll(filter).then((r) => r.data.data),
-    staleTime: 30_000,
+    queryKey:        LOAN_KEYS.list(filter),
+    queryFn:         () => loansApi.getAll(filter).then((r) => r.data.data),
+    // Application List must always reflect the current database state —
+    // never serve a cached snapshot, whether from an earlier visit or from
+    // right before a new application was created.
+    staleTime:       0,
+    refetchOnMount:  'always',
   })
 }
 

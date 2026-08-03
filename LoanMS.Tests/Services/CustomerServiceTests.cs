@@ -103,6 +103,31 @@ public class CustomerServiceTests
     }
 
     [Fact]
+    public async Task GetAllAsync_AlwaysReadsThroughToRepository_NeverCaches()
+    {
+        // Regression test for the same cross-device/cross-replica staleness bug
+        // fixed in LoanService.GetAllAsync: the customer list must always come
+        // straight from the database, not from a cache that RemoveByPrefixAsync
+        // can silently fail to invalidate (no-op on the Redis-backed
+        // DistributedCacheService; per-replica-only under the in-memory
+        // fallback on ECS with multiple Fargate tasks). Calling this twice must
+        // hit the repository twice — a cache hit on the second call, or any
+        // call reaching into ICacheService at all, is exactly the bug this
+        // guards against.
+        var page = new PagedResultDto<CustomerDto> { Items = new List<CustomerDto>(), TotalCount = 0, Page = 1, PageSize = 20 };
+        _repoMock.Setup(r => r.GetPagedAsync(1, 20, null)).ReturnsAsync(page);
+
+        var svc = CreateService();
+        await svc.GetAllAsync(1, 20, null);
+        await svc.GetAllAsync(1, 20, null);
+
+        _repoMock.Verify(r => r.GetPagedAsync(1, 20, null), Times.Exactly(2));
+        _cacheMock.Verify(c => c.GetAsync<PagedResultDto<CustomerDto>>(It.IsAny<string>()), Times.Never);
+        _cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<PagedResultDto<CustomerDto>>(), It.IsAny<TimeSpan?>()), Times.Never);
+        _cacheMock.Verify(c => c.RemoveByPrefixAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
     public async Task DeleteAsync_WithActiveLoans_ReturnsFail()
     {
         var customer = new Customer { Id = 1, FullName = "Test", Email = "t@t.com", Phone = "9999999999" };

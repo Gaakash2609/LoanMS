@@ -33,6 +33,16 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     }
   }
 
+  // Backfill loanms_token from the real auth state (efin_auth) on every load.
+  // Covers sessions that were created before loanms_token syncing existed,
+  // and guards against the two keys ever silently drifting apart again.
+  (function _syncLegacyTokenKey() {
+    try {
+      var at = _getAuthState().accessToken;
+      if (at && _lsGet('loanms_token') !== at) _lsSet('loanms_token', at);
+    } catch (e) {}
+  })();
+
   function _token()   { return _getAuthState().accessToken; }
   function _refresh() { return _getAuthState().refreshToken; }
   // Also removes efin_session (the display-only cache read by boot.js/efin-app.js
@@ -47,6 +57,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   function _clearAuth() {
     _lsRemove(LS_AUTH);
     _lsRemove(LS_SESSION);
+    _lsRemove('loanms_token');
   }
 
   /* ── Core API request with auto token refresh ──
@@ -93,6 +104,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           zustandardAuthState.state.accessToken = d2.data.accessToken;
           zustandardAuthState.state.refreshToken = d2.data.refreshToken;
           _lsSet(LS_AUTH, JSON.stringify(zustandardAuthState));
+          // Same loanms_token sync as doLogin — keep it current across refreshes.
+          _lsSet('loanms_token', d2.data.accessToken);
           return d2.data.accessToken;
         }
         _clearAuth();
@@ -192,15 +205,31 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       if (!res || !res.success) return;
       var list = (res.data && res.data.items) ? res.data.items : [];
       if (!list.length) return;
-      // For bulk, we already have list items — fetch full details only for recent 50
-      var recentIds = list.slice(0, 50).map(function(l){ return l.id; });
+      // For bulk, we already have list items — fetch full details for everything
+      // the server returned (GetBulk already caps the payload size server-side
+      // per role), so no loan silently drops out of the synced view.
+      var recentIds = list.map(function(l){ return l.id; });
       return Promise.all(recentIds.map(function(id){
         return apiReq('GET', '/loans/' + id).then(function(r){ return r && r.success ? r.data : null; });
       })).then(function(detailed) {
         var apiApps = detailed.filter(Boolean).map(_loanToApp);
-        if (typeof window.APPLICATIONS !== 'undefined') {
-          var demo = window.APPLICATIONS.filter(function(a){ return !String(a.id).startsWith('API'); });
-          window.APPLICATIONS = demo.concat(apiApps);
+        // IMPORTANT: mutate window.APPLICATIONS IN PLACE (splice/push) — do
+        // NOT reassign it (`window.APPLICATIONS = ...`). efin-app.js's
+        // renderTable()/_applyRoleFilter() read the closure-scoped
+        // `APPLICATIONS` variable, which was only ever pointed at this same
+        // array object once (`window.APPLICATIONS = APPLICATIONS`). Handing
+        // window.APPLICATIONS a brand-new array here would silently detach
+        // it from that closure variable — the API-synced applications would
+        // still exist on `window.APPLICATIONS` but never appear in the UI,
+        // on this device or any other. Same class of bug as the
+        // _pmCanManage payout fix: data present, but not reaching the
+        // scope that actually renders it.
+        if (typeof window.APPLICATIONS !== 'undefined' && Array.isArray(window.APPLICATIONS)) {
+          var arr = window.APPLICATIONS;
+          for (var i = arr.length - 1; i >= 0; i--) {
+            if (String(arr[i].id).startsWith('API')) arr.splice(i, 1);
+          }
+          apiApps.forEach(function(a){ arr.push(a); });
           _refreshUI();
         }
       });
@@ -732,15 +761,26 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
        alongside the current user's own claim — see Phase 3 multi-claimant
        logic in WizardController) become visible wherever the API scope
        (myOnly / role-based self-scoping, enforced server-side) allows it. */
+  // Local (efin UI) status strings ↔ backend PayoutClaim.Status enum values.
+  // Local code (PM_STATUS_META, filters, badges) uses lowercase-underscore
+  // keys ('pending','approved','paid','rejected','on_hold'); the backend
+  // uses ('Pending','Verified','Paid','Rejected','OnHold'). A plain
+  // .toLowerCase() turns 'OnHold' into 'onhold', which none of the local
+  // UI code recognizes — centralized here so pull-sync and push-sync agree.
+  var _PM_STATUS_API_TO_LOCAL = { Pending:'pending', Verified:'approved', Paid:'paid', Rejected:'rejected', OnHold:'on_hold' };
+  var _PM_STATUS_LOCAL_TO_API = { pending:'Pending', approved:'Verified', paid:'Paid', rejected:'Rejected', on_hold:'OnHold' };
+  function _pmStatusToLocal(s) { return _PM_STATUS_API_TO_LOCAL[s] || String(s || 'pending').toLowerCase(); }
+  function _pmStatusToApi(s)   { return _PM_STATUS_LOCAL_TO_API[s] || 'Pending'; }
+
   function _syncPayoutClaimsFromServer() {
-    if (typeof window.PAYOUT_CLAIMS === 'undefined' || !Array.isArray(window.PAYOUT_CLAIMS)) return;
+    if (typeof window.PAYOUT_CLAIMS === 'undefined' || !Array.isArray(window.PAYOUT_CLAIMS)) return Promise.resolve();
     return apiReq('GET', '/payout').then(function(res) {
       if (!res || !res.success || !Array.isArray(res.data)) return;
       res.data.forEach(function(c) {
         var existing = PAYOUT_CLAIMS.find(function(p) { return p._apiId === c.id; });
         if (existing) {
           // Server is authoritative for status/amount/month once a claim is synced.
-          existing.status       = (c.status || existing.status || 'Pending').toLowerCase();
+          existing.status       = c.status ? _pmStatusToLocal(c.status) : (existing.status || 'pending');
           existing.claimAmount  = typeof c.claimAmount === 'number' ? c.claimAmount : existing.claimAmount;
           existing.payoutAmount = typeof c.claimAmount === 'number' ? c.claimAmount : existing.payoutAmount;
           existing.claimMonth   = c.month || existing.claimMonth;
@@ -761,7 +801,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           claimAmount: c.claimAmount || 0,
           payoutAmount: c.claimAmount || 0,
           userType: (c.claimType || '').toLowerCase(),
-          status: (c.status || 'pending').toLowerCase(),
+          status: _pmStatusToLocal(c.status),
           vendorRemark: c.notes || '',
           createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : '',
           isAuto: true,
@@ -837,6 +877,61 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       window[fnName] = function() {
         var result = _orig.apply(this, arguments);
         setTimeout(_syncOwnPayoutClaims, 400);
+        return result;
+      };
+    });
+  }
+
+  /* Push Management status changes (approve/reject/mark-paid/hold) to the
+     server via the existing PayoutController.UpdateStatus endpoint.
+     Previously quickMgmtAction/saveClaimStatus/bulkMgmtAction only mutated
+     PAYOUT_CLAIMS in memory + localStorage, so a decision made by Accounts/
+     Admin on one device was invisible on any other device/session — the
+     next _syncPayoutClaimsFromServer() pull would just overwrite it back
+     with the server's still-Pending copy. Snapshot-and-diff (rather than
+     reading each function's own claimId argument/closure var) so the same
+     wrapper works for all three call shapes unchanged. Same optimistic-
+     with-rollback pattern as _patchTicketStatusActions. Claims with no
+     _apiId (not yet synced — e.g. local-only demo loan) are left as-is,
+     same scope rule as _syncOwnPayoutClaims above. */
+  function _patchPayoutClaimStatusActions() {
+    if (window._bridgePayoutStatusPatched) return;
+    window._bridgePayoutStatusPatched = true;
+
+    function pushStatus(claim, prevStatus) {
+      if (!claim || !claim._apiId || claim.status === prevStatus) return;
+      apiReq('PATCH', '/payout/' + claim._apiId + '/status', { status: _pmStatusToApi(claim.status) })
+        .then(function(res) {
+          if (!res || !res.success) {
+            claim.status = prevStatus; // revert the optimistic local change
+            if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
+            if (typeof window.renderPayoutMgmt === 'function') { try { window.renderPayoutMgmt(); } catch(e){} }
+            if (typeof window.renderPayoutPage === 'function') { try { window.renderPayoutPage(); } catch(e){} }
+            var msg = (res && (res.message || (res.errors && res.errors[0]))) || 'Could not update claim on the server — reverted.';
+            if (typeof window.showToast === 'function') window.showToast(msg, 'error');
+          } else if (typeof window.showToast === 'function') {
+            window.showToast('Saved to database ✓', 'success');
+          }
+        })
+        .catch(function() {
+          claim.status = prevStatus;
+          if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
+          if (typeof window.renderPayoutMgmt === 'function') { try { window.renderPayoutMgmt(); } catch(e){} }
+          if (typeof window.showToast === 'function') window.showToast('Network error — claim status reverted.', 'error');
+        });
+    }
+
+    ['quickMgmtAction', 'saveClaimStatus', 'bulkMgmtAction'].forEach(function(fnName) {
+      var _orig = window[fnName];
+      if (typeof _orig !== 'function') return;
+      window[fnName] = function() {
+        var list = window.PAYOUT_CLAIMS || [];
+        var before = list.map(function(c) { return { id: c.id, status: c.status }; });
+        var result = _orig.apply(this, arguments);
+        before.forEach(function(b) {
+          var c = list.find(function(x) { return x.id === b.id; });
+          if (c && c.status !== b.status) pushStatus(c, b.status);
+        });
         return result;
       };
     });
@@ -1240,6 +1335,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           version: 0
         };
         _lsSet(LS_AUTH, JSON.stringify(zustandardAuthState));
+        // Keep the legacy loanms_token key in sync with the real access
+        // token. efin_auth (above) is the actual source of truth, but many
+        // parts of the app (Settings pages, Expert Export access-check,
+        // session-restore gates) read loanms_token specifically — without
+        // this, that token key stayed empty forever after a real login,
+        // silently 401'ing all of those features even for a logged-in user.
+        _lsSet('loanms_token', data.data.accessToken);
         var u = data.data.user;
         var efinRole = ROLE_MAP[u.role] || 'sales_executive';
         var userEmail = u.email.toLowerCase();
@@ -1309,6 +1411,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       _patchDsaSave();
       _patchPartnerSave();
       _patchPayoutClaimCreate();
+      _patchPayoutClaimStatusActions();
       _patchReports();
       _patchChangePassword();
       _patchWizardSubmit();
@@ -1508,7 +1611,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         _setWizardSyncState(app, 'synced');
         _wizardToast('Application ' + r.data.loanNumber + ' saved to database ✓', 'success');
         if (typeof window.persistSave === 'function') window.persistSave();
-        setTimeout(_syncLoans, 1000);
+        _syncLoans();
         return;
       }
 
@@ -1523,7 +1626,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           _setWizardSyncState(app, 'synced');
           _wizardToast('Application already saved to database ✓', 'success');
           if (typeof window.persistSave === 'function') window.persistSave();
-          setTimeout(_syncLoans, 1000);
+          _syncLoans();
           return;
         }
         // Real validation/business failure — retrying identical data

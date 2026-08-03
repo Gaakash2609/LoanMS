@@ -7,7 +7,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 
 interface Props {
   loanId?: number   // undefined or 0 = no loan context, show placeholder
-  currentStage?: string  // eslint-disable-line @typescript-eslint/no-unused-vars
+  currentStage?: string
 }
 
 export default function AIInsightPanel({ loanId }: Props) {

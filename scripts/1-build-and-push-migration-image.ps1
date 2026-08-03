@@ -1,7 +1,7 @@
 # -- PREPARATION ONLY -- does NOT touch the staging database --
 # Builds and pushes the migration runner image to its own ECR repository.
-# Run this from the repository root (same folder as Dockerfile.migration and
-# migration-bundle/efbundle).
+# Run this from the repository root (Dockerfile.migration now lives in
+# deploy/docker/; migration-bundle/efbundle stays at the repo root).
 
 $ErrorActionPreference = "Stop"
 
@@ -76,7 +76,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "== 3. Build migration image ==" -ForegroundColor Cyan
-Invoke-Checked -Command { docker build -f Dockerfile.migration -t $ImageUriLocal . } `
+Invoke-Checked -Command { docker build -f deploy/docker/Dockerfile.migration -t $ImageUriLocal . } `
     -FailureMessage "Docker build failed for '$ImageUriLocal'."
 
 Write-Host "== 4. Tag image for ECR ==" -ForegroundColor Cyan

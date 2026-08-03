@@ -1524,13 +1524,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   window._efinEditSnapshot = {};
 
   /* ──────────────────────────────────────────────────────────────────
-     PERIODIC BADGE REFRESH (every 60 s)
+     PERIODIC BADGE REFRESH — REMOVED (duplicate).
+     This was a copy-pasted duplicate of the same setInterval already
+     defined in efin-app.js, which caused updateDashboardStats() (and
+     therefore expertExportCheckAccess() → GET /api/expertexport/access)
+     to fire twice as often as intended, including while logged out.
+     The single, session-gated interval now lives only in efin-app.js.
   ─────────────────────────────────────────────────────────────────── */
-
-  setInterval(function () {
-    _refreshTaskNavBadge();
-    if (typeof updateDashboardStats === 'function') updateDashboardStats();
-  }, 60000);
 
 
   /* ══════════════════════════════════════════════════════════════════
