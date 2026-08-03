@@ -275,6 +275,13 @@ try
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddJwtBearer(options =>
         {
+            // Without this, the handler silently renames well-known short claim
+            // names (e.g. "role" -> ClaimTypes.Role) via its default inbound
+            // claim map, so BaseController's `User.FindFirst("role")` never
+            // finds anything and CurrentUserRole comes back empty for every
+            // request — which made every loan list/dashboard query fall into
+            // the "unrecognized role" branch and return zero rows for everyone.
+            options.MapInboundClaims = false;
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer           = true,

@@ -3,7 +3,7 @@ using LoanMS.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace LoanMS.API.Controllers;
 
@@ -20,7 +20,7 @@ public abstract class BaseController : ControllerBase
         User.FindFirst("role")?.Value ?? string.Empty;
 
     protected string CurrentUserEmail =>
-        User.FindFirst(ClaimTypes.Email)?.Value ?? string.Empty;
+        User.FindFirst(JwtRegisteredClaimNames.Email)?.Value ?? string.Empty;
 
     protected IActionResult ApiResult<T>(ApiResponseDto<T> response)
     {
