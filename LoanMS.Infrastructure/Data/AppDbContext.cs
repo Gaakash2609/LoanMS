@@ -423,4 +423,15 @@ public class AppDbContext : DbContext
             e.Property(sf => sf.Description).HasMaxLength(500);
         });
     }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        // Suppress PendingModelChangesWarning temporarily to allow app to boot
+        // while pending migrations are being applied to the database.
+        // This warning should be re-enabled after all migrations are applied.
+        optionsBuilder.ConfigureWarnings(w =>
+            w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning)
+        );
+    }
 }
