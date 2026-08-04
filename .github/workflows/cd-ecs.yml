@@ -19,7 +19,7 @@ env:
   ECS_CLUSTER:       ${{ vars.ECS_CLUSTER }}
   ECS_SERVICE:       ${{ vars.ECS_SERVICE }}
   CONTAINER_NAME:    loanms-api
-  TASK_DEF_FILE:     ecs-task-def.json
+  TASK_DEF_FILE:     deploy/aws/ecs-task-def.json
 
 jobs:
   deploy:
