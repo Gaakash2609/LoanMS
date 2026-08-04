@@ -94,6 +94,26 @@ try
 
     // ── Database — SQLite (dev) or PostgreSQL (production) ───────────────────
     var dbProvider = (builder.Configuration["Database:Provider"] ?? "sqlite").ToLower();
+
+    // Fail fast instead of silently falling back to a per-container SQLite
+    // file. A missing/misspelled "Database:Provider" env var on any one
+    // instance/replica (e.g. an incomplete ECS task definition) would make
+    // that instance quietly use its own local, empty SQLite database instead
+    // of the shared PostgreSQL/RDS instance — writes made through that
+    // instance would then be invisible everywhere else, with no error shown
+    // anywhere (both would return 200 success). In Production this is always
+    // a misconfiguration, never an intended fallback, so refuse to start
+    // instead of serving traffic against the wrong database.
+    if (builder.Environment.IsProduction() && dbProvider is not ("postgresql" or "postgres"))
+    {
+        throw new InvalidOperationException(
+            "Database:Provider is not set to 'PostgreSQL' in a Production environment " +
+            "(current value: '" + (builder.Configuration["Database:Provider"] ?? "<missing>") + "'). " +
+            "Refusing to start with a local SQLite fallback, which would silently diverge from " +
+            "the shared database on other replicas. Set the Database__Provider environment " +
+            "variable to 'PostgreSQL' in the ECS task definition.");
+    }
+
     builder.Services.AddDbContext<AppDbContext>(options =>
     {
         if (dbProvider is "postgresql" or "postgres")
