@@ -3770,7 +3770,7 @@
           <div style="font-family:var(--font-head);font-size:24px;font-weight:800;margin-bottom:4px">Banks & NBFCs</div>
           <div style="font-size:13px;color:var(--text3)">Manage lending partners</div>
         </div>
-        <button class="btn btn-primary" id="add-bank-btn" onclick="openModal('modal-add-bank')">＋ Add Bank</button>
+        <button class="btn btn-primary" id="add-bank-btn" onclick="openAddBankModal()">＋ Add Bank</button>
       </div>
       <div class="card">
         <div class="table-wrap">
@@ -6013,7 +6013,7 @@
     <div class="modal">
       <div class="modal-head">
         <div class="modal-title">Add New Bank / NBFC</div><button class="modal-close"
-          onclick="closeModal('modal-add-bank')">✕</button>
+          onclick="closeAddBankModal()">✕</button>
       </div>
       <div class="modal-body">
         <div class="form-grid">
@@ -6027,7 +6027,7 @@
           <div class="form-group full"><label>Remarks</label><textarea id="nb-remarks" placeholder="Optional remarks"></textarea></div>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
-          <button class="btn btn-ghost" onclick="closeModal('modal-add-bank')">Cancel</button>
+          <button class="btn btn-ghost" onclick="closeAddBankModal()">Cancel</button>
           <button class="btn btn-primary" onclick="saveBank()">Save Bank</button>
         </div>
       </div>
@@ -9403,7 +9403,7 @@ Please log in and change your password immediately.
   <script src="/js/cibil-view.js?v=8"></script>
   <script src="/js/ai-agent.js"></script>
   <script src="/js/lender-email-workflow.js"></script>
-  <script src="/js/api-bridge.js?v=3"></script>
+  <script src="/js/api-bridge.js?v=4"></script>
 
   <!-- ══ Login page function safety wrapper ══
        Moved to /js/login-helpers.js (must load after boot.js) -->

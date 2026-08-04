@@ -1874,7 +1874,19 @@
         }
         renderPayoutPage();
       }
-      if (name === 'profile') renderProfilePage();
+      if (name === 'profile') {
+        // Render immediately from whatever's in memory (instant UI, works
+        // offline), then pull the authoritative copy from the server and
+        // re-render — same pattern as the Settings → Access tab's
+        // stgSyncPermissionsFromServer() — so this user's own DB-saved
+        // profile shows up even if this browser's localStorage is stale.
+        renderProfilePage();
+        if (typeof stgSyncUserProfileFromServer === 'function') {
+          stgSyncUserProfileFromServer().then(() => {
+            try { renderProfilePage(); } catch(e) { console.warn('[profile tab sync]', e); }
+          });
+        }
+      }
       if (name === 'tickets') {
         if (typeof tkRenderTable === 'function') tkRenderTable(tkActiveFilter || 'all');
         if (typeof tkPopulateLoanSelect === 'function') tkPopulateLoanSelect();
@@ -6836,6 +6848,34 @@
         timestamp:   new Date().toISOString()
       };
       (typeof ASSIGNMENT_AUDIT_LOG !== 'undefined' ? ASSIGNMENT_AUDIT_LOG : (window.ASSIGNMENT_AUDIT_LOG = [])).push(entry);
+
+      // Mirror this entry to the database so the assignment history is
+      // visible across devices/users, not just this browser's localStorage —
+      // the DB becomes the durable copy, ASSIGNMENT_AUDIT_LOG stays the fast
+      // in-memory view the rest of the UI already reads from.
+      if (typeof window.apiReq === 'function') {
+        const _app = (typeof APPLICATIONS !== 'undefined' ? APPLICATIONS : []).find(a => a.id === entry.appId);
+        const _toUser = (typeof twUsers !== 'undefined' ? twUsers : []).find(u => u.name === entry.assignedUser);
+        window.apiReq('POST', '/assignment-audit', {
+          loanApplicationId: (_app && _app._apiId) || null,
+          loanFrontendId: entry.appId,
+          location: entry.location,
+          loanType: entry.loanType,
+          salesPerson: entry.salesPerson,
+          salesTeam: entry.salesTeam,
+          assignedToUserId: (_toUser && _toUser._apiId) || null,
+          assignedToUserName: entry.assignedUser,
+          assignedByName: 'System (Auto)',
+          method: entry.method,
+          tieBreak: entry.tieBreak,
+          reason: entry.assignedUser
+            ? ('Auto-assigned by Location + least workload' + (entry.tieBreak ? ' (tie broken fairly)' : ''))
+            : 'No active/eligible Login User at this location — added to Assignment Queue',
+          candidates: entry.candidates,
+          assignedAt: entry.timestamp
+        }).catch(function (e) { console.warn('[AssignmentAudit] sync failed:', e); });
+      }
+
       return entry;
     }
 
@@ -7323,7 +7363,7 @@
       // Log manual override to the same audit trail as auto-assignments, so
       // there is one place to see who assigned what and how.
       if (typeof ASSIGNMENT_AUDIT_LOG !== 'undefined') {
-        ASSIGNMENT_AUDIT_LOG.push({
+        const _manualEntry = {
           id: 'AAL-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
           appId, location: app.location || '', loanType: app.loanType || '',
           salesPerson: app.sales || '', salesTeam: app.salesTeam || '',
@@ -7331,7 +7371,32 @@
           tieBreak: false, previousUser: oldUser || null,
           decidedBy: (typeof currentUser !== 'undefined' && currentUser?.name) || 'Admin',
           timestamp: new Date().toISOString()
-        });
+        };
+        ASSIGNMENT_AUDIT_LOG.push(_manualEntry);
+
+        // Mirror to the database — same reasoning as the auto-assignment
+        // push above: without this, a manual reassignment made by one user
+        // on one device is invisible to everyone else.
+        if (typeof window.apiReq === 'function') {
+          const _toUser = (typeof twUsers !== 'undefined' ? twUsers : []).find(u => u.name === userName);
+          window.apiReq('POST', '/assignment-audit', {
+            loanApplicationId: app._apiId || null,
+            loanFrontendId: appId,
+            location: _manualEntry.location,
+            loanType: _manualEntry.loanType,
+            salesPerson: _manualEntry.salesPerson,
+            salesTeam: _manualEntry.salesTeam,
+            assignedToUserId: (_toUser && _toUser._apiId) || null,
+            assignedToUserName: userName || null,
+            assignedByName: _manualEntry.decidedBy,
+            method: 'manual',
+            tieBreak: false,
+            previousUserName: oldUser || null,
+            reason: 'Manual reassignment by ' + _manualEntry.decidedBy,
+            candidates: [],
+            assignedAt: _manualEntry.timestamp
+          }).catch(function (e) { console.warn('[AssignmentAudit] sync failed:', e); });
+        }
       }
       if (typeof persistSave === 'function') { try { persistSave(); } catch (_) {} }
       showToast(`Login User updated to ${userName}`, 'success');
@@ -10502,22 +10567,52 @@
 
       document.getElementById('del-cancel').onclick = () => overlay.remove();
       document.getElementById('del-confirm').onclick = () => {
-        const idx = APPLICATIONS.findIndex(a => a.id === id);
-        if (idx !== -1) {
-          APPLICATIONS.splice(idx, 1);
-          renderTable();
-          updateDashboardStats();
-          renderPipeline();
-          renderActivity();
-          if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
-          showToast(`Application ${id} deleted`, 'warn');
-          // If detail page was open, go back
-          const detailPage = document.getElementById('page-app-detail');
-          if (detailPage && detailPage.classList.contains('active')) {
-            showPage('applications', null);
+        overlay.remove();
+
+        function finishLocalDelete() {
+          const idx = APPLICATIONS.findIndex(a => a.id === id);
+          if (idx !== -1) {
+            APPLICATIONS.splice(idx, 1);
+            renderTable();
+            updateDashboardStats();
+            renderPipeline();
+            renderActivity();
+            if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+            // If detail page was open, go back
+            const detailPage = document.getElementById('page-app-detail');
+            if (detailPage && detailPage.classList.contains('active')) {
+              showPage('applications', null);
+            }
           }
         }
-        overlay.remove();
+
+        // Database is the source of truth: an application already saved to
+        // the backend (app._apiId set) must actually be deleted there via
+        // DELETE /api/loans/{id} before it's removed from view — otherwise
+        // it would just reappear (or disagree across devices/sessions) the
+        // next time anything reloads from GET /api/loans. A record that was
+        // never synced (pure local draft, no _apiId) has nothing to delete
+        // server-side, so it's removed locally as before.
+        if (app._apiId && typeof window.apiReq === 'function') {
+          showToast(`Deleting ${id}…`, 'info');
+          window.apiReq('DELETE', '/loans/' + app._apiId).then(function (r) {
+            if (r && r.success === false) {
+              const msg = (r.message || (r.errors && r.errors.join(' ')) || 'Delete was rejected by the server.');
+              showToast(`⚠ Application ${id} NOT deleted: ${msg}`, 'error');
+              return;
+            }
+            finishLocalDelete();
+            // Reload from GET /api/loans so this device (and the next
+            // sync on any other device) reflects the database exactly.
+            if (typeof window._apiSyncLoans === 'function') window._apiSyncLoans();
+            showToast(`Application ${id} deleted`, 'warn');
+          }).catch(function () {
+            showToast(`⚠ Application ${id} NOT deleted — could not reach the server.`, 'error');
+          });
+        } else {
+          finishLocalDelete();
+          showToast(`Application ${id} deleted`, 'warn');
+        }
       };
     }
 
@@ -11953,25 +12048,78 @@
         </div>`).join('');
     }
 
+    // Debounce timers for target field edits, keyed by month — mirrors the
+    // Obligations inline-edit debounce pattern (_syncObligationField in
+    // api-bridge.js), so rapid keystrokes across the 3 inputs on a row don't
+    // fire a separate PUT/POST per keystroke.
+    var _rptTargetSyncTimers = {};
+
+    function _rptCanEditTargets() {
+      const r = (currentUser && currentUser.role) || (window.currentUser && window.currentUser.role) || '';
+      return r === 'admin' || r === 'manager';
+    }
+
+    // Pushes the current in-memory target for `month` to the database
+    // (create if it has no _id yet, otherwise update), then re-syncs from
+    // the server so RPT_TARGETS[month]._id and any other tab/device stay
+    // current. Backend is the single source of truth going forward — same
+    // convention as Banks/DSA — so local RPT_TARGETS edits are always
+    // followed by a real API call, not just a localStorage write.
+    function _rptSyncTargetToApi(month) {
+      if (typeof window.apiReq !== 'function') return;
+      clearTimeout(_rptTargetSyncTimers[month]);
+      _rptTargetSyncTimers[month] = setTimeout(function () {
+        const tgt = RPT_TARGETS[month];
+        if (!tgt) return;
+        const payload = {
+          targetMonth: month,
+          disbAmt: tgt.disbAmt || 0,
+          loginCount: tgt.loginCount || 0,
+          disbCount: tgt.disbCount || 0
+        };
+        const req = tgt._id
+          ? window.apiReq('PUT', '/report-targets/' + tgt._id, payload)
+          : window.apiReq('POST', '/report-targets', payload);
+        req.then(function (res) {
+          if (res && res.success) {
+            if (!tgt._id && res.data && res.data.id) tgt._id = res.data.id;
+            if (typeof window._apiSyncReportTargets === 'function') window._apiSyncReportTargets();
+          } else if (typeof showToast === 'function') {
+            showToast((res && res.errors && res.errors[0]) || 'Target saved locally, but database sync failed — will retry on next refresh', 'warn');
+          }
+        });
+      }, 500);
+    }
+
     function updateTarget(month, field, val) {
-      if (currentUser && currentUser.role !== 'admin') { showToast('Only Admin can edit report targets', 'error'); return; }
+      if (!_rptCanEditTargets()) { showToast('Only Admin/Manager can edit report targets', 'error'); return; }
       if (!RPT_TARGETS[month]) RPT_TARGETS[month] = { disbAmt: 0, loginCount: 0, disbCount: 0 };
       RPT_TARGETS[month][field] = +val;
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
       renderReports();
+      _rptSyncTargetToApi(month);
     }
 
     function deleteTarget(month) {
-      if (currentUser && currentUser.role !== 'admin') { showToast('Only Admin can edit report targets', 'error'); return; }
+      if (!_rptCanEditTargets()) { showToast('Only Admin/Manager can edit report targets', 'error'); return; }
       if (!confirm('Remove target for ' + monthLabel(month) + '?')) return;
+      const tgt = RPT_TARGETS[month];
       delete RPT_TARGETS[month];
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
       renderTargetEditorRows();
       renderReports();
+      clearTimeout(_rptTargetSyncTimers[month]);
+      if (tgt && tgt._id && typeof window.apiReq === 'function') {
+        window.apiReq('DELETE', '/report-targets/' + tgt._id).then(function (res) {
+          if (!res || !res.success) {
+            if (typeof showToast === 'function') showToast('Target removed locally, but database sync failed — will retry on next refresh', 'warn');
+          }
+        });
+      }
     }
 
     function addTargetEditorRow() {
-      if (currentUser && currentUser.role !== 'admin') { showToast('Only Admin can edit report targets', 'error'); return; }
+      if (!_rptCanEditTargets()) { showToast('Only Admin/Manager can edit report targets', 'error'); return; }
       const months = Object.keys(RPT_TARGETS).sort();
       const lastM = months[months.length - 1];
       let newM;
@@ -11987,6 +12135,10 @@
         RPT_TARGETS[newM] = { disbAmt: 5000000, loginCount: 20, disbCount: 8 };
         if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
         renderTargetEditorRows();
+        // New row is created against the DB immediately (rather than
+        // waiting for the user to touch a field) so it persists even if
+        // they navigate away right after clicking "Add Month".
+        _rptSyncTargetToApi(newM);
       }
     }
 
@@ -13029,7 +13181,13 @@ ${printContent}
     }
 
     // ═══════════════════════════════════════════════════════
-    //  BANKS STORE  (makes "Add Bank" modal actually persist)
+    //  BANKS STORE  (backed by GET/POST/PUT/DELETE /api/banks —
+    //  see api-bridge.js _syncBanks(). The seed rows below are only a
+    //  first-paint fallback shown before the initial sync completes /
+    //  if the API is unreachable; _syncBanks() replaces this array
+    //  wholesale with the real data from the Banks table on login,
+    //  session-restore, and manual refresh — same convention as
+    //  RM_EMAILS/_syncRmEmails.)
     // ═══════════════════════════════════════════════════════
     var BANKS_STORE = [
       { id: 1, name: 'InCred Financial Services', ifsc: 'INCR0001234', location: 'Mumbai', rm: 'Anjali Sharma', rmMobile: '9876543210', email: 'anjali.sharma@incred.com', empCode: 'EMP-INC-001', bankLocation: 'BKC, Mumbai', remarks: 'Preferred Partner' },
@@ -13038,6 +13196,10 @@ ${printContent}
       { id: 4, name: 'ICICI Bank', ifsc: 'ICIC0009876', location: 'Bangalore', rm: 'Suresh Nair', rmMobile: '9843219876', email: 'suresh@icici.com', empCode: 'EMP-ICI-056', bankLocation: 'MG Road, Bangalore', remarks: '—' },
     ];
     let bankNextId = 5;
+    // Set to a bank's id while the "Add Bank" modal is being reused to edit
+    // that record; null means the modal is in "create" mode. Mirrors the
+    // id-hidden-field pattern used by saveRm()/deleteRm() (rm-modal-id).
+    let _bankEditId = null;
 
     function renderBanksTable() {
       const tbody = document.querySelector('#page-banks tbody');
@@ -13053,41 +13215,119 @@ ${printContent}
       <td><a href="mailto:${b.email}" style="color:var(--accent)">${b.email}</a></td>
       <td>${b.remarks}</td>
       <td onclick="event.stopPropagation()">
+        <button class="btn btn-ghost btn-sm" onclick="editBank(${b.id})" title="Edit bank">✎</button>
         <button class="btn btn-danger btn-sm" onclick="deleteBank(${b.id})">✕</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:24px">No banks added yet</td></tr>';
     }
 
+    // Resets the "Add Bank" modal to create-mode (clears fields, clears
+    // _bankEditId, restores title/button text) then opens it. Used by the
+    // "＋ Add Bank" button so a previous, cancelled edit never leaks into
+    // the next Add.
+    function openAddBankModal() {
+      _bankEditId = null;
+      ['nb-name','nb-ifsc','nb-empcode','nb-banklocation','nb-rm','nb-rmmobile','nb-email','nb-remarks']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      const titleEl = document.querySelector('#modal-add-bank .modal-title, #modal-add-bank h3');
+      if (titleEl) titleEl.textContent = 'Add New Bank / NBFC';
+      const saveBtn = document.querySelector('#modal-add-bank .btn-primary');
+      if (saveBtn) saveBtn.textContent = 'Save Bank';
+      openModal('modal-add-bank');
+    }
+
+    // Closes the Add/Edit Bank modal and resets edit-mode state (so
+    // cancelling an edit doesn't leave the modal primed for the next Add).
+    function closeAddBankModal() {
+      _bankEditId = null;
+      closeModal('modal-add-bank');
+    }
+
+    // Pre-fills the existing "Add Bank" modal with a bank's current values
+    // and flips it into edit mode (saveBank() below checks _bankEditId to
+    // decide POST vs PUT). Reuses modal-add-bank rather than adding a new
+    // modal, since the fields are identical to Add.
+    function editBank(id) {
+      const _r = (currentUser && currentUser.role) || (window.currentUser && window.currentUser.role) || '';
+      if (_r !== 'admin') { showToast('Only Admin can edit banks', 'error'); return; }
+      const bk = BANKS_STORE.find(b => b.id === id);
+      if (!bk) { showToast('Bank not found', 'error'); return; }
+      _bankEditId = id;
+      const setVal = (elId, val) => { const el = document.getElementById(elId); if (el) el.value = (val && val !== '—') ? val : ''; };
+      setVal('nb-name', bk.name);
+      setVal('nb-ifsc', bk.ifsc);
+      setVal('nb-empcode', bk.empCode);
+      setVal('nb-banklocation', bk.bankLocation || bk.location);
+      setVal('nb-rm', bk.rm);
+      setVal('nb-rmmobile', bk.rmMobile);
+      setVal('nb-email', bk.email);
+      setVal('nb-remarks', bk.remarks);
+      const titleEl = document.querySelector('#modal-add-bank .modal-title, #modal-add-bank h3');
+      if (titleEl) titleEl.textContent = '✎ Edit Bank';
+      const saveBtn = document.querySelector('#modal-add-bank .btn-primary');
+      if (saveBtn) saveBtn.textContent = 'Update Bank';
+      openModal('modal-add-bank');
+    }
+
     function saveBank() {
       const _r = (currentUser && currentUser.role) || (window.currentUser && window.currentUser.role) || '';
-      if (_r !== 'admin' && _r !== 'product_team') { showToast('Only Admin or Product Team can add banks', 'error'); return; }
+      if (_r !== 'admin') { showToast('Only Admin can ' + (_bankEditId ? 'edit' : 'add') + ' banks', 'error'); return; }
       const name     = document.getElementById('nb-name')?.value.trim();
       const ifsc     = document.getElementById('nb-ifsc')?.value.trim().toUpperCase() || '';
-      const empCode  = document.getElementById('nb-empcode')?.value.trim() || '—';
-      const bankLoc  = document.getElementById('nb-banklocation')?.value.trim() || '—';
-      const rm       = document.getElementById('nb-rm')?.value.trim() || '—';
-      const rmMobile = document.getElementById('nb-rmmobile')?.value.trim() || '—';
-      const email    = document.getElementById('nb-email')?.value.trim() || '—';
-      const remarks  = document.getElementById('nb-remarks')?.value.trim() || '—';
+      const empCode  = document.getElementById('nb-empcode')?.value.trim() || '';
+      const bankLoc  = document.getElementById('nb-banklocation')?.value.trim() || '';
+      const rm       = document.getElementById('nb-rm')?.value.trim() || '';
+      const rmMobile = document.getElementById('nb-rmmobile')?.value.trim() || '';
+      const email    = document.getElementById('nb-email')?.value.trim() || '';
+      const remarks  = document.getElementById('nb-remarks')?.value.trim() || '';
 
       if (!name) { showToast('Bank name is required', 'error'); return; }
 
-      BANKS_STORE.push({
-        id: bankNextId++,
-        name, ifsc,
-        empCode, bankLocation: bankLoc,
+      if (typeof window.apiReq !== 'function') {
+        showToast('Cannot save bank — API bridge not loaded', 'error');
+        return;
+      }
+
+      const payload = {
+        bankName: name,
+        ifscPrefix: ifsc,
+        empCode: empCode,
         location: bankLoc,
-        rm, rmMobile, email, remarks,
+        rmName: rm,
+        rmMobile: rmMobile,
+        email: email,
+        remarks: remarks,
+      };
+      const editId = _bankEditId;
+      const req = editId
+        ? window.apiReq('PUT', '/banks/' + editId, payload)
+        : window.apiReq('POST', '/banks', payload);
+
+      req.then(function (res) {
+        if (res && res.success) {
+          ['nb-name','nb-ifsc','nb-empcode','nb-banklocation','nb-rm','nb-rmmobile','nb-email','nb-remarks']
+            .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+          const titleEl = document.querySelector('#modal-add-bank .modal-title, #modal-add-bank h3');
+          if (titleEl) titleEl.textContent = 'Add New Bank / NBFC';
+          const saveBtn = document.querySelector('#modal-add-bank .btn-primary');
+          if (saveBtn) saveBtn.textContent = 'Save Bank';
+          _bankEditId = null;
+
+          closeModal('modal-add-bank');
+          const afterSync = function () {
+            renderBanksTable();
+            if (typeof populateRmSelect === 'function') populateRmSelect();
+          };
+          if (typeof window._apiSyncBanks === 'function') {
+            window._apiSyncBanks().then(afterSync);
+          } else {
+            afterSync();
+          }
+          showToast(`Bank "${name}" ${editId ? 'updated' : 'added'} successfully`, 'success');
+        } else {
+          showToast((res && res.errors && res.errors[0]) || `Could not ${editId ? 'update' : 'add'} bank — please try again`, 'error');
+        }
       });
-
-      ['nb-name','nb-ifsc','nb-empcode','nb-banklocation','nb-rm','nb-rmmobile','nb-email','nb-remarks']
-        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-
-      closeModal('modal-add-bank');
-      renderBanksTable();
-      if (typeof populateRmSelect === 'function') populateRmSelect();
-      if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
-      showToast(`Bank "${name}" added successfully`, 'success');
     }
 
     // mirrors loan_bank.py _onchange_rm_partner — auto-fills mobile when RM is selected
@@ -13095,14 +13335,28 @@ ${printContent}
 
     function deleteBank(id) {
       const _r = (currentUser && currentUser.role) || (window.currentUser && window.currentUser.role) || '';
-      if (_r !== 'admin' && _r !== 'product_team') { showToast('Only Admin or Product Team can remove banks', 'error'); return; }
+      if (_r !== 'admin') { showToast('Only Admin can remove banks', 'error'); return; }
       const bk = BANKS_STORE.find(b => b.id === id);
       if (!confirm('Remove bank "' + (bk ? bk.name : '') + '"?')) return;
-      const idx = BANKS_STORE.findIndex(b => b.id === id);
-      if (idx >= 0) BANKS_STORE.splice(idx, 1);
-      renderBanksTable();
-      if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
-      showToast('Bank removed', 'info');
+      if (typeof window.apiReq !== 'function') {
+        showToast('Cannot delete bank — API bridge not loaded', 'error');
+        return;
+      }
+      window.apiReq('DELETE', '/banks/' + id).then(function (res) {
+        if (res && res.success) {
+          const afterSync = function () { renderBanksTable(); };
+          if (typeof window._apiSyncBanks === 'function') {
+            window._apiSyncBanks().then(afterSync);
+          } else {
+            const idx = BANKS_STORE.findIndex(b => b.id === id);
+            if (idx >= 0) BANKS_STORE.splice(idx, 1);
+            afterSync();
+          }
+          showToast('Bank removed', 'info');
+        } else {
+          showToast((res && res.errors && res.errors[0]) || 'Could not delete bank — please try again', 'error');
+        }
+      });
     }
 
     // ═══════════════════════════════════════════════════════
@@ -20003,6 +20257,9 @@ ${printContent}
     window.saveBank = saveBank;
     window.nbRmMobileSync = nbRmMobileSync;
     window.deleteBank = deleteBank;
+    window.editBank = editBank;
+    window.openAddBankModal = openAddBankModal;
+    window.closeAddBankModal = closeAddBankModal;
     window.BANKS_STORE = BANKS_STORE;  // LEW: expose for lender-email-workflow.js
     window.renderIncredPage = renderIncredPage;
     window.incredCreateApp = incredCreateApp;
@@ -20069,6 +20326,64 @@ ${printContent}
     // ═══════════════════════════════════════════════════════
     //  BRANDING PANEL — Admin Settings → Logo & Branding
     // ═══════════════════════════════════════════════════════
+    //  PHASE 8 UPDATE: main logo, banner logo, icon size, banner size,
+    //  brand name and brand subtitle were localStorage-only (unlike the
+    //  sign-in logo, which was already DB-backed via the dedicated
+    //  /api/settings/signin-logo endpoint in an earlier phase). These six
+    //  fields are now also synced to the database via the existing generic
+    //  Settings API (AppSettings table, already wired to GET/POST
+    //  /api/settings on the backend — the same pattern already used for
+    //  Roles & Permissions sync). localStorage is kept as an instant-render
+    //  / offline fallback only — nothing about the existing UI behaviour is
+    //  removed, this is purely additive.
+    // ═══════════════════════════════════════════════════════
+    const BRAND_SETTINGS_KEYS = {
+      icon:       'efin_logo',
+      banner:     'efin_banner_logo',
+      iconSize:   'efin_logo_icon_size',
+      bannerSize: 'efin_logo_banner_size',
+      name:       'efin_brand_name',
+      sub:        'efin_brand_sub',
+    };
+
+    function brandingAuthHeaders(json) {
+      var tok = null;
+      try { tok = localStorage.getItem('loanms_token'); } catch (e) {}
+      var h = tok ? { 'Authorization': 'Bearer ' + tok } : {};
+      if (json) h['Content-Type'] = 'application/json';
+      return h;
+    }
+
+    // Fire-and-forget push of a single branding field to the server. Called
+    // right alongside every localStorage.setItem/removeItem for these six
+    // keys so the DB and the local cache always move together. If the
+    // network call fails, the change still stands locally (localStorage) —
+    // exactly like the existing signin-logo and permissions sync fallbacks.
+    function brandingPushSetting(key, value) {
+      try {
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: brandingAuthHeaders(true),
+          body: JSON.stringify({ key: key, value: value || '', category: 'branding' })
+        }).catch(function(){});
+      } catch (e) {}
+    }
+
+    // Pull one branding field from the server. Returns null (not throwing)
+    // if the field isn't set yet, the request fails, or the user isn't
+    // authorized to read it — callers fall back to the localStorage cache
+    // in every case, same as the existing signin-logo load path.
+    async function brandingFetchSetting(key) {
+      try {
+        const res = await fetch('/api/settings/' + key, { headers: brandingAuthHeaders(false) });
+        if (res.ok) {
+          const body = await res.json();
+          const val = body && body.data ? body.data.value : null;
+          return (val !== undefined && val !== null && val !== '') ? val : null;
+        }
+      } catch (e) {}
+      return null;
+    }
 
     function brandingInitPanel() {
       // Sync current icon logo state
@@ -20157,6 +20472,7 @@ ${printContent}
         applyLogoToSidebar(dataUrl);
         applyLogoToLogin(dataUrl);
         try { localStorage.setItem('efin_logo', dataUrl); } catch(err) {}
+        brandingPushSetting(BRAND_SETTINGS_KEYS.icon, dataUrl);
         // Update panel preview
         const prev = document.getElementById('branding-icon-preview-img');
         const placeholder = document.getElementById('branding-icon-preview-placeholder');
@@ -20177,6 +20493,7 @@ ${printContent}
         const dataUrl = e.target.result;
         applyBannerLogoToSidebar(dataUrl);
         try { localStorage.setItem('efin_banner_logo', dataUrl); } catch(err) {}
+        brandingPushSetting(BRAND_SETTINGS_KEYS.banner, dataUrl);
         // Update panel preview
         const prev = document.getElementById('branding-banner-preview-img');
         const placeholder = document.getElementById('branding-banner-preview-placeholder');
@@ -20268,6 +20585,7 @@ ${printContent}
       if (removeBtn) removeBtn.style.display = 'none';
       document.getElementById('branding-icon-filename').textContent = '';
       try { localStorage.removeItem('efin_logo'); } catch(e) {}
+      brandingPushSetting(BRAND_SETTINGS_KEYS.icon, '');
       showToast('Icon logo removed', 'success');
     }
 
@@ -20288,6 +20606,7 @@ ${printContent}
       if (removeBtn) removeBtn.style.display = 'none';
       document.getElementById('branding-banner-filename').textContent = '';
       try { localStorage.removeItem('efin_banner_logo'); } catch(e) {}
+      brandingPushSetting(BRAND_SETTINGS_KEYS.banner, '');
       showToast('Banner logo removed', 'success');
     }
 
@@ -20304,6 +20623,7 @@ ${printContent}
       if (label) label.textContent = size + ' px';
       if (save !== false) {
         try { localStorage.setItem('efin_logo_icon_size', size); } catch(e) {}
+        brandingPushSetting(BRAND_SETTINGS_KEYS.iconSize, String(size));
       }
     }
 
@@ -20322,6 +20642,7 @@ ${printContent}
       if (label) label.textContent = size + ' px';
       if (save !== false) {
         try { localStorage.setItem('efin_logo_banner_size', size); } catch(e) {}
+        brandingPushSetting(BRAND_SETTINGS_KEYS.bannerSize, String(size));
       }
     }
 
@@ -20342,6 +20663,8 @@ ${printContent}
         localStorage.setItem('efin_brand_name', name);
         localStorage.setItem('efin_brand_sub', sub);
       } catch(e) {}
+      brandingPushSetting(BRAND_SETTINGS_KEYS.name, name);
+      brandingPushSetting(BRAND_SETTINGS_KEYS.sub, sub);
     }
 
     function brandingResetAll() {
@@ -20394,6 +20717,7 @@ ${printContent}
       if (placeholder) placeholder.style.display = '';
       if (removeBtn) removeBtn.style.display = 'none';
       try { localStorage.removeItem('efin_logo'); } catch(e) {}
+      brandingPushSetting(BRAND_SETTINGS_KEYS.icon, '');
     }
 
     function brandingRemoveBannerSilent() {
@@ -20410,6 +20734,7 @@ ${printContent}
       if (placeholder) placeholder.style.display = '';
       if (removeBtn) removeBtn.style.display = 'none';
       try { localStorage.removeItem('efin_banner_logo'); } catch(e) {}
+      brandingPushSetting(BRAND_SETTINGS_KEYS.banner, '');
     }
 
     window.brandingInitPanel = brandingInitPanel;
@@ -21237,6 +21562,64 @@ ${printContent}
         const sSub  = document.getElementById('sidebar-logo-sub');
         if (savedName && sName) sName.textContent = savedName;
         if (savedSub  && sSub)  sSub.textContent  = savedSub;
+
+        // PHASE 8: the localStorage reads above are the instant-render /
+        // offline fallback. Now pull the authoritative copy of each field
+        // from the server (same generic /api/settings API already used for
+        // signin-logo and Roles/Permissions sync) and re-apply + re-cache —
+        // so a value saved by an admin on one device/browser shows up on
+        // every other device too, not just the one that saved it. Any
+        // field the server doesn't have yet (or a failed/unauthorized
+        // request) silently keeps whatever the localStorage cache already
+        // applied above — nothing regresses if the server call fails.
+        (async function() {
+          try {
+            const serverIcon = await brandingFetchSetting(BRAND_SETTINGS_KEYS.icon);
+            if (serverIcon) {
+              applyLogoToSidebar(serverIcon);
+              try { localStorage.setItem('efin_logo', serverIcon); } catch(e) {}
+            }
+          } catch(e) {}
+
+          try {
+            const serverBanner = await brandingFetchSetting(BRAND_SETTINGS_KEYS.banner);
+            if (serverBanner) {
+              applyBannerLogoToSidebar(serverBanner);
+              try { localStorage.setItem('efin_banner_logo', serverBanner); } catch(e) {}
+            }
+          } catch(e) {}
+
+          try {
+            const serverIconSize = await brandingFetchSetting(BRAND_SETTINGS_KEYS.iconSize);
+            if (serverIconSize) {
+              brandingUpdateIconSize(parseInt(serverIconSize), false);
+              try { localStorage.setItem('efin_logo_icon_size', serverIconSize); } catch(e) {}
+            }
+          } catch(e) {}
+
+          try {
+            const serverBannerSize = await brandingFetchSetting(BRAND_SETTINGS_KEYS.bannerSize);
+            if (serverBannerSize) {
+              brandingUpdateBannerSize(parseInt(serverBannerSize), false);
+              try { localStorage.setItem('efin_logo_banner_size', serverBannerSize); } catch(e) {}
+            }
+          } catch(e) {}
+
+          try {
+            const serverName = await brandingFetchSetting(BRAND_SETTINGS_KEYS.name);
+            const serverSub  = await brandingFetchSetting(BRAND_SETTINGS_KEYS.sub);
+            const sName2 = document.getElementById('sidebar-logo-text');
+            const sSub2  = document.getElementById('sidebar-logo-sub');
+            if (serverName) {
+              if (sName2) sName2.textContent = serverName;
+              try { localStorage.setItem('efin_brand_name', serverName); } catch(e) {}
+            }
+            if (serverSub) {
+              if (sSub2) sSub2.textContent = serverSub;
+              try { localStorage.setItem('efin_brand_sub', serverSub); } catch(e) {}
+            }
+          } catch(e) {}
+        })();
       } catch(err) {}
 
       // Start clock
@@ -21292,11 +21675,14 @@ ${printContent}
     var TASK_STORE = window.TASK_STORE;
     var taskNextId = 1;
 
-    // incred.rm.email store
+    // incred.rm.email store — populated from the database (GET /api/incred/rm)
+    // by api-bridge.js's _syncRmEmails() on load/refresh. Previously this was
+    // a plain in-memory array with no backend, so it reset on every page
+    // refresh and never appeared on another tab/device.
     var RM_EMAILS = [
     ];
-    var rmNextId = 4;
-    window.RM_EMAILS = RM_EMAILS; // expose for _refreshIncredTab in app-core.js
+    var rmNextId = 1;
+    window.RM_EMAILS = RM_EMAILS; // expose for _refreshIncredTab in app-core.js and api-bridge.js sync
 ;
 
     // running_loan_bank_line (obligations) per application
@@ -22490,31 +22876,55 @@ ${printContent}
       const name = document.getElementById('rm-modal-name').value.trim();
       const email = document.getElementById('rm-modal-email').value.trim();
       if (!name || !email) { showToast('Name and Email are required', 'error'); return; }
-      const data = {
+      const payload = {
         name, email,
         location: document.getElementById('rm-modal-location').value.trim(),
-        contact_no: document.getElementById('rm-modal-contact').value.trim(),
+        contactNo: document.getElementById('rm-modal-contact').value.trim(),
       };
-      if (id) {
-        const rm = RM_EMAILS.find(r => r.id === parseInt(id));
-        if (rm) Object.assign(rm, data);
-        showToast('RM updated', 'success');
-      } else {
-        RM_EMAILS.push({ id: rmNextId++, ...data });
-        showToast('RM added', 'success');
+      if (typeof window.apiReq !== 'function') {
+        showToast('Cannot save RM — API bridge not loaded', 'error');
+        return;
       }
-      closeModal('modal-rm-email');
-      renderRmEmails();
-      populateRmSelect();
+      const req = id
+        ? window.apiReq('PUT', '/incred/rm/' + id, payload)
+        : window.apiReq('POST', '/incred/rm', payload);
+      req.then(function (res) {
+        if (res && res.success) {
+          showToast(id ? 'RM updated' : 'RM added', 'success');
+          closeModal('modal-rm-email');
+          const afterSync = function () { renderRmEmails(); populateRmSelect(); };
+          if (typeof window._apiSyncRmEmails === 'function') {
+            window._apiSyncRmEmails().then(afterSync);
+          } else {
+            afterSync();
+          }
+        } else {
+          showToast((res && res.errors && res.errors[0]) || 'Could not save RM — please try again', 'error');
+        }
+      });
     }
 
     function deleteRm(id) {
       if (!confirm('Delete this RM record?')) return;
-      const idx = RM_EMAILS.findIndex(r => r.id === id);
-      if (idx >= 0) RM_EMAILS.splice(idx, 1);
-      renderRmEmails();
-      populateRmSelect();
-      showToast('RM deleted', 'info');
+      if (typeof window.apiReq !== 'function') {
+        showToast('Cannot delete RM — API bridge not loaded', 'error');
+        return;
+      }
+      window.apiReq('DELETE', '/incred/rm/' + id).then(function (res) {
+        if (res && res.success) {
+          const afterSync = function () { renderRmEmails(); populateRmSelect(); };
+          if (typeof window._apiSyncRmEmails === 'function') {
+            window._apiSyncRmEmails().then(afterSync);
+          } else {
+            const idx = RM_EMAILS.findIndex(r => r.id === id);
+            if (idx >= 0) RM_EMAILS.splice(idx, 1);
+            afterSync();
+          }
+          showToast('RM deleted', 'info');
+        } else {
+          showToast((res && res.errors && res.errors[0]) || 'Could not delete RM — please try again', 'error');
+        }
+      });
     }
 
     // ══════════════════════════════════════════════════
@@ -24170,7 +24580,12 @@ ${printContent}
       },
     };
 
-    // Restore any previously saved profile edits from localStorage
+    // Restore any previously saved profile edits from localStorage — this
+    // stays as the INSTANT-RENDER cache (shows something immediately, works
+    // offline). The authoritative, database-backed copy is pulled from the
+    // server separately by stgSyncUserProfileFromServer() (see below), the
+    // same "render local first, then sync-and-re-render" pattern already
+    // used for Roles/Menu-Visibility (stgSyncPermissionsFromServer).
     (function() {
       try {
         const saved = localStorage.getItem('efin_user_profiles');
@@ -24183,8 +24598,81 @@ ${printContent}
       } catch(e) {}
     })();
 
+    // ── DB-backed sync for User Profile (per-user AppSettings row) ──────────
+    // Previously USER_PROFILES was only ever written to *this browser's*
+    // localStorage, under one shared key holding every user's profile
+    // ('efin_user_profiles'). That meant a profile edit made on one device
+    // was invisible on another device/browser for that same user, and lost
+    // entirely if storage was cleared.
+    //
+    // Now also synced to the real database via the same generic Settings API
+    // pattern used for Roles/Menu-Visibility (AppSettings table), except
+    // through GET/POST /api/user-settings instead of /api/settings — that
+    // generic endpoint is Admin-only (org-wide config), while a profile
+    // belongs to one specific user, so it is scoped server-side to whoever
+    // the Bearer token belongs to (never a client-supplied id/email).
+    // localStorage remains the instant-render / offline fallback — nothing
+    // about existing behaviour is removed, this is purely additive.
+    const STG_USER_PROFILE_KEY = 'efin_user_profile';
+
+    function _upAuthHeaders(json) {
+      var tok = null;
+      try { tok = localStorage.getItem('loanms_token'); } catch (e) {}
+      var h = tok ? { 'Authorization': 'Bearer ' + tok } : {};
+      if (json) h['Content-Type'] = 'application/json';
+      return h;
+    }
+
+    function _upCurrentEmail() {
+      return (currentUser && currentUser.email)
+        || (typeof USER_ACCOUNTS !== 'undefined' && USER_ACCOUNTS.find(u => u.name === currentUser.name)?.email)
+        || '';
+    }
+
+    // Pull the logged-in user's own profile from the server and merge it into
+    // the in-memory USER_PROFILES entry. Safe to call repeatedly — if there's
+    // no token (offline/local login) or the server has nothing saved yet, it
+    // silently falls back to whatever is already there (localStorage-restored
+    // copy / seed default).
+    async function stgSyncUserProfileFromServer() {
+      const email = _upCurrentEmail();
+      if (!email) return;
+      try {
+        const res = await fetch('/api/user-settings/' + STG_USER_PROFILE_KEY, { headers: _upAuthHeaders(false) });
+        if (res.ok) {
+          const body = await res.json();
+          const raw = body && body.data ? body.data.value : null;
+          if (raw) {
+            const saved = JSON.parse(raw);
+            USER_PROFILES[email] = Object.assign(USER_PROFILES[email] || {}, saved);
+          }
+        }
+      } catch (e) { console.warn('[profile] could not reach server for user profile — using local copy', e); }
+    }
+
+    // Push the logged-in user's own profile to the server so it follows them
+    // across devices/browsers. Fire-and-forget: if the network call fails,
+    // the change still stands locally via saveProfilesToStorage().
+    async function stgPushUserProfileToServer() {
+      const email = _upCurrentEmail();
+      if (!email || !USER_PROFILES[email]) return;
+      try {
+        await fetch('/api/user-settings', {
+          method: 'POST', headers: _upAuthHeaders(true),
+          body: JSON.stringify({ key: STG_USER_PROFILE_KEY, value: JSON.stringify(USER_PROFILES[email]), category: 'profile' })
+        });
+      } catch (e) { console.warn('[profile] failed to sync user profile to server (saved locally only)', e); }
+    }
+
+    window.stgSyncUserProfileFromServer = stgSyncUserProfileFromServer;
+    window.stgPushUserProfileToServer   = stgPushUserProfileToServer;
+
     function saveProfilesToStorage() {
+      // Instant-render cache only — kept exactly as before.
       try { localStorage.setItem('efin_user_profiles', JSON.stringify(USER_PROFILES)); } catch(e) {}
+      // Database-backed save — same generic AppSettings pattern as
+      // stgPushPermissionsToServer(), scoped to this user.
+      if (typeof stgPushUserProfileToServer === 'function') stgPushUserProfileToServer();
     }
 
     // All logged-in users can edit their own profile; admins/accounts/ops can edit any profile
@@ -33117,14 +33605,71 @@ var advFilter = {
   dsaName:'', linkedPartner:'', companyName:''
 };
 
-// ── Saved filter presets (persisted in localStorage) ──
+// ── Saved filter presets ──
+// Instant-render cache stays in localStorage ('efin_filter_presets') exactly
+// as before — restored synchronously below so the preset chips can draw
+// immediately, offline, with zero network round-trip.
+//
+// DB-backed sync (additive, same generic AppSettings pattern already used
+// for User Profile — see stgSyncUserProfileFromServer() / STG_USER_PROFILE_KEY
+// above): through GET/POST /api/user-settings, scoped server-side to
+// whoever the Bearer token belongs to, key 'filter_presets'. This makes
+// presets follow the user across devices/browsers instead of being stuck
+// in one browser's localStorage.
 var _afPresets = [];
 (function() {
   try { _afPresets = JSON.parse(localStorage.getItem('efin_filter_presets') || '[]'); } catch(e) {}
 })();
 
+const STG_FILTER_PRESETS_KEY = 'filter_presets';
+
+function _afAuthHeaders(json) {
+  var tok = null;
+  try { tok = localStorage.getItem('loanms_token'); } catch (e) {}
+  var h = tok ? { 'Authorization': 'Bearer ' + tok } : {};
+  if (json) h['Content-Type'] = 'application/json';
+  return h;
+}
+
+// Pull this user's filter presets from the server and merge into the
+// in-memory/local-cache copy. Safe to call repeatedly — if there's no
+// token or the server has nothing saved yet, it silently keeps whatever
+// is already there (localStorage-restored copy).
+async function stgSyncFilterPresetsFromServer() {
+  try {
+    const res = await fetch('/api/user-settings/' + STG_FILTER_PRESETS_KEY, { headers: _afAuthHeaders(false) });
+    if (res.ok) {
+      const body = await res.json();
+      const raw = body && body.data ? body.data.value : null;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          _afPresets = parsed;
+          try { localStorage.setItem('efin_filter_presets', JSON.stringify(_afPresets)); } catch(e) {}
+        }
+      }
+    }
+  } catch (e) { console.warn('[filter presets] could not reach server — using local copy', e); }
+}
+
+// Push the current presets list to the server so they follow the user
+// across devices/browsers. Fire-and-forget: if the network call fails,
+// the change still stands locally.
+async function stgPushFilterPresetsToServer() {
+  try {
+    await fetch('/api/user-settings', {
+      method: 'POST', headers: _afAuthHeaders(true),
+      body: JSON.stringify({ key: STG_FILTER_PRESETS_KEY, value: JSON.stringify(_afPresets), category: 'filters' })
+    });
+  } catch (e) { console.warn('[filter presets] failed to sync to server (saved locally only)', e); }
+}
+
 function _afSavePresets() {
+  // Instant-render cache only — kept exactly as before.
   try { localStorage.setItem('efin_filter_presets', JSON.stringify(_afPresets)); } catch(e) {}
+  // Database-backed save — same generic AppSettings pattern as
+  // stgPushUserProfileToServer().
+  stgPushFilterPresetsToServer();
 }
 
 function afSavePreset() {
@@ -33232,6 +33777,14 @@ function openAdvFilter() {
   _afRenderPresets();
   _afUpdateLiveCount();
   openModal('modal-adv-filter');
+
+  // Render immediately from local cache (instant UI, works offline), then
+  // pull the authoritative DB-backed copy and re-render if it differs —
+  // same "render local first, then sync-and-re-render" pattern used for
+  // the Profile tab (stgSyncUserProfileFromServer).
+  stgSyncFilterPresetsFromServer().then(() => {
+    try { _afRenderPresets(); } catch(e) { console.warn('[filter presets sync]', e); }
+  });
 
   // Live count update on any field change
   document.querySelectorAll('#modal-adv-filter select, #modal-adv-filter input').forEach(function(el) {
@@ -33682,6 +34235,56 @@ var _exportDragSrc = null;
 var _exportScope   = 'filtered';
 const EXPORT_PRESET_KEY = 'efin_export_presets_v2';
 
+// ── DB-backed sync for Export Presets (per-user AppSettings row) ────────
+// Same generic Settings API pattern used for Filter Presets / User Profile
+// above (GET/POST /api/user-settings, scoped server-side to whoever the
+// Bearer token belongs to). localStorage (EXPORT_PRESET_KEY) remains the
+// instant-render / offline cache — reads stay synchronous via
+// _loadExportPresets(), nothing about existing callers changes.
+const STG_EXPORT_PRESETS_KEY = 'export_presets';
+
+function _epAuthHeaders(json) {
+  var tok = null;
+  try { tok = localStorage.getItem('loanms_token'); } catch (e) {}
+  var h = tok ? { 'Authorization': 'Bearer ' + tok } : {};
+  if (json) h['Content-Type'] = 'application/json';
+  return h;
+}
+
+// Pull this user's export presets from the server and merge them into the
+// local cache (server copy wins on same-name keys). Safe to call
+// repeatedly — if there's no token or nothing saved server-side yet, it
+// silently keeps whatever is already in localStorage.
+async function stgSyncExportPresetsFromServer() {
+  try {
+    const res = await fetch('/api/user-settings/' + STG_EXPORT_PRESETS_KEY, { headers: _epAuthHeaders(false) });
+    if (res.ok) {
+      const body = await res.json();
+      const raw = body && body.data ? body.data.value : null;
+      if (raw) {
+        const serverPresets = JSON.parse(raw);
+        if (serverPresets && typeof serverPresets === 'object') {
+          const merged = Object.assign({}, _loadExportPresets(), serverPresets);
+          try { localStorage.setItem(EXPORT_PRESET_KEY, JSON.stringify(merged)); } catch(e) {}
+        }
+      }
+    }
+  } catch (e) { console.warn('[export presets] could not reach server — using local copy', e); }
+}
+
+// Push the full local presets map to the server so it follows the user
+// across devices/browsers. Fire-and-forget: if the network call fails,
+// the change still stands locally via the existing localStorage.setItem.
+async function stgPushExportPresetsToServer() {
+  try {
+    const presets = _loadExportPresets();
+    await fetch('/api/user-settings', {
+      method: 'POST', headers: _epAuthHeaders(true),
+      body: JSON.stringify({ key: STG_EXPORT_PRESETS_KEY, value: JSON.stringify(presets), category: 'export' })
+    });
+  } catch (e) { console.warn('[export presets] failed to sync to server (saved locally only)', e); }
+}
+
 // ── Label helpers shared by export ──────────────────────────
 const _EXP_LABELS = {
   loanType:  { personal_loan:'Personal Loan', business_loan:'Business Loan', home_loan:'Home Loan', new_car_loan:'New Car Loan', used_car_loan:'Used Car Loan', lap:'LAP', two_wheeler:'Two Wheeler Loan' },
@@ -33724,7 +34327,10 @@ function exportSavePreset() {
   const keys = EXPORT_COLS.filter(c => c.checked).map(c => c.key);
   let presets = _loadExportPresets();
   presets[name.trim()] = keys;
+  // Instant-render cache only — kept exactly as before.
   try { localStorage.setItem(EXPORT_PRESET_KEY, JSON.stringify(presets)); } catch(e) {}
+  // Database-backed save — same generic AppSettings pattern as Filter Presets.
+  stgPushExportPresetsToServer();
   _renderPresetSelect();
   showToast('Preset "' + name.trim() + '" saved ✓', 'success');
 }
@@ -33950,6 +34556,14 @@ function openExportModal() {
   _updateExportCounts();
   _renderExportPreview();
   openModal('modal-export');
+
+  // Render immediately from local cache (instant UI, works offline), then
+  // pull the authoritative DB-backed copy and re-render if it differs —
+  // same "render local first, then sync-and-re-render" pattern used for
+  // the Profile tab / Filter Presets.
+  stgSyncExportPresetsFromServer().then(() => {
+    try { _renderPresetSelect(); } catch(e) { console.warn('[export presets sync]', e); }
+  });
 }
 
 // ── Column list renderer ─────────────────────────────────────
@@ -36424,8 +37038,19 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       // the server on the next load, which is exactly what Phase 4B removes.
     if (window.OBLIGATIONS)   localStorage.setItem(STORE_KEYS.obligations,  JSON.stringify(OBLIGATIONS));
       if (window.ROLES)         localStorage.setItem(STORE_KEYS.roles,        JSON.stringify(ROLES));
-      if (window.BANKS_STORE)   localStorage.setItem(STORE_KEYS.banks,        JSON.stringify(BANKS_STORE));
-      if (window.RPT_TARGETS)   localStorage.setItem(STORE_KEYS.rptTargets,   JSON.stringify(RPT_TARGETS));
+      // BANKS_STORE is intentionally NOT written to localStorage anymore —
+      // same reasoning as tickets above. PostgreSQL via /api/banks is now
+      // the sole source of truth (see _syncBanks() in api-bridge.js, which
+      // reloads BANKS_STORE from the API on login/session-restore/refresh).
+      // Persisting it here would let a stale local copy silently win over
+      // the server on the next load.
+      // RPT_TARGETS is intentionally NOT written to localStorage anymore —
+      // same reasoning as Banks/Tickets above. PostgreSQL via
+      // /api/report-targets is now the sole source of truth (see
+      // _syncReportTargets() in api-bridge.js, which reloads RPT_TARGETS
+      // from the API on login/session-restore/refresh, and after every
+      // create/edit/delete). Persisting it here would let a stale local
+      // copy silently win over the server on the next load.
       if (window.ASSIGNMENT_AUDIT_LOG) localStorage.setItem(STORE_KEYS.assignmentLog, JSON.stringify(ASSIGNMENT_AUDIT_LOG));
     } catch (e) {
       // Storage quota exceeded — attempt to save only critical data
@@ -36453,37 +37078,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   function persistLoad() {
     var loaded = false;
 
-    // Applications — localStorage is an OFFLINE CACHE, not a live data
-    // source. Records already confirmed persisted to the database
-    // (_dbSynced / _apiId set by api-bridge.js after a successful backend
-    // save) are skipped here while the browser is online: _syncLoans()
-    // refetches those from the API and is the single source of truth, so a
-    // stale local snapshot can never shadow current server data on this or
-    // any other device/session. Records that are NOT yet confirmed synced
-    // (local drafts, pending backend submits) still restore normally —
-    // and always restore while genuinely offline — so no in-progress work
-    // is ever lost.
-    var savedApps  = safeJSON(_lsGet(STORE_KEYS.apps), null);
-    var _appsOffline = (typeof navigator !== 'undefined' && navigator.onLine === false);
-    if (savedApps && Array.isArray(savedApps) && savedApps.length && window.APPLICATIONS) {
-      var _restorableApps = _appsOffline
-        ? savedApps
-        : savedApps.filter(function (a) { return !(a && (a._dbSynced || a._apiId)); });
-      var seededIds = new Set(APPLICATIONS.map(function (a) { return a.id; }));
-      // Add brand-new apps that don't exist in seed data
-      var newApps = _restorableApps.filter(function (a) { return !seededIds.has(a.id) && a.id; });
-      if (newApps.length) { newApps.forEach(function (a) { if (a.id) APPLICATIONS.push(a); }); loaded = true; }
-      // FIX: Also UPDATE existing seeded apps with persisted state (status, tracking, RM, etc.)
-      // Without this, any changes to demo applications are lost on page refresh.
-      _restorableApps.forEach(function (saved) {
-        if (!saved || !saved.id) return;
-        var idx = APPLICATIONS.findIndex(function (a) { return a.id === saved.id; });
-        if (idx >= 0) {
-          APPLICATIONS[idx] = Object.assign({}, APPLICATIONS[idx], saved);
-          loaded = true;
-        }
-      });
-    }
+    // Applications — Phase: DB-as-single-source-of-truth. APPLICATIONS is
+    // populated exclusively from GET /api/loans (see _syncLoans() in
+    // api-bridge.js, called on login/boot and after every create, status
+    // change, and delete). localStorage is no longer merged into
+    // APPLICATIONS here at all — even for a startup-only read — so a
+    // stale local snapshot can never shadow, resurrect, or duplicate
+    // server data on this or any other device/session. This mirrors the
+    // Phase 4B change already made for tickets (TK_STORE / twTickets),
+    // below. persistSave() may still write an APPLICATIONS snapshot to
+    // localStorage as a temporary offline cache (e.g. for crash recovery
+    // while genuinely offline), but nothing reads that snapshot back into
+    // APPLICATIONS on startup anymore.
 
     // Tasks
     var savedTasks = safeJSON(_lsGet(STORE_KEYS.tasks), null);
@@ -36508,38 +37114,21 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     // never-synced tickets to the API instead of silently merging or
     // discarding them, per the data-safety requirement.
 
-    // Report targets (merge persisted monthly targets; mutate in place since const)
-    var savedTargets = safeJSON(_lsGet(STORE_KEYS.rptTargets), null);
-    if (savedTargets && typeof savedTargets === 'object' && window.RPT_TARGETS) {
-      // Remove keys not in saved set, then apply saved values
-      Object.keys(window.RPT_TARGETS).forEach(function(k){ if (!(k in savedTargets)) delete window.RPT_TARGETS[k]; });
-      Object.keys(savedTargets).forEach(function(k){
-        if (savedTargets[k] && typeof savedTargets[k] === 'object') window.RPT_TARGETS[k] = savedTargets[k];
-      });
-      loaded = true;
-    }
+    // Report targets: previously merged from localStorage here. Now
+    // database-backed (ReportTargets table via /api/report-targets) —
+    // _syncReportTargets() in api-bridge.js is the sole source of truth and
+    // replaces RPT_TARGETS wholesale on login/session-restore/refresh, same
+    // as Banks/RM_EMAILS/tickets. Merging a stale local copy on top of it
+    // here would risk it winning over the server until the next sync, so
+    // this restore path is removed (RPT_TARGETS keeps its hardcoded seed
+    // values only until the first API sync completes).
 
-    // Banks master (merge persisted banks; mutate in place since BANKS_STORE is const)
-    var savedBanks = safeJSON(_lsGet(STORE_KEYS.banks), null);
-    if (savedBanks && Array.isArray(savedBanks) && window.BANKS_STORE) {
-      var bIds = new Set(BANKS_STORE.map(function(b){ return b.id; }));
-      savedBanks.forEach(function(sb){
-        if (!sb) return;
-        var idx = BANKS_STORE.findIndex(function(b){ return b.id === sb.id; });
-        if (idx >= 0) BANKS_STORE[idx] = sb;
-        else if (!bIds.has(sb.id)) BANKS_STORE.push(sb);
-      });
-      // Respect deletions: drop seed banks not present in saved set (only if saved set non-empty)
-      if (savedBanks.length) {
-        var savedIds = new Set(savedBanks.map(function(b){ return b.id; }));
-        for (var i = BANKS_STORE.length - 1; i >= 0; i--) {
-          if (!savedIds.has(BANKS_STORE[i].id)) BANKS_STORE.splice(i, 1);
-        }
-      }
-      // Keep bankNextId ahead of max id
-      try { var mx = BANKS_STORE.reduce(function(m,b){ return Math.max(m, b.id||0); }, 0); if (typeof bankNextId !== 'undefined' && bankNextId <= mx) bankNextId = mx + 1; } catch(_){}
-      loaded = true;
-    }
+    // Banks master: previously merged from localStorage here. Now
+    // database-backed (Banks table via /api/banks) — _syncBanks() in
+    // api-bridge.js is the sole source of truth and replaces BANKS_STORE
+    // wholesale on login/session-restore/refresh, same as RM_EMAILS/tickets.
+    // Merging a stale local copy on top of it here would risk it winning
+    // over the server until the next sync, so this restore path is removed.
 
     // Roles & permissions (merge persisted perms onto live ROLES; never add/remove roles)
     var savedRoles = safeJSON(_lsGet(STORE_KEYS.roles), null);

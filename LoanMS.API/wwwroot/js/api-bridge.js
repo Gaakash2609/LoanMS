@@ -226,8 +226,22 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         // scope that actually renders it.
         if (typeof window.APPLICATIONS !== 'undefined' && Array.isArray(window.APPLICATIONS)) {
           var arr = window.APPLICATIONS;
+          // Dedup by _apiId (the numeric DB id _loanToApp always sets) —
+          // NOT by an 'API' id prefix. Loan ids are the real loan number
+          // (e.g. "EFIN20261234567"), never 'API'-prefixed like the
+          // users/teams/locations/tickets sync paths, so the old prefix
+          // check could never match a single loan record. That meant this
+          // filter silently did nothing and every _syncLoans() call (login,
+          // after wizard submit, after status change, auto-refresh) just
+          // appended a second/third/Nth copy of every already-loaded loan
+          // instead of replacing it with the fresh copy — duplicate rows
+          // that would only get worse as CRUD-triggered reloads are added.
+          // Removing by _apiId is a full replace-by-truth for every record
+          // the API just returned; any entry with no _apiId (a local-only
+          // wizard draft that hasn't reached the server yet) is left alone.
+          var freshApiIds = new Set(apiApps.map(function(a){ return a._apiId; }));
           for (var i = arr.length - 1; i >= 0; i--) {
-            if (String(arr[i].id).startsWith('API')) arr.splice(i, 1);
+            if (arr[i]._apiId && freshApiIds.has(arr[i]._apiId)) arr.splice(i, 1);
           }
           apiApps.forEach(function(a){ arr.push(a); });
           _refreshUI();
@@ -588,6 +602,171 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       mappedDsaId: d.mappedDsaId ? ('API' + d.mappedDsaId) : ''
     };
   }
+  /* ══════════════════════════════════════════════════════════
+     4b. OBLIGATIONS — Running Loan / Bank Line (FOIR tab)
+     Backend: ObligationsController (LoanObligation table via
+     GET /api/loans/{loanId}/obligations, POST/PUT/DELETE /api/obligations).
+     Previously OBLIGATIONS (efin-app.js) was a plain in-memory object
+     persisted only to localStorage — never visible on another device.
+     window.OBLIGATIONS is keyed by the frontend appId (e.g. "EFIN000123");
+     the backend needs the numeric Loan id, which lives on the matching
+     APPLICATIONS entry as app._apiId (set by _syncLoans/_loanToApp). If a
+     loan hasn't been synced to the backend yet (no _apiId), obligation
+     writes stay local-only until the loan itself is — same "saved locally,
+     sync will retry" fallback used elsewhere in this file.
+  ══════════════════════════════════════════════════════════ */
+  function _oblToLocal(o) {
+    return {
+      id: o.id, _apiId: o.id,
+      loan_type: o.loanType,
+      financer_name: o.financerName || '',
+      sanction_amt: Number(o.sanctionAmount || 0),
+      loan_emi: Number(o.loanEmi || 0),
+      amount_out: Number(o.amountOutstanding || 0),
+      loan_closure_date: o.loanClosureDate ? String(o.loanClosureDate).slice(0, 10) : '',
+      loan_acc_no: o.loanAccountNumber || '',
+      select_bt: !!o.selectBT
+    };
+  }
+  function _oblToPayload(app, obl) {
+    return {
+      loanApplicationId: app._apiId,
+      loanType: obl.loan_type,
+      financerName: obl.financer_name || '',
+      sanctionAmount: obl.sanction_amt || 0,
+      loanEmi: obl.loan_emi || 0,
+      amountOutstanding: obl.amount_out || 0,
+      loanClosureDate: obl.loan_closure_date || null,
+      loanAccountNumber: obl.loan_acc_no || '',
+      selectBT: !!obl.select_bt
+    };
+  }
+
+  /* Pull the authoritative obligation list for one application from the
+     server and replace window.OBLIGATIONS[appId] wholesale (server is the
+     single source of truth here, same approach as _syncRmEmails). No-op if
+     the loan hasn't been synced to the backend yet. */
+  function _syncObligations(appId) {
+    var app = (window.APPLICATIONS || []).find(function(a) { return a.id === appId; });
+    if (!app || !app._apiId) return Promise.resolve();
+    return apiReq('GET', '/loans/' + app._apiId + '/obligations').then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      if (typeof window.OBLIGATIONS === 'undefined') return;
+      window.OBLIGATIONS[appId] = res.data.map(_oblToLocal);
+      if (typeof window.renderObligationsTab === 'function') {
+        try { window.renderObligationsTab(appId); } catch (e) {}
+      }
+    }).catch(function(e) { console.warn('[Bridge] syncObligations:', e); });
+  }
+
+  /* Auto-sync the Obligations tab whenever an application's detail view opens
+     — mirrors _patchOpenDetailCibil below. */
+  function _patchOpenDetailObligations() {
+    if (window._bridgeOdOblPatched) return;
+    window._bridgeOdOblPatched = true;
+    var _orig = window.openDetail;
+    if (typeof _orig !== 'function') return;
+    window.openDetail = function(id) {
+      var result = _orig.apply(this, arguments);
+      setTimeout(function() { _syncObligations(id); }, 250);
+      return result;
+    };
+  }
+
+  /* Patch: saveObligation → POST /api/obligations (add). Original function
+     already does the local push + toast + re-render — left untouched so the
+     UI behaves identically offline; this just fires the API call after. */
+  function _patchObligationSave() {
+    if (window._bridgeOblSavePatched) return;
+    window._bridgeOblSavePatched = true;
+    var _orig = window.saveObligation;
+    if (typeof _orig !== 'function') return;
+    window.saveObligation = function() {
+      var appIdEl = document.getElementById('obl-app-id');
+      var appId = appIdEl ? appIdEl.value : null;
+      var app = (window.APPLICATIONS || []).find(function(a) { return a.id === appId; });
+      var result = _orig.apply(this, arguments);
+      if (app && app._apiId) {
+        var obls = (window.OBLIGATIONS && window.OBLIGATIONS[appId]) || [];
+        var justAdded = obls[obls.length - 1];
+        if (justAdded) {
+          apiReq('POST', '/obligations', _oblToPayload(app, justAdded)).then(function(r) {
+            if (r && r.success) {
+              setTimeout(function() { _syncObligations(appId); }, 300);
+            } else if (typeof window.showToast === 'function') {
+              window.showToast('Obligation saved locally, but database sync failed — will retry on next refresh', 'warn');
+            }
+          });
+        }
+      }
+      return result;
+    };
+  }
+
+  /* Patch: deleteObligation → DELETE /api/obligations/{id}. */
+  function _patchObligationDelete() {
+    if (window._bridgeOblDeletePatched) return;
+    window._bridgeOblDeletePatched = true;
+    var _orig = window.deleteObligation;
+    if (typeof _orig !== 'function') return;
+    window.deleteObligation = function(appId, oblId) {
+      var app = (window.APPLICATIONS || []).find(function(a) { return a.id === appId; });
+      var obl = ((window.OBLIGATIONS && window.OBLIGATIONS[appId]) || []).find(function(o) { return o.id === oblId; });
+      var apiId = obl && obl._apiId;
+      var result = _orig.apply(this, arguments);
+      if (app && app._apiId && apiId) {
+        apiReq('DELETE', '/obligations/' + apiId).then(function(r) {
+          if (!r || !r.success) {
+            if (typeof window.showToast === 'function') {
+              window.showToast('Obligation removed locally, but database sync failed — will retry on next refresh', 'warn');
+            }
+          }
+        });
+      }
+      return result;
+    };
+  }
+
+  /* Patch: oblField (inline edit) / toggleBT → PUT /api/obligations/{id},
+     debounced 500ms so rapid keystrokes/toggles don't fire a request each. */
+  var _oblFieldSyncTimers = {};
+  function _syncObligationField(appId, oblId) {
+    var app = (window.APPLICATIONS || []).find(function(a) { return a.id === appId; });
+    var obl = ((window.OBLIGATIONS && window.OBLIGATIONS[appId]) || []).find(function(o) { return o.id === oblId; });
+    if (!app || !app._apiId || !obl || !obl._apiId) return; // not backend-linked yet
+    var key = appId + ':' + oblId;
+    clearTimeout(_oblFieldSyncTimers[key]);
+    _oblFieldSyncTimers[key] = setTimeout(function() {
+      apiReq('PUT', '/obligations/' + obl._apiId, _oblToPayload(app, obl)).then(function(r) {
+        if (!r || !r.success) {
+          if (typeof window.showToast === 'function') {
+            window.showToast('Obligation update saved locally, but database sync failed', 'warn');
+          }
+        }
+      });
+    }, 500);
+  }
+  function _patchObligationFieldEdit() {
+    if (window._bridgeOblFieldPatched) return;
+    window._bridgeOblFieldPatched = true;
+    var _origField = window.oblField;
+    if (typeof _origField === 'function') {
+      window.oblField = function(appId, oblId, field, value) {
+        var result = _origField.apply(this, arguments);
+        _syncObligationField(appId, oblId);
+        return result;
+      };
+    }
+    var _origBT = window.toggleBT;
+    if (typeof _origBT === 'function') {
+      window.toggleBT = function(appId, oblId, val) {
+        var result = _origBT.apply(this, arguments);
+        _syncObligationField(appId, oblId);
+        return result;
+      };
+    }
+  }
+
   function _syncDsaPartners() {
     return apiReq('GET', '/dsa').then(function(res) {
       if (!res || !res.success || !res.data) return;
@@ -610,6 +789,173 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       if (typeof window.dsaStatsRefresh === 'function') { try { window.dsaStatsRefresh(); } catch(e){} }
       if (typeof window.pmStatsRefresh  === 'function') { try { window.pmStatsRefresh();  } catch(e){} }
     }).catch(function(e){ console.warn('[Bridge] syncDsaPartners:', e); });
+  }
+
+  /* InCred RM Emails — GET /api/incred/rm → window.RM_EMAILS (efin-app.js).
+     Previously RM_EMAILS was a frontend-only in-memory array with no backend
+     at all, so it reset on refresh and never appeared on another tab/device.
+     This mirrors _syncDsaPartners()'s read/merge approach, but since
+     RM_EMAILS is a flat array (not keyed by _apiId like twDSAList), the
+     database is treated as the single source of truth and the array is
+     replaced wholesale on each sync rather than merged field-by-field. */
+  function _rmToLocal(r) {
+    return {
+      id: r.id,
+      name: r.name,
+      location: r.location || '',
+      email: r.email,
+      contact_no: r.contactNo || ''
+    };
+  }
+  function _syncRmEmails() {
+    return apiReq('GET', '/incred/rm').then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      var mapped = res.data.map(_rmToLocal);
+      if (Array.isArray(window.RM_EMAILS)) {
+        window.RM_EMAILS.length = 0;
+        Array.prototype.push.apply(window.RM_EMAILS, mapped);
+      } else {
+        window.RM_EMAILS = mapped;
+      }
+      if (typeof window.renderRmEmails === 'function')  { try { window.renderRmEmails();  } catch(e){} }
+      if (typeof window.populateRmSelect === 'function') { try { window.populateRmSelect(); } catch(e){} }
+    }).catch(function(e){ console.warn('[Bridge] syncRmEmails:', e); });
+  }
+
+  /* Banks master — GET/POST/PUT/DELETE /api/banks → window.BANKS_STORE
+     (efin-app.js). Previously BANKS_STORE was a frontend-only in-memory
+     array (var BANKS_STORE = [...]) with no backend at all, so any bank
+     added/removed on one device/tab never appeared anywhere else and reset
+     to the hardcoded seed list on every refresh. Now backed by the Banks
+     table (BanksController). Same approach as _syncRmEmails: BANKS_STORE is
+     a flat array (no _apiId keying like twDSAList), so the database is
+     treated as the single source of truth and the array is replaced
+     wholesale on each sync rather than merged field-by-field. */
+  function _bankToLocal(b) {
+    return {
+      id: b.id,
+      name: b.bankName,
+      ifsc: b.ifscPrefix || '',
+      empCode: b.empCode || '—',
+      location: b.location || '—',
+      bankLocation: b.location || '—',
+      rm: b.rmName || '—',
+      rmMobile: b.rmMobile || '—',
+      email: b.email || '—',
+      remarks: b.remarks || '—',
+      isActive: b.isActive !== false
+    };
+  }
+  function _syncBanks() {
+    return apiReq('GET', '/banks').then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      var mapped = res.data.map(_bankToLocal);
+      if (Array.isArray(window.BANKS_STORE)) {
+        window.BANKS_STORE.length = 0;
+        Array.prototype.push.apply(window.BANKS_STORE, mapped);
+      } else {
+        window.BANKS_STORE = mapped;
+      }
+      try {
+        var mx = window.BANKS_STORE.reduce(function(m, b) { return Math.max(m, b.id || 0); }, 0);
+        if (typeof window.bankNextId !== 'undefined') { window.bankNextId = mx + 1; }
+      } catch (_) {}
+      if (typeof window.renderBanksTable === 'function') { try { window.renderBanksTable(); } catch (e) {} }
+      if (typeof window.populateRmSelect === 'function') { try { window.populateRmSelect(); } catch (e) {} }
+    }).catch(function(e) { console.warn('[Bridge] syncBanks:', e); });
+  }
+
+  /* Report Targets — GET/POST/PUT/DELETE /api/report-targets →
+     window.RPT_TARGETS (efin-app.js). Previously RPT_TARGETS was a
+     hardcoded frontend-only object (const RPT_TARGETS = {...}) persisted
+     only to the browser's localStorage, so any edit made from the Target
+     Editor on one device/tab never appeared on another and reset to the
+     hardcoded seed months on a fresh browser profile. Now backed by the
+     ReportTargets table (ReportTargetsController). Same approach as
+     _syncBanks: the database is the single source of truth and the object
+     is replaced wholesale on each sync rather than merged key-by-key. Only
+     organization-wide rows (UserId/TeamId both null) are applied — the
+     Reports & Analytics page has no per-user/team target view today, so
+     any future per-user/team rows are simply not surfaced here yet. */
+  function _reportTargetToLocal(rt) {
+    return {
+      _id: rt.id,
+      month: rt.targetMonth,
+      disbAmt: rt.disbAmt || 0,
+      loginCount: rt.loginCount || 0,
+      disbCount: rt.disbCount || 0
+    };
+  }
+  function _syncReportTargets() {
+    return apiReq('GET', '/report-targets').then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      if (typeof window.RPT_TARGETS === 'undefined') return;
+      var orgWide = res.data.filter(function(rt) { return rt.userId == null && rt.teamId == null; });
+      Object.keys(window.RPT_TARGETS).forEach(function(k) { delete window.RPT_TARGETS[k]; });
+      orgWide.forEach(function(rt) {
+        var mapped = _reportTargetToLocal(rt);
+        window.RPT_TARGETS[mapped.month] = {
+          disbAmt: mapped.disbAmt,
+          loginCount: mapped.loginCount,
+          disbCount: mapped.disbCount,
+          _id: mapped._id
+        };
+      });
+      if (typeof window.renderReports === 'function') { try { window.renderReports(); } catch (e) {} }
+      // Only re-render the Target Editor rows if that panel is currently open,
+      // same guard the panel's own toggle uses (see toggleTargetEditor()).
+      var editorBody = document.getElementById('rpt-target-editor-body');
+      if (editorBody && editorBody.style.display !== 'none' && typeof window.renderTargetEditorRows === 'function') {
+        try { window.renderTargetEditorRows(); } catch (e) {}
+      }
+    }).catch(function(e) { console.warn('[Bridge] syncReportTargets:', e); });
+  }
+
+  /* Assignment Audit Log — GET /api/assignment-audit → window.ASSIGNMENT_AUDIT_LOG
+     (efin-app.js). Previously ASSIGNMENT_AUDIT_LOG was a frontend-only
+     in-memory array (`let ASSIGNMENT_AUDIT_LOG = []`), persisted only to the
+     browser's localStorage, so the auto/manual assignment history recorded
+     on one device/tab never appeared on another. Now backed by the
+     AssignmentAuditLogs table (AssignmentAuditController). Same approach as
+     _syncReportTargets/_syncBanks: the database is the single source of
+     truth and the array is replaced wholesale on each sync rather than
+     merged entry-by-entry — this is a read-only history view, there is
+     nothing to merge. The actual POST-on-push (writing new entries) happens
+     inline in efin-app.js right where ASSIGNMENT_AUDIT_LOG.push(entry) is
+     called, not here — this function only ever pulls. */
+  function _assignmentAuditToLocal(a) {
+    return {
+      id: 'AAL-' + a.id, _id: a.id,
+      appId: a.loanFrontendId, _apiLoanId: a.loanApplicationId,
+      location: a.location || '', loanType: a.loanType || '',
+      salesPerson: a.salesPerson || '', salesTeam: a.salesTeam || '',
+      candidates: (function () { try { return a.candidatesJson ? JSON.parse(a.candidatesJson) : []; } catch (_) { return []; } })(),
+      assignedUser: a.assignedToUserName || null,
+      method: a.method || 'unassigned',
+      tieBreak: !!a.tieBreak,
+      previousUser: a.previousUserName || null,
+      decidedBy: a.assignedByName || 'System',
+      timestamp: a.assignedAt
+    };
+  }
+  function _syncAssignmentAuditLog(loanId) {
+    var path = '/assignment-audit' + (loanId ? ('?loanId=' + encodeURIComponent(loanId)) : '');
+    return apiReq('GET', path).then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      var mapped = res.data.map(_assignmentAuditToLocal);
+      var target = (typeof window.ASSIGNMENT_AUDIT_LOG !== 'undefined') ? window.ASSIGNMENT_AUDIT_LOG : (window.ASSIGNMENT_AUDIT_LOG = []);
+      if (loanId) {
+        // Scoped refresh (e.g. opening one application's history) — replace
+        // only that application's entries, leave everything else untouched.
+        for (var i = target.length - 1; i >= 0; i--) {
+          if (target[i].appId === loanId) target.splice(i, 1);
+        }
+        Array.prototype.push.apply(target, mapped);
+      } else {
+        target.length = 0;
+        Array.prototype.push.apply(target, mapped);
+      }
+    }).catch(function(e) { console.warn('[Bridge] syncAssignmentAuditLog:', e); });
   }
 
   /* Upload any staged (in-memory File objects) DSA/Partner documents to
@@ -1282,6 +1628,11 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
               } else {
                 app._dbSyncFailed  = false;
                 app._dbSyncMessage = '';
+                // Database is the source of truth for the resulting state
+                // (status, tracking history, computed fields) — reload
+                // from GET /api/loans rather than trusting the local
+                // optimistic update to have gotten everything right.
+                _syncLoans();
               }
             });
           }
@@ -1370,6 +1721,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           _syncTasks();
           _syncTickets();
           _syncDsaPartners();
+          _syncBanks();
+          _syncReportTargets();
           setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500); // after loans have _apiId populated
           setTimeout(tkMigrateLegacyLocalTickets, 1000);
         }, 800);
@@ -1420,6 +1773,10 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       _patchReportsToApi();
       _patchOpenDetailCibil();
       _patchStatusNotify();
+      _patchOpenDetailObligations();
+      _patchObligationSave();
+      _patchObligationDelete();
+      _patchObligationFieldEdit();
     }, 2500);
 
     // If already logged in, validate token and sync all data
@@ -1464,6 +1821,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             _syncTasks();
             _syncTickets();
             _syncDsaPartners();
+            _syncBanks();
+            _syncReportTargets();
             setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500);
             setTimeout(tkMigrateLegacyLocalTickets, 1400);
           }, 1200);
@@ -1918,13 +2277,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
 
   // Expose sync functions for manual refresh
-  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
+  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); _syncRmEmails(); _syncBanks(); _syncReportTargets(); _syncAssignmentAuditLog(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
   window._syncPayoutClaimsFromServer = _syncPayoutClaimsFromServer;
   window._apiSyncLoans  = _syncLoans;
   window._apiSyncUsers  = _syncUsers;
   window._apiSyncTeams  = _syncTeams;
   window._apiSyncTasks  = _syncTasks;
   window._apiSyncTickets = _syncTickets;
+  window._apiSyncRmEmails = _syncRmEmails;
+  window._apiSyncBanks = _syncBanks;
+  window._apiSyncReportTargets = _syncReportTargets;
+  window._apiSyncAssignmentAuditLog = _syncAssignmentAuditLog;
+  window._apiSyncObligations = _syncObligations;
   window.apiReq = apiReq;
   window.apiReqRaw = apiReqRaw;
 

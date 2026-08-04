@@ -134,13 +134,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   function persistLoad() {
     var loaded = false;
 
-    // Applications
-    var savedApps = safeJSON(_lsGet(STORE_KEYS.apps), null);
-    if (savedApps && Array.isArray(savedApps) && savedApps.length && window.APPLICATIONS) {
-      var seededIds = new Set(APPLICATIONS.map(function (a) { return a.id; }));
-      var newApps   = savedApps.filter(function (a) { return !seededIds.has(a.id); });
-      if (newApps.length) { newApps.forEach(function (a) { APPLICATIONS.push(a); }); loaded = true; }
-    }
+    // Applications — DB (GET /api/loans, via _syncLoans() in api-bridge.js)
+    // is the single source of truth. This used to unconditionally merge
+    // every cached app back into APPLICATIONS on every page load with no
+    // check for whether it was already confirmed saved to the database —
+    // running right after efin-app.js's own (more careful) persistLoad()
+    // and silently re-adding stale/duplicate records every time. Removed;
+    // see the matching removal and explanation in efin-app.js's persistLoad().
 
     // Tasks
     var savedTasks = safeJSON(_lsGet(STORE_KEYS.tasks), null);

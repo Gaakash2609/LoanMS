@@ -47,6 +47,9 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Value")
                         .IsRequired()
                         .HasColumnType("text");
@@ -54,9 +57,99 @@ namespace LoanMS.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Key")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"UserId\" IS NULL")
+                        .HasDatabaseName("IX_AppSettings_Key_OrgWide_Unique");
+
+                    b.HasIndex("Key", "UserId")
+                        .IsUnique()
+                        .HasFilter("\"UserId\" IS NOT NULL")
+                        .HasDatabaseName("IX_AppSettings_Key_UserId_Unique");
 
                     b.ToTable("AppSettings");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.AssignmentAuditLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("AssignedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AssignedByName")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<int?>("AssignedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("AssignedToUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AssignedToUserName")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("CandidatesJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("LoanApplicationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LoanFrontendId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("LoanType")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("PreviousUserName")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("SalesPerson")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("SalesTeam")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<bool>("TieBreak")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedAt");
+
+                    b.HasIndex("LoanApplicationId");
+
+                    b.HasIndex("LoanFrontendId");
+
+                    b.ToTable("AssignmentAuditLogs");
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.AssignmentLog", b =>
@@ -1006,6 +1099,46 @@ namespace LoanMS.Infrastructure.Migrations
                     b.ToTable("DsaPartners");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.IncredRmEmail", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ContactNo")
+                        .HasMaxLength(15)
+                        .HasColumnType("character varying(15)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("IncredRmEmails");
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.Loan", b =>
                 {
                     b.Property<int>("Id")
@@ -1194,6 +1327,61 @@ namespace LoanMS.Infrastructure.Migrations
                     b.HasIndex("LoanId");
 
                     b.ToTable("LoanDocuments");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.LoanObligation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AmountOutstanding")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FinancerName")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LoanAccountNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("LoanApplicationId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LoanClosureDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("LoanEmi")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("LoanType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<decimal>("SanctionAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("SelectBT")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LoanApplicationId");
+
+                    b.ToTable("LoanObligations");
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.LoanOffer", b =>
@@ -1573,6 +1761,56 @@ namespace LoanMS.Infrastructure.Migrations
                     b.ToTable("PayoutRules");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.ReportTarget", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("DisbAmt")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("DisbCount")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("LoginCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TargetMonth")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<int?>("TeamId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TargetMonth")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ReportTargets_TargetMonth_OrgWide_Unique")
+                        .HasFilter("\"IsDeleted\" = false AND \"UserId\" IS NULL AND \"TeamId\" IS NULL");
+
+                    b.ToTable("ReportTargets");
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.ScoreFactor", b =>
                 {
                     b.Property<int>("Id")
@@ -1898,6 +2136,16 @@ namespace LoanMS.Infrastructure.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.AssignmentAuditLog", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.Loan", "LoanApplication")
+                        .WithMany()
+                        .HasForeignKey("LoanApplicationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("LoanApplication");
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.BureauAccount", b =>
                 {
                     b.HasOne("LoanMS.Domain.Entities.BureauReport", "BureauReport")
@@ -2066,6 +2314,17 @@ namespace LoanMS.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Loan");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.LoanObligation", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.Loan", "LoanApplication")
+                        .WithMany()
+                        .HasForeignKey("LoanApplicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LoanApplication");
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.LoanOffer", b =>

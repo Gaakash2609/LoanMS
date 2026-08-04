@@ -1156,4 +1156,77 @@ public class IncredController : BaseController
         if (string.IsNullOrWhiteSpace(residenceType)) return null;
         return _residenceTypeMap.TryGetValue(residenceType.Trim(), out var mapped) ? mapped : null;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // InCred RM Emails — /api/incred/rm
+    // Was frontend-only (efin-app.js `var RM_EMAILS = []`, plain JS array) —
+    // never saved anywhere, so it reset on every refresh and never appeared on
+    // another tab/device. Now backed by the IncredRmEmails table. Read is open
+    // to any authenticated user (same as GET /api/dsa); create/edit/delete are
+    // Admin-only, matching the destructive-action convention used by
+    // BanksController/AuditController for other small admin-managed master
+    // lists in this codebase.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [HttpGet("rm")]
+    public async Task<IActionResult> GetRmEmails()
+    {
+        var rms = await _db.IncredRmEmails
+            .OrderBy(r => r.Name)
+            .Select(r => new RmEmailDto {
+                Id = r.Id, Name = r.Name, Location = r.Location,
+                Email = r.Email, ContactNo = r.ContactNo,
+                CreatedAt = r.CreatedAt, UpdatedAt = r.UpdatedAt
+            }).ToListAsync();
+        return Ok(ApiResponseDto<object>.Ok(rms));
+    }
+
+    [HttpPost("rm")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> CreateRmEmail([FromBody] RmEmailUpsertDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(ApiResponseDto<object>.Fail("Name is required."));
+        if (string.IsNullOrWhiteSpace(dto.Email))
+            return BadRequest(ApiResponseDto<object>.Fail("Email is required."));
+
+        var rm = new IncredRmEmail {
+            Name = dto.Name.Trim(), Location = dto.Location?.Trim(),
+            Email = dto.Email.Trim(), ContactNo = dto.ContactNo?.Trim(),
+            CreatedAt = DateTime.UtcNow
+        };
+        _db.IncredRmEmails.Add(rm);
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<object>.Ok(new { rm.Id }, "RM created."));
+    }
+
+    [HttpPut("rm/{id:int}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateRmEmail(int id, [FromBody] RmEmailUpsertDto dto)
+    {
+        var rm = await _db.IncredRmEmails.FindAsync(id);
+        if (rm == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(ApiResponseDto<bool>.Fail("Name is required."));
+        if (string.IsNullOrWhiteSpace(dto.Email))
+            return BadRequest(ApiResponseDto<bool>.Fail("Email is required."));
+
+        rm.Name = dto.Name.Trim(); rm.Location = dto.Location?.Trim();
+        rm.Email = dto.Email.Trim(); rm.ContactNo = dto.ContactNo?.Trim();
+        rm.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Updated."));
+    }
+
+    [HttpDelete("rm/{id:int}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> DeleteRmEmail(int id)
+    {
+        var rm = await _db.IncredRmEmails.FindAsync(id);
+        if (rm == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+        rm.IsDeleted = true; rm.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Deleted."));
+    }
 }

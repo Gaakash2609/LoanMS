@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<Customer>          Customers           => Set<Customer>();
     public DbSet<Loan>              Loans               => Set<Loan>();
     public DbSet<LoanDocument>      LoanDocuments       => Set<LoanDocument>();
+    public DbSet<LoanObligation>    LoanObligations     => Set<LoanObligation>();
     public DbSet<LoanStatusHistory> LoanStatusHistories => Set<LoanStatusHistory>();
     public DbSet<LoanOffer>         LoanOffers          => Set<LoanOffer>();
     public DbSet<TrackingEntry>     TrackingEntries     => Set<TrackingEntry>();
@@ -31,6 +32,9 @@ public class AppDbContext : DbContext
     public DbSet<LoanReference>     LoanReferences      => Set<LoanReference>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<BankMaster>        Banks               => Set<BankMaster>();
+    public DbSet<IncredRmEmail>     IncredRmEmails      => Set<IncredRmEmail>();
+    public DbSet<ReportTarget>      ReportTargets       => Set<ReportTarget>();
+    public DbSet<AssignmentAuditLog> AssignmentAuditLogs => Set<AssignmentAuditLog>();
 
     // CIBIL / Bureau Report Entities
     public DbSet<BureauReport>           BureauReports           => Set<BureauReport>();
@@ -133,6 +137,19 @@ public class AppDbContext : DbContext
             e.HasOne(d => d.Loan).WithMany(l => l.Documents).HasForeignKey(d => d.LoanId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        mb.Entity<LoanObligation>(e => {
+            e.HasKey(o => o.Id);
+            e.HasIndex(o => o.LoanApplicationId);
+            e.Property(o => o.LoanType).HasMaxLength(40).IsRequired();
+            e.Property(o => o.FinancerName).HasMaxLength(150);
+            e.Property(o => o.SanctionAmount).HasColumnType("decimal(18,2)");
+            e.Property(o => o.LoanEmi).HasColumnType("decimal(18,2)");
+            e.Property(o => o.AmountOutstanding).HasColumnType("decimal(18,2)");
+            e.Property(o => o.LoanAccountNumber).HasMaxLength(50);
+            e.HasQueryFilter(o => !o.IsDeleted);
+            e.HasOne(o => o.LoanApplication).WithMany().HasForeignKey(o => o.LoanApplicationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         mb.Entity<TrackingEntry>(e => {
             e.HasKey(t => t.Id);
             e.HasIndex(t => t.LoanId);
@@ -210,6 +227,30 @@ public class AppDbContext : DbContext
                 .HasDatabaseName("IX_Banks_BankName_Unique_Active");
         });
 
+        mb.Entity<ReportTarget>(e => {
+            e.HasKey(rt => rt.Id);
+            e.Property(rt => rt.TargetMonth).HasMaxLength(7).IsRequired();
+            e.Property(rt => rt.DisbAmt).HasColumnType("decimal(18,2)");
+            e.HasQueryFilter(rt => !rt.IsDeleted);
+            // Only one organization-wide (UserId/TeamId both null) target per
+            // month — mirrors RPT_TARGETS being keyed uniquely by month today.
+            // Per-user/per-team targets (once used) are naturally excluded from
+            // this filter since the partial index only covers UserId/TeamId IS NULL.
+            e.HasIndex(rt => rt.TargetMonth)
+                .IsUnique()
+                .HasFilter("\"IsDeleted\" = false AND \"UserId\" IS NULL AND \"TeamId\" IS NULL")
+                .HasDatabaseName("IX_ReportTargets_TargetMonth_OrgWide_Unique");
+        });
+
+        mb.Entity<IncredRmEmail>(e => {
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Name).HasMaxLength(150).IsRequired();
+            e.Property(r => r.Location).HasMaxLength(100);
+            e.Property(r => r.Email).HasMaxLength(200).IsRequired();
+            e.Property(r => r.ContactNo).HasMaxLength(15);
+            e.HasQueryFilter(r => !r.IsDeleted);
+        });
+
         mb.Entity<Team>(e => {
             e.HasKey(t => t.Id);
             e.Property(t => t.Name).HasMaxLength(100).IsRequired();
@@ -259,9 +300,21 @@ public class AppDbContext : DbContext
 
         mb.Entity<AppSetting>(e => {
             e.HasKey(s => s.Id);
-            e.HasIndex(s => s.Key).IsUnique();
             e.Property(s => s.Key).HasMaxLength(100).IsRequired();
             e.HasQueryFilter(s => !s.IsDeleted);
+            // Org-wide settings (UserId IS NULL) keep the original one-row-per-Key
+            // guarantee — unchanged behaviour for Roles/Menu-Visibility/InCred/AI/
+            // Email/branding config.
+            e.HasIndex(s => s.Key)
+                .IsUnique()
+                .HasFilter("\"UserId\" IS NULL")
+                .HasDatabaseName("IX_AppSettings_Key_OrgWide_Unique");
+            // Per-user settings (e.g. User Profile) get one row per (Key, UserId) —
+            // each user has their own independent copy of the same Key.
+            e.HasIndex(s => new { s.Key, s.UserId })
+                .IsUnique()
+                .HasFilter("\"UserId\" IS NOT NULL")
+                .HasDatabaseName("IX_AppSettings_Key_UserId_Unique");
         });
 
         mb.Entity<AuditLog>(e => {
@@ -286,6 +339,32 @@ public class AppDbContext : DbContext
             // no FK constraints to Users (mirrors AuditLog's UserId, which is also a
             // plain nullable int, not a navigation property) so a user being removed
             // later never breaks or cascades against historical assignment records.
+        });
+
+        mb.Entity<AssignmentAuditLog>(e => {
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => a.LoanApplicationId);
+            e.HasIndex(a => a.LoanFrontendId);
+            e.HasIndex(a => a.AssignedAt);
+            e.Property(a => a.LoanFrontendId).HasMaxLength(40).IsRequired();
+            e.Property(a => a.Location).HasMaxLength(100);
+            e.Property(a => a.LoanType).HasMaxLength(60);
+            e.Property(a => a.SalesPerson).HasMaxLength(150);
+            e.Property(a => a.SalesTeam).HasMaxLength(150);
+            e.Property(a => a.AssignedToUserName).HasMaxLength(150);
+            e.Property(a => a.AssignedByName).HasMaxLength(150).IsRequired();
+            e.Property(a => a.Method).HasMaxLength(20).IsRequired();
+            e.Property(a => a.PreviousUserName).HasMaxLength(150);
+            e.Property(a => a.Reason).HasMaxLength(500);
+            // Insert-only audit trail — no query filter needed (no IsDeleted
+            // column), same convention as AssignmentLog. LoanApplicationId is
+            // nullable and left un-cascaded (SetNull) rather than Cascade —
+            // this record must survive even if the loan it refers to is later
+            // hard-deleted, since it's a historical audit entry, not live data.
+            e.HasOne(a => a.LoanApplication)
+                .WithMany()
+                .HasForeignKey(a => a.LoanApplicationId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         mb.Entity<PayoutRule>(e => {
