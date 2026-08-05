@@ -99,6 +99,75 @@ public class NotificationsController : BaseController
             Data = new { message = "EFIN webhook test — connection successful!", timestamp = DateTime.UtcNow }
         });
     }
+
+    // ── In-app notifications (Management alerts) ────────────────────────────
+    // Was frontend-only (notifyManagement() in efin-app.js, localStorage key
+    // 'mgmt_notifications') — written to whichever browser triggered the
+    // event, so the intended recipient (Admin/Accounts, often a different
+    // device) never actually saw it. Now DB-backed and role-targeted: any
+    // user whose role matches TargetRole (or a null/global TargetRole) can
+    // read/mark-read; creating one is unrestricted since it's triggered
+    // internally by app events (e.g. a DSA/partner submitting a payout claim),
+    // not a user-facing form.
+
+    /// <summary>List recent notifications for the current user's role (or role-agnostic ones).</summary>
+    [HttpGet]
+    public async Task<IActionResult> GetNotifications([FromQuery] bool unreadOnly = false)
+    {
+        var role = CurrentUserRole;
+        var query = _db.AppNotifications
+            .Where(n => n.TargetRole == null || n.TargetRole == role);
+        if (unreadOnly) query = query.Where(n => !n.IsRead);
+
+        var items = await query
+            .OrderByDescending(n => n.CreatedAt)
+            .Take(50)
+            .Select(n => new { n.Id, n.Type, n.ClaimId, n.Partner, n.Amount, n.IsRead, n.CreatedAt })
+            .ToListAsync();
+        return Ok(ApiResponseDto<object>.Ok(items));
+    }
+
+    /// <summary>Create a notification (called internally by app events, e.g. payout claim submission).</summary>
+    [HttpPost]
+    public async Task<IActionResult> CreateNotification([FromBody] AppNotificationDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Type))
+            return BadRequest(ApiResponseDto<object>.Fail("Type is required."));
+
+        var notification = new AppNotification
+        {
+            Type = dto.Type.Trim(),
+            ClaimId = dto.ClaimId,
+            Partner = dto.Partner?.Trim(),
+            Amount = dto.Amount,
+            TargetRole = dto.TargetRole?.Trim(),
+            CreatedAt = DateTime.UtcNow
+        };
+        _db.AppNotifications.Add(notification);
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<object>.Ok(new { notification.Id }, "Notification created."));
+    }
+
+    /// <summary>Mark a notification as read.</summary>
+    [HttpPut("{id:int}/read")]
+    public async Task<IActionResult> MarkRead(int id)
+    {
+        var n = await _db.AppNotifications.FindAsync(id);
+        if (n == null) return NotFound(ApiResponseDto<bool>.Fail("Notification not found."));
+        n.IsRead = true;
+        n.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Marked as read."));
+    }
+}
+
+public class AppNotificationDto
+{
+    public string Type { get; set; } = string.Empty;
+    public string? ClaimId { get; set; }
+    public string? Partner { get; set; }
+    public decimal? Amount { get; set; }
+    public string? TargetRole { get; set; }
 }
 
 public class WebhookPayloadDto

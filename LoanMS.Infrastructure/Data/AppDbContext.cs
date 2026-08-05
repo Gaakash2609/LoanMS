@@ -35,6 +35,13 @@ public class AppDbContext : DbContext
     public DbSet<IncredRmEmail>     IncredRmEmails      => Set<IncredRmEmail>();
     public DbSet<ReportTarget>      ReportTargets       => Set<ReportTarget>();
     public DbSet<AssignmentAuditLog> AssignmentAuditLogs => Set<AssignmentAuditLog>();
+    public DbSet<RejectionReason>   RejectionReasons    => Set<RejectionReason>();
+    public DbSet<AppNotification>   AppNotifications    => Set<AppNotification>();
+    public DbSet<LenderEmailThreadEntry> LenderEmailThreadEntries => Set<LenderEmailThreadEntry>();
+    public DbSet<EmailTemplate>     EmailTemplates      => Set<EmailTemplate>();
+    public DbSet<ProductOfferMatrix> ProductOfferMatrices => Set<ProductOfferMatrix>();
+    public DbSet<AiAgentRun>        AiAgentRuns         => Set<AiAgentRun>();
+    public DbSet<LoginAttempt>      LoginAttempts       => Set<LoginAttempt>();
 
     // CIBIL / Bureau Report Entities
     public DbSet<BureauReport>           BureauReports           => Set<BureauReport>();
@@ -365,6 +372,72 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(a => a.LoanApplicationId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        mb.Entity<LenderEmailThreadEntry>(e => {
+            e.HasKey(t => t.Id);
+            e.HasIndex(t => t.LoanApplicationId);
+            e.Property(t => t.Direction).HasMaxLength(20).IsRequired();
+            e.Property(t => t.Stage).HasMaxLength(40);
+            e.Property(t => t.RmName).HasMaxLength(150);
+            e.Property(t => t.RmEmail).HasMaxLength(200);
+            e.Property(t => t.Subject).HasMaxLength(500);
+            e.Property(t => t.Source).HasMaxLength(40);
+            e.HasQueryFilter(t => !t.IsDeleted);
+            e.HasOne(t => t.LoanApplication).WithMany().HasForeignKey(t => t.LoanApplicationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<EmailTemplate>(e => {
+            e.HasKey(t => t.Id);
+            e.HasQueryFilter(t => !t.IsDeleted);
+            e.Property(t => t.TemplateKey).HasMaxLength(40).IsRequired();
+            e.Property(t => t.Subject).HasMaxLength(500).IsRequired();
+            e.HasIndex(t => t.TemplateKey).IsUnique().HasFilter("\"IsDeleted\" = false");
+        });
+
+        mb.Entity<ProductOfferMatrix>(e => {
+            e.HasKey(p => p.Id);
+            e.HasQueryFilter(p => !p.IsDeleted);
+            e.Property(p => p.ProductKey).HasMaxLength(60).IsRequired();
+            e.HasIndex(p => p.ProductKey).IsUnique().HasFilter("\"IsDeleted\" = false");
+        });
+
+        mb.Entity<AiAgentRun>(e => {
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => a.LoanApplicationId);
+            e.Property(a => a.RunId).HasMaxLength(60).IsRequired();
+            e.Property(a => a.Status).HasMaxLength(20).IsRequired();
+            e.HasQueryFilter(a => !a.IsDeleted);
+            e.HasOne(a => a.LoanApplication).WithMany().HasForeignKey(a => a.LoanApplicationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<LoginAttempt>(e => {
+            e.HasKey(a => a.Id);
+            e.Property(a => a.Email).HasMaxLength(200).IsRequired();
+            e.Property(a => a.IpAddress).HasMaxLength(60).IsRequired();
+            e.HasIndex(a => new { a.Email, a.CreatedAt });
+            e.HasIndex(a => new { a.IpAddress, a.CreatedAt });
+            // No soft-delete query filter — rows are hard-deleted on cleanup
+            // (successful login / periodic purge), not tombstoned; this is a
+            // short-lived lockout counter, not an audit trail.
+        });
+
+        mb.Entity<RejectionReason>(e => {
+            e.HasKey(r => r.Id);
+            e.HasQueryFilter(r => !r.IsDeleted);
+            e.Property(r => r.Key).HasMaxLength(80).IsRequired();
+            e.Property(r => r.Label).HasMaxLength(300).IsRequired();
+            e.HasIndex(r => r.Key).IsUnique().HasFilter("\"IsDeleted\" = false");
+        });
+
+        mb.Entity<AppNotification>(e => {
+            e.HasKey(n => n.Id);
+            e.HasQueryFilter(n => !n.IsDeleted);
+            e.Property(n => n.Type).HasMaxLength(60).IsRequired();
+            e.Property(n => n.Partner).HasMaxLength(200);
+            e.Property(n => n.TargetRole).HasMaxLength(40);
+            e.Property(n => n.Amount).HasColumnType("decimal(18,2)");
+            e.HasIndex(n => new { n.TargetRole, n.IsRead, n.CreatedAt });
         });
 
         mb.Entity<PayoutRule>(e => {

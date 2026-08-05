@@ -24,10 +24,12 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   ];
 
   // ── In-memory store ───────────────────────────────────────────────────
+  // Populated from the server via _syncRejectionReasons() (api-bridge.js,
+  // called at login/session-restore boot). DEFAULTS is only a placeholder
+  // shown until that first sync completes, or as an offline fallback if the
+  // sync request fails — it is never written back to the server.
   if (!window._PP_REASONS) {
-    var _saved = null;
-    try { _saved = JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) {}
-    window._PP_REASONS = (_saved && _saved.length) ? _saved : DEFAULTS.map(function (r) { return { id: r.id, label: r.label }; });
+    window._PP_REASONS = DEFAULTS.map(function (r) { return { id: r.id, label: r.label }; });
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
@@ -37,9 +39,11 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   }
   function _toast(msg, type) { if (typeof showToast === 'function') showToast(msg, type || 'success'); }
 
-  // ── Persist + sync modal select ───────────────────────────────────────
-  function _save() {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(window._PP_REASONS)); } catch (e) {}
+  // ── Refresh the Reject-modal dropdown after any local state change ──────
+  // (Renamed from _save(): this module no longer owns persistence — each
+  // CRUD handler below calls the RejectionReasonsController API directly
+  // and window._PP_REASONS is the database, not localStorage.)
+  function _refreshSelect() {
     _syncSelect();
   }
 
@@ -250,19 +254,36 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       if (!key) { _toast('Reason key is required', 'error'); return; }
       if (!/^[a-z0-9_]+$/.test(key)) { _toast('Key: lowercase letters, digits and underscores only', 'error'); return; }
       if (window._PP_REASONS.find(function (r) { return r.id === key; })) { _toast('Key "' + key + '" already exists', 'error'); return; }
-      window._PP_REASONS.push({ id: key, label: label });
-      _toast('Rejection reason "' + label + '" added');
+      if (typeof window.apiReq !== 'function') { _toast('Cannot save — app not ready, please refresh.', 'error'); return; }
+      window.apiReq('POST', '/rejectionreasons', { key: key, label: label }).then(function (res) {
+        if (!res || !res.success) {
+          _toast((res && (res.message || (res.errors && res.errors.join(' ')))) || 'Could not save reason.', 'error');
+          return;
+        }
+        _toast('Rejection reason "' + label + '" added');
+        if (typeof closeModal === 'function') closeModal('modal-pp-reason');
+        if (typeof window._apiSyncRejectionReasons === 'function') {
+          window._apiSyncRejectionReasons().then(function () { _refreshSelect(); ppRenderRejectionContent(); });
+        }
+      });
     } else {
       // UPDATE
       var r = window._PP_REASONS.find(function (x) { return x.id === editId; });
       if (!r) return;
-      r.label = label;
-      _toast('Rejection reason updated');
+      if (!r._dbId) { _toast('Cannot update — reason not yet synced from server, please refresh.', 'error'); return; }
+      if (typeof window.apiReq !== 'function') { _toast('Cannot save — app not ready, please refresh.', 'error'); return; }
+      window.apiReq('PUT', '/rejectionreasons/' + r._dbId, { label: label }).then(function (res) {
+        if (!res || !res.success) {
+          _toast((res && (res.message || (res.errors && res.errors.join(' ')))) || 'Could not update reason.', 'error');
+          return;
+        }
+        r.label = label;
+        _toast('Rejection reason updated');
+        if (typeof closeModal === 'function') closeModal('modal-pp-reason');
+        _refreshSelect();
+        ppRenderRejectionContent();
+      });
     }
-
-    _save();
-    if (typeof closeModal === 'function') closeModal('modal-pp-reason');
-    ppRenderRejectionContent();
   };
 
   // ── Delete ────────────────────────────────────────────────────────────
@@ -271,10 +292,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     var r = window._PP_REASONS.find(function (x) { return x.id === id; });
     if (!r) return;
     if (!confirm('Delete "' + r.label + '"? This cannot be undone.')) return;
-    window._PP_REASONS = window._PP_REASONS.filter(function (x) { return x.id !== id; });
-    _save();
-    ppRenderRejectionContent();
-    _toast('Rejection reason deleted', 'warn');
+    if (!r._dbId) { _toast('Cannot delete — reason not yet synced from server, please refresh.', 'error'); return; }
+    if (typeof window.apiReq !== 'function') { _toast('Cannot delete — app not ready, please refresh.', 'error'); return; }
+    window.apiReq('DELETE', '/rejectionreasons/' + r._dbId).then(function (res) {
+      if (!res || !res.success) {
+        _toast((res && (res.message || (res.errors && res.errors.join(' ')))) || 'Could not delete reason.', 'error');
+        return;
+      }
+      window._PP_REASONS = window._PP_REASONS.filter(function (x) { return x.id !== id; });
+      _refreshSelect();
+      ppRenderRejectionContent();
+      _toast('Rejection reason deleted', 'warn');
+    });
   };
 
   // ── Reorder ───────────────────────────────────────────────────────────
@@ -285,8 +314,14 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     var tmp = window._PP_REASONS[idx];
     window._PP_REASONS[idx] = window._PP_REASONS[ni];
     window._PP_REASONS[ni]  = tmp;
-    _save();
+    _refreshSelect();
     ppRenderRejectionContent();
+    if (typeof window.apiReq !== 'function') return;
+    var orderedDbIds = window._PP_REASONS.map(function (r) { return r._dbId; }).filter(function (x) { return x; });
+    if (orderedDbIds.length !== window._PP_REASONS.length) return; // not all rows synced yet — skip persisting order
+    window.apiReq('PUT', '/rejectionreasons/reorder', orderedDbIds).catch(function (e) {
+      console.warn('[RejectionReasons] reorder save failed:', e);
+    });
   };
 
   // ── Nav visibility (admin + product_team) ────────────────────────────
@@ -365,23 +400,49 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         result.push(cur.trim()); return result;
       }
 
-      var added = 0, skipped = 0;
+      var toCreate = [];
       for (var i = startIdx; i < lines.length; i++) {
         var cols  = parseRow(lines[i]);
         var key   = (cols[0] || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
         var label = (cols[1] || cols[0] || '').trim();
-        if (!key || !label) { skipped++; continue; }
-        if (window._PP_REASONS.find(function (r) { return r.id === key; })) { skipped++; continue; }
-        window._PP_REASONS.push({ id: key, label: label });
-        added++;
+        if (!key || !label) continue;
+        if (window._PP_REASONS.find(function (r) { return r.id === key; })) continue;
+        if (toCreate.find(function (r) { return r.key === key; })) continue;
+        toCreate.push({ key: key, label: label });
       }
-      try { localStorage.setItem('_pp_rejection_reasons', JSON.stringify(window._PP_REASONS)); } catch (err) {}
-      if (typeof _syncSelect === 'function') _syncSelect();
-      ppRenderRejectionContent();
-      var msg = added + ' reason(s) imported';
-      if (skipped) msg += ', ' + skipped + ' skipped (invalid/duplicate)';
-      if (typeof showToast === 'function') showToast(msg, added > 0 ? 'success' : 'warn');
-      input.value = '';
+      var skipped = lines.length - startIdx - toCreate.length;
+
+      if (!toCreate.length) {
+        if (typeof showToast === 'function') showToast('0 reason(s) imported' + (skipped ? ', ' + skipped + ' skipped (invalid/duplicate)' : ''), 'warn');
+        input.value = '';
+        return;
+      }
+      if (typeof window.apiReq !== 'function') {
+        if (typeof showToast === 'function') showToast('Cannot import — app not ready, please refresh.', 'error');
+        return;
+      }
+
+      // Post sequentially so a duplicate/validation failure on one row
+      // doesn't abort the rest, and the server's uniqueness check (not just
+      // this browser's current in-memory list) is authoritative.
+      var added = 0;
+      function postNext(i) {
+        if (i >= toCreate.length) {
+          if (typeof window._apiSyncRejectionReasons === 'function') {
+            window._apiSyncRejectionReasons().then(function () { _refreshSelect(); ppRenderRejectionContent(); });
+          }
+          var msg = added + ' reason(s) imported';
+          if (skipped || added < toCreate.length) msg += ', ' + (skipped + (toCreate.length - added)) + ' skipped (invalid/duplicate)';
+          if (typeof showToast === 'function') showToast(msg, added > 0 ? 'success' : 'warn');
+          input.value = '';
+          return;
+        }
+        window.apiReq('POST', '/rejectionreasons', toCreate[i]).then(function (res) {
+          if (res && res.success) added++;
+          postNext(i + 1);
+        }).catch(function () { postNext(i + 1); });
+      }
+      postNext(0);
     };
     reader.readAsText(file);
   };

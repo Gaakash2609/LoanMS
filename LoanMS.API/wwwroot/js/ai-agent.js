@@ -53,20 +53,52 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   };
 
   let _cfg = Object.assign({}, DEFAULT_CFG);
-  function _loadCfg() { try { var r=localStorage.getItem(CFG_STORE); if(r) _cfg=Object.assign({},DEFAULT_CFG,JSON.parse(r)); } catch(e){} }
-  function _saveCfg() { try { localStorage.setItem(CFG_STORE,JSON.stringify(_cfg)); } catch(e){} }
+  function _loadCfg() {
+    // Instant-render from cache, then reconcile with the server (source of
+    // truth) once it responds — was localStorage-only, so an admin's
+    // enabled/autoUpToStage/etc. settings only ever applied on the one
+    // browser that set them, never for automated runs triggered elsewhere.
+    try { var r=localStorage.getItem(CFG_STORE); if(r) _cfg=Object.assign({},DEFAULT_CFG,JSON.parse(r)); } catch(e){}
+    if (typeof window.apiReq === 'function') {
+      window.apiReq('GET', '/settings/ai_agent_config').then(function(res) {
+        var val = res && res.success && res.data ? res.data.value : null;
+        if (val) { try { _cfg = Object.assign({}, DEFAULT_CFG, JSON.parse(val)); _lsSet(CFG_STORE, JSON.stringify(_cfg)); } catch(e){} }
+      }).catch(function(){});
+    }
+  }
+  function _saveCfg() {
+    try { localStorage.setItem(CFG_STORE,JSON.stringify(_cfg)); } catch(e){}
+    if (typeof window.apiReq === 'function') {
+      window.apiReq('POST', '/settings', { key: 'ai_agent_config', value: JSON.stringify(_cfg), category: 'ai_agent' }).catch(function(){});
+    }
+  }
 
   let _runs = {};
   function _loadRuns() { try { var r=localStorage.getItem(AGENT_STORE); _runs=r?JSON.parse(r):{} } catch(e){_runs={};} }
   function _saveRuns() { try { localStorage.setItem(AGENT_STORE,JSON.stringify(_runs)); } catch(e){} }
-  function _startRun(id) {
+  function _startRun(id, app) {
     if(!_runs[id]) _runs[id]=[];
     var run={runId:'RUN-'+Date.now(),startedAt:new Date().toISOString(),finishedAt:null,steps:[],status:'running',error:null};
     _runs[id].unshift(run); if(_runs[id].length>20) _runs[id]=_runs[id].slice(0,20);
-    _saveRuns(); return run;
+    _saveRuns();
+    // Also log to the server — was localStorage-only, so this automated
+    // system's run history/audit trail was invisible to anyone but the
+    // browser that triggered it.
+    if (app && app._apiId && typeof window._apiStartAiAgentRun === 'function') {
+      window._apiStartAiAgentRun(app._apiId, run.runId).then(function(res) {
+        if (res && res.success && res.data) run._dbId = res.data.id;
+      }).catch(function(){});
+    }
+    return run;
   }
   function _logStep(run,stage,action,result,detail){ run.steps.push({ts:new Date().toISOString(),stage,action,result,detail:detail||''}); _saveRuns(); }
-  function _finishRun(run,status,error){ run.finishedAt=new Date().toISOString(); run.status=status; run.error=error||null; _saveRuns(); }
+  function _finishRun(run,status,error){
+    run.finishedAt=new Date().toISOString(); run.status=status; run.error=error||null; _saveRuns();
+    if (run._dbId && typeof window._apiUpdateAiAgentRun === 'function') {
+      window._apiUpdateAiAgentRun(run._dbId, { stepsJson: JSON.stringify(run.steps), status: status, error: error || null })
+        .catch(function(e) { console.warn('[AiAgent] run update failed:', e); });
+    }
+  }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function _ts() {
@@ -816,7 +848,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     if(['rejected','hold','cancelled','ni','disbursed'].includes(app.status)) {
       if(typeof showToast==='function') showToast('Akshiv: cannot run on '+app.status,'warn'); return;
     }
-    var run=_startRun(appId);
+    var run=_startRun(appId, app);
     _aiTrack(app,'EFIN-Akshiv \u2014 Run Started','System Comments',
       'Started: '+app.status,'Cross Verification Running');
     if(typeof showToast==='function') showToast('\uD83E\uDD16 Akshiv running for '+appId+'\u2026','info');

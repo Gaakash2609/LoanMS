@@ -1047,6 +1047,12 @@
 
 
     // ── Login rate-limit helpers ──
+    // UX-only: mirrors the server-side lock (AuthController.Login +
+    // LoginAttempts table, 5 failed attempts → 15 min) so the countdown
+    // shows instantly without a round trip. The server is the sole real
+    // enforcement point — clearing this localStorage key or switching
+    // browsers does not bypass the actual lock, since /api/auth/login
+    // rejects the attempt regardless of what this tab believes.
     const _LOGIN_LOCK_KEY  = 'efin_login_lock';
     const _LOGIN_MAX_TRIES = 5;
     const _LOGIN_LOCK_MS   = 15 * 60 * 1000; // 15 minutes
@@ -35227,7 +35233,7 @@ function stgRenderAllTemplates() {
   const badgeInlineStyle = { modal:'background:var(--surface3);color:var(--text3);border:1px solid var(--border)' };
 
   let saved = {};
-  try { saved = JSON.parse(localStorage.getItem(STG_TPL_KEY) || '{}'); } catch(e) {}
+  try { saved = window._EMAIL_TPL_OVERRIDES || JSON.parse(localStorage.getItem(STG_TPL_KEY) || '{}'); } catch(e) {}
 
   container.innerHTML = defs.map(t => {
     const sv      = saved[t.key] || {};
@@ -35302,26 +35308,32 @@ function stgSaveTpl(key) {
   const subjectEl = document.getElementById('stg-tpl-' + key + '-subject');
   const bodyEl    = document.getElementById('stg-tpl-' + key + '-body');
   if (!subjectEl || !bodyEl) return;
-  let templates = {};
-  try { templates = JSON.parse(localStorage.getItem(STG_TPL_KEY) || '{}'); } catch(e) {}
-  templates[key] = { subject: subjectEl.value, body: bodyEl.value };
-  _lsSet(STG_TPL_KEY, JSON.stringify(templates));
-  const saved = document.getElementById('stg-tpl-' + key + '-saved');
-  if (saved) { saved.style.display = 'inline'; setTimeout(() => saved.style.display = 'none', 2500); }
-  showToast('Template saved ✓', 'success');
 
-  // The invitation template is also editable from the "Invitation Email" folder
-  // (stg-inv-subject / stg-inv-body), which persists to the backend — the exact
-  // config EmailService reads. Keep both editors in sync and push through to the
-  // backend here too, so a save from either place is never silently lost on the
-  // next Settings reload.
-  if (key === 'invitation') {
-    const invSubjectEl = document.getElementById('stg-inv-subject');
-    const invBodyEl    = document.getElementById('stg-inv-body');
-    if (invSubjectEl) invSubjectEl.value = subjectEl.value;
-    if (invBodyEl)    invBodyEl.value    = bodyEl.value;
-    stgSaveMailConfig(); // persists invSubject/invBody (and the rest of the form) to the backend
-  }
+  if (typeof window.apiReq !== 'function') { showToast('Cannot save — app not ready, please refresh.', 'error'); return; }
+  window.apiReq('PUT', '/emailtemplates/' + key, { subject: subjectEl.value, body: bodyEl.value }).then(function(res) {
+    if (!res || !res.success) {
+      showToast((res && (res.message || (res.errors && res.errors.join(' ')))) || 'Could not save template.', 'error');
+      return;
+    }
+    if (!window._EMAIL_TPL_OVERRIDES) window._EMAIL_TPL_OVERRIDES = {};
+    window._EMAIL_TPL_OVERRIDES[key] = { subject: subjectEl.value, body: bodyEl.value };
+    const saved = document.getElementById('stg-tpl-' + key + '-saved');
+    if (saved) { saved.style.display = 'inline'; setTimeout(() => saved.style.display = 'none', 2500); }
+    showToast('Template saved ✓', 'success');
+
+    // The invitation template is also editable from the "Invitation Email" folder
+    // (stg-inv-subject / stg-inv-body), which persists to the backend — the exact
+    // config EmailService reads. Keep both editors in sync and push through to the
+    // backend here too, so a save from either place is never silently lost on the
+    // next Settings reload.
+    if (key === 'invitation') {
+      const invSubjectEl = document.getElementById('stg-inv-subject');
+      const invBodyEl    = document.getElementById('stg-inv-body');
+      if (invSubjectEl) invSubjectEl.value = subjectEl.value;
+      if (invBodyEl)    invBodyEl.value    = bodyEl.value;
+      stgSaveMailConfig(); // persists invSubject/invBody (and the rest of the form) to the backend
+    }
+  });
 }
 
 // ── Reset a template to its default ──
@@ -35332,6 +35344,11 @@ function stgResetTpl(key) {
   const bodyEl    = document.getElementById('stg-tpl-' + key + '-body');
   if (subjectEl) subjectEl.value = dflt.subject || '';
   if (bodyEl)    bodyEl.value    = dflt.body    || '';
+  if (typeof window.apiReq === 'function') {
+    window.apiReq('DELETE', '/emailtemplates/' + key).then(function() {
+      if (window._EMAIL_TPL_OVERRIDES) delete window._EMAIL_TPL_OVERRIDES[key];
+    });
+  }
   showToast('Template reset to default', 'info');
 }
 
@@ -35924,7 +35941,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 function stgGetTemplate(key) {
   try {
-    const t = JSON.parse(localStorage.getItem(STG_TPL_KEY) || '{}')[key];
+    const t = (window._EMAIL_TPL_OVERRIDES || JSON.parse(localStorage.getItem(STG_TPL_KEY) || '{}'))[key];
     if (t) return t;
   } catch(e) {}
   return STG_TPL_DEFAULTS[key] || null;
@@ -38803,20 +38820,21 @@ function validateClaimForm() {
 }
 
 function notifyManagement(type, claim) {
-  const notification = {
-    type: type,
-    claimId: claim.id,
-    partner: claim.partner,
-    amount: claim.claimAmount,
-    timestamp: new Date().toISOString(),
-    read: false
-  };
-  
-  // Store in localStorage for notifications
-  const notifications = JSON.parse(localStorage.getItem('mgmt_notifications') || '[]');
-  notifications.unshift(notification);
-  localStorage.setItem('mgmt_notifications', JSON.stringify(notifications.slice(0, 50)));
-  
+  // Previously wrote to localStorage on whichever browser triggered the
+  // event (e.g. a DSA/Partner submitting a claim) — Admin/Accounts, usually
+  // on a different device entirely, never actually received it. Now posted
+  // to the server so it's visible to Admin/Accounts regardless of who or
+  // where it was triggered from.
+  if (typeof window.apiReq === 'function') {
+    window.apiReq('POST', '/notifications', {
+      type: type,
+      claimId: claim.id,
+      partner: claim.partner,
+      amount: claim.claimAmount,
+      targetRole: null // visible to any role that reads notifications; narrow later if a role-specific inbox is added
+    }).catch(function (e) { console.warn('[Notifications] Could not save management notification:', e); });
+  }
+
   // Show toast if admin is viewing
   if (currentUser.role === 'admin' || currentUser.role === 'accounts') {
     console.log('🔔 New claim notification:', claim.id);
@@ -40796,50 +40814,36 @@ window.notifyManagement = notifyManagement;
   //  so the KYC OCR component stays a locked, untouched production module.
   // ══════════════════════════════════════════════════════════════
 
-  // Read the Gemini API key from the same shared config the app already uses
-  // (browser-saved key, else the embedded default). Read-only reuse — no KYC code.
-  function _pseGeminiKey() {
-    // Read the SAME browser-saved key the whole app uses ('efin_gemini_key',
-    // saved by Settings → KYC). The old code looked up a non-existent name,
-    // so the slip reader never found a key and always fell back to manual entry.
-    var k = '';
-    try { k = localStorage.getItem('efin_gemini_key') || ''; } catch (_) {}
-    // Zero-config embedded default (same as KYC OCR) so the slip reader works
-    // out-of-the-box. Never produces dummy data — the prompt returns null when
-    // Net Pay isn't clearly visible.
-    if (!k) k = '';
-    return k;
-  }
+  // NOTE: this legacy Gemini-key lookup is unused — _pseGeminiVision() below
+  // now goes through the server-side /api/kyc/vision proxy instead, which
+  // holds the configured provider's key server-side (Admin-only, DB-backed,
+  // under Settings → AI Keys). Nothing writes 'efin_gemini_key' anywhere in
+  // the app, so this always returned an empty string; kept only so any
+  // external caller checking "is a key configured" doesn't throw.
+  function _pseGeminiKey() { return ''; }
 
-  // Independent browser → Gemini vision call used ONLY by the Salary Slip stage.
+  // Salary-Slip vision call. Previously did a direct browser → Google Gemini
+  // fetch using a raw API key read from localStorage ('efin_gemini_key') —
+  // that key is no longer written anywhere (the real AI key management is
+  // DB-backed, Admin-only, under Settings → AI Keys), so this call always
+  // failed silently and fell back to manual entry. Now routed through the
+  // same server-side proxy the KYC PAN/Aadhaar OCR already uses
+  // (/api/kyc/vision) — the server holds the configured provider's key
+  // (Gemini/OpenAI/Claude, with failover) and it is never sent to the
+  // browser.
   async function _pseGeminiVision(images, prompt) {
-    var apiKey = _pseGeminiKey();
-    if (!apiKey) throw new Error('No Gemini key configured.');
-    var parts = [{ text: prompt }];
-    (images || []).forEach(function(img) {
-      parts.push({ inline_data: { mime_type: img.mediaType || 'image/jpeg', data: img.data } });
-    });
-    var body = JSON.stringify({ contents: [{ parts: parts }] });
-    var base = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
-    var attempts = /^AIza/.test(apiKey)
-      ? [ { url: base + '?key=' + encodeURIComponent(apiKey), headers: { 'Content-Type': 'application/json' } },
-          { url: base, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey } } ]
-      : [ { url: base, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey } },
-          { url: base + '?key=' + encodeURIComponent(apiKey), headers: { 'Content-Type': 'application/json' } } ];
-    var lastErr = '';
-    for (var a = 0; a < attempts.length; a++) {
-      var resp;
-      try { resp = await fetch(attempts[a].url, { method: 'POST', headers: attempts[a].headers, body: body }); }
-      catch (e) { lastErr = 'Network error reaching Gemini.'; continue; }
-      var j = null;
-      try { j = await resp.json(); } catch (_) {}
-      if (resp.ok) {
-        try { return j.candidates[0].content.parts.map(function(p){ return p.text || ''; }).join(''); }
-        catch (_) { throw new Error('Gemini returned an unexpected response.'); }
-      }
-      lastErr = (j && j.error && j.error.message) || ('Gemini error ' + resp.status);
-    }
-    throw new Error(lastErr || 'Gemini request failed.');
+    if (typeof window.apiReq !== 'function') throw new Error('App not ready — please refresh.');
+    var payload = {
+      documentType: 'SALARY_SLIP',
+      prompt: prompt,
+      images: (images || []).map(function(img) {
+        return { mediaType: img.mediaType || 'image/jpeg', data: img.data };
+      })
+    };
+    var res = await window.apiReq('POST', '/kyc/vision', payload);
+    if (!res) throw new Error('Network error reaching the KYC vision service.');
+    if (!res.success) throw new Error(res.error || res.message || 'Salary slip reading failed.');
+    return res.text || '';
   }
 
   async function pseGeminiExtract(file, i, mySession) {

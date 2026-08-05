@@ -865,6 +865,79 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     }).catch(function(e) { console.warn('[Bridge] syncBanks:', e); });
   }
 
+  /* Rejection Reasons (Policy & Product page) — GET/POST/PUT/DELETE
+     /api/rejectionreasons → window._PP_REASONS (rejection-reasons.js).
+     Previously '_pp_rejection_reasons' was localStorage-only, so one admin's
+     Add/Edit/Delete/Reorder never appeared for any other user/device. Same
+     approach as _syncBanks: database is the source of truth, replaced
+     wholesale on each sync. */
+  function _syncRejectionReasons() {
+    return apiReq('GET', '/rejectionreasons').then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      var mapped = res.data.map(function(r) { return { id: r.key, _dbId: r.id, label: r.label }; });
+      window._PP_REASONS = mapped;
+      if (typeof window._ppSyncSelect === 'function') { try { window._ppSyncSelect(); } catch (e) {} }
+      if (typeof window.ppRenderRejectionContent === 'function') { try { window.ppRenderRejectionContent(); } catch (e) {} }
+    }).catch(function(e) { console.warn('[Bridge] syncRejectionReasons:', e); });
+  }
+  window._apiSyncRejectionReasons = _syncRejectionReasons;
+
+  /* Email Templates (Settings → Templates) — GET/PUT/DELETE /api/emailtemplates
+     → window._EMAIL_TPL_OVERRIDES (efin-app.js reads this to override its
+     built-in STG_TPL_DEFAULTS per key). Previously 'efin_email_templates_v1'
+     was localStorage-only — an admin's customization never applied anywhere
+     else, including for server-triggered auto-sends. */
+  function _syncEmailTemplates() {
+    return apiReq('GET', '/emailtemplates').then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      var map = {};
+      res.data.forEach(function(t) { map[t.templateKey] = { subject: t.subject, body: t.body }; });
+      window._EMAIL_TPL_OVERRIDES = map;
+      if (typeof window.stgRenderAllTemplates === 'function') { try { window.stgRenderAllTemplates(); } catch (e) {} }
+    }).catch(function(e) { console.warn('[Bridge] syncEmailTemplates:', e); });
+  }
+  window._apiSyncEmailTemplates = _syncEmailTemplates;
+
+  /* Product Offer Matrix (Policy & Product page) — GET/PUT /api/productoffermatrix
+     → window.PRODUCT_CAM_MATRICES (merged over the built-in PP_DEFAULTS).
+     Previously 'efin_product_cam_v2' was localStorage-only. */
+  function _syncProductOfferMatrix() {
+    return apiReq('GET', '/productoffermatrix').then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      if (!window.PRODUCT_CAM_MATRICES) window.PRODUCT_CAM_MATRICES = {};
+      res.data.forEach(function(p) {
+        try { window.PRODUCT_CAM_MATRICES[p.productKey] = JSON.parse(p.matrixJson); }
+        catch (e) { console.warn('[Bridge] bad matrixJson for', p.productKey, e); }
+      });
+      if (typeof window.ppRenderProductMatrix === 'function') { try { window.ppRenderProductMatrix(); } catch (e) {} }
+    }).catch(function(e) { console.warn('[Bridge] syncProductOfferMatrix:', e); });
+  }
+  window._apiSyncProductOfferMatrix = _syncProductOfferMatrix;
+
+  /* Lender Email Thread (per application) — GET/POST /api/lenderemailthreads.
+     Fetched on demand (when a specific application's timeline/thread view
+     opens), not part of the global boot sync — mirrors how Obligations are
+     fetched per-application rather than all at once. */
+  window._apiFetchLenderEmailThread = function(loanApplicationId) {
+    return apiReq('GET', '/lenderemailthreads/' + loanApplicationId);
+  };
+  window._apiAppendLenderEmailThread = function(entry) {
+    return apiReq('POST', '/lenderemailthreads', entry);
+  };
+
+  /* AI Agent (Akshiv) run history (per application) — GET/POST/PUT
+     /api/aiagentruns. Fetched/written on demand, same reasoning as the
+     Lender Email Thread above. */
+  window._apiFetchAiAgentRuns = function(loanApplicationId) {
+    return apiReq('GET', '/aiagentruns/' + loanApplicationId);
+  };
+  window._apiStartAiAgentRun = function(loanApplicationId, runId) {
+    return apiReq('POST', '/aiagentruns', { loanApplicationId: loanApplicationId, runId: runId });
+  };
+  window._apiUpdateAiAgentRun = function(id, patch) {
+    return apiReq('PUT', '/aiagentruns/' + id, patch);
+  };
+
   /* Report Targets — GET/POST/PUT/DELETE /api/report-targets →
      window.RPT_TARGETS (efin-app.js). Previously RPT_TARGETS was a
      hardcoded frontend-only object (const RPT_TARGETS = {...}) persisted
@@ -1670,6 +1743,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           var msg = (data && (data.message || (data.errors && data.errors.join(' ')))) || 'Invalid email or password.';
           if (errEl) { errEl.textContent = '✕ ' + msg; errEl.style.display = 'block'; }
           if (passEl) { passEl.value = ''; }
+          // Mirror the failure into the local lockout counter used only for
+          // the instant "Xm Ys remaining" countdown display — the actual
+          // 5-attempts/15-minute lock is enforced server-side
+          // (AuthController.Login, backed by the LoginAttempts table), so
+          // this can never be bypassed by clearing localStorage or using a
+          // different browser; it just avoids a round trip to show the
+          // countdown on subsequent tries within the same tab.
+          try {
+            var lockState = JSON.parse(localStorage.getItem('efin_login_lock') || 'null') || { count: 0, ts: 0 };
+            lockState = { count: (lockState.count || 0) + 1, ts: Date.now() };
+            localStorage.setItem('efin_login_lock', JSON.stringify(lockState));
+          } catch (_) {}
           return;
         }
         // Save auth state in Zustand persist middleware format
@@ -1693,6 +1778,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         // this, that token key stayed empty forever after a real login,
         // silently 401'ing all of those features even for a logged-in user.
         _lsSet('loanms_token', data.data.accessToken);
+        try { localStorage.removeItem('efin_login_lock'); } catch (_) {}
         var u = data.data.user;
         var efinRole = ROLE_MAP[u.role] || 'sales_executive';
         var userEmail = u.email.toLowerCase();
@@ -1721,8 +1807,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           _syncTasks();
           _syncTickets();
           _syncDsaPartners();
+          _syncRmEmails();
           _syncBanks();
           _syncReportTargets();
+          _syncAssignmentAuditLog();
+          _syncRejectionReasons();
+          _syncEmailTemplates();
+          _syncProductOfferMatrix();
           setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500); // after loans have _apiId populated
           setTimeout(tkMigrateLegacyLocalTickets, 1000);
         }, 800);
@@ -1821,8 +1912,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             _syncTasks();
             _syncTickets();
             _syncDsaPartners();
+            _syncRmEmails();
             _syncBanks();
             _syncReportTargets();
+            _syncAssignmentAuditLog();
+            _syncRejectionReasons();
+            _syncEmailTemplates();
+            _syncProductOfferMatrix();
             setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500);
             setTimeout(tkMigrateLegacyLocalTickets, 1400);
           }, 1200);
@@ -2277,7 +2373,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
 
   // Expose sync functions for manual refresh
-  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); _syncRmEmails(); _syncBanks(); _syncReportTargets(); _syncAssignmentAuditLog(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
+  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); _syncRmEmails(); _syncBanks(); _syncReportTargets(); _syncAssignmentAuditLog(); _syncRejectionReasons(); _syncEmailTemplates(); _syncProductOfferMatrix(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
   window._syncPayoutClaimsFromServer = _syncPayoutClaimsFromServer;
   window._apiSyncLoans  = _syncLoans;
   window._apiSyncUsers  = _syncUsers;

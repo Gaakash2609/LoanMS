@@ -1,8 +1,11 @@
 using LoanMS.Application.DTOs;
 using LoanMS.Application.Interfaces;
+using LoanMS.Domain.Entities;
+using LoanMS.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace LoanMS.API.Controllers;
@@ -36,14 +39,27 @@ public class AuthController : BaseController
 {
     private readonly IAuthService          _auth;
     private readonly IPasswordResetService _passwordReset;
+    private readonly AppDbContext          _db;
 
-    public AuthController(IAuthService auth, IPasswordResetService passwordReset)
+    // Server-side lockout thresholds. Mirrors what the frontend previously
+    // enforced ALONE via localStorage key 'efin_login_lock' — trivially
+    // bypassed by clearing localStorage or opening an incognito window,
+    // so it was UX-only, not real security. This is now the sole
+    // enforcement point; the frontend lock is kept only to show an instant
+    // "locked, try again in Xm" message without a round trip.
+    private const int LockoutMaxAttempts = 5;
+    private static readonly TimeSpan LockoutWindow = TimeSpan.FromMinutes(15);
+
+    public AuthController(IAuthService auth, IPasswordResetService passwordReset, AppDbContext db)
     {
         _auth          = auth;
         _passwordReset = passwordReset;
+        _db            = db;
     }
 
-    /// <summary>Login — public, rate-limited to 5 attempts per IP per 15 minutes.</summary>
+    /// <summary>Login — public, rate-limited to 5 attempts per IP per 15 minutes,
+    /// and locked out for 15 minutes after 5 FAILED attempts for either the
+    /// target email or the calling IP (whichever trips first).</summary>
     [AllowAnonymous]
     [HttpPost("login")]
     [EnableRateLimiting("LoginPolicy")]
@@ -53,8 +69,51 @@ public class AuthController : BaseController
             return BadRequest(ApiResponseDto<LoginResponseDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
 
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var email = request.Email.Trim().ToLowerInvariant();
+        var windowStart = DateTime.UtcNow - LockoutWindow;
+
+        var emailFailCount = await _db.LoginAttempts
+            .Where(a => a.Email == email && a.CreatedAt >= windowStart)
+            .CountAsync();
+        var ipFailCount = await _db.LoginAttempts
+            .Where(a => a.IpAddress == ip && a.CreatedAt >= windowStart)
+            .CountAsync();
+
+        if (emailFailCount >= LockoutMaxAttempts || ipFailCount >= LockoutMaxAttempts)
+        {
+            var oldestRelevant = await _db.LoginAttempts
+                .Where(a => (a.Email == email || a.IpAddress == ip) && a.CreatedAt >= windowStart)
+                .OrderBy(a => a.CreatedAt)
+                .Select(a => a.CreatedAt)
+                .FirstOrDefaultAsync();
+            var retryAfter = oldestRelevant == default ? LockoutWindow : (oldestRelevant + LockoutWindow) - DateTime.UtcNow;
+            var minutes = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalMinutes));
+            return Ok(ApiResponseDto<LoginResponseDto>.Fail(
+                $"Too many failed attempts. Try again in {minutes} minute{(minutes == 1 ? "" : "s")}."));
+        }
+
         var result = await _auth.LoginAsync(request);
         await Task.Delay(200);
+
+        if (result.Success)
+        {
+            // Successful login clears this email's failed-attempt history —
+            // a mistyped-then-corrected password shouldn't leave the account
+            // sitting near a lockout threshold it never actually earned.
+            var stale = await _db.LoginAttempts.Where(a => a.Email == email).ToListAsync();
+            if (stale.Count > 0)
+            {
+                _db.LoginAttempts.RemoveRange(stale);
+                await _db.SaveChangesAsync();
+            }
+        }
+        else
+        {
+            _db.LoginAttempts.Add(new LoginAttempt { Email = email, IpAddress = ip, CreatedAt = DateTime.UtcNow });
+            await _db.SaveChangesAsync();
+        }
+
         // Always return 200 — frontend checks result.success flag
         // Returning 400 on wrong password causes api-bridge to lose the error message
         return Ok(result);

@@ -89,8 +89,20 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     });
   }
 
-  function _persist() {
+  // localStorage remains the instant-render cache; the database (via
+  // /api/productoffermatrix, synced at boot into window.PRODUCT_CAM_MATRICES
+  // by _syncProductOfferMatrix in api-bridge.js) is the source of truth.
+  // Previously this only wrote to localStorage — an admin's edits never
+  // applied for anyone else.
+  function _persist(changedKey) {
     try { localStorage.setItem(LS_KEY, JSON.stringify(window.PRODUCT_CAM_MATRICES)); } catch (e) {}
+    if (typeof window.apiReq !== 'function') return;
+    var keys = changedKey ? [changedKey] : Object.keys(window.PRODUCT_CAM_MATRICES);
+    keys.forEach(function (key) {
+      window.apiReq('PUT', '/productoffermatrix/' + key, {
+        matrixJson: JSON.stringify(window.PRODUCT_CAM_MATRICES[key])
+      }).catch(function (e) { console.warn('[ProductOfferMatrix] save failed for', key, e); });
+    });
   }
 
   function _e(s) {
@@ -359,7 +371,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     _toast('✓ Band added');
   };
   window.ppPmatSaveMatrix = function (key) {
-    _persist();
+    _persist(key);
     var msg = document.getElementById('pp-pmat-saved-'+key);
     if (msg){ msg.style.display='inline'; setTimeout(function(){ msg.style.display='none'; },2500); }
     _toast('✓ Matrix saved');
@@ -369,7 +381,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     if (!confirm('Reset "' + (nm||key) + '" to defaults?')) return;
     window.PRODUCT_CAM_MATRICES[key] = (PP_DEFAULTS[key]||[]).map(function(r){return Object.assign({},r);});
     _editingRow[key] = -1;
-    _persist();
+    _persist(key);
     ppRenderProductMatrix(key);
     _toast('↺ Reset to defaults','info');
   };

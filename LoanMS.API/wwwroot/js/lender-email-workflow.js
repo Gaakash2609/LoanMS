@@ -95,11 +95,29 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     return _threads[appId];
   }
 
-  function _appendThread(appId, entry) {
+  function _appendThread(appId, entry, app) {
     const thread = _getThread(appId);
     entry.id = thread.length + 1;
     thread.push(entry);
     _saveThreads();
+
+    // Push to the server too — was localStorage-only, so the conversation
+    // log (including AI-parsed lender replies used to gate approval stages)
+    // was invisible to anyone but this browser.
+    const loan = app || (window.APPLICATIONS && APPLICATIONS.find(a => a.id === appId));
+    if (loan && loan._apiId && typeof window._apiAppendLenderEmailThread === 'function') {
+      window._apiAppendLenderEmailThread({
+        loanApplicationId: loan._apiId,
+        direction: entry.direction === 'outbound' ? 'sent' : (entry.direction === 'inbound' ? 'received' : entry.direction),
+        stage: entry.stage || null,
+        rmName: entry.rmName || null,
+        rmEmail: entry.rmEmail || null,
+        subject: entry.subject || null,
+        bodyText: entry.bodyText || null,
+        source: entry.source || null,
+        parsedDataJson: entry.parsedData ? JSON.stringify(entry.parsedData) : null
+      }).catch(function(e) { console.warn('[LenderEmailWorkflow] server log failed:', e); });
+    }
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -890,7 +908,32 @@ Required JSON format:
   //  VIEW EMAIL THREAD MODAL
   // ════════════════════════════════════════════════════════════════════════
 
-  function openEmailThreadModal(appId) {
+  // Public entry point — fetches the latest thread from the server (source
+  // of truth) before rendering, merging it into the local cache used by
+  // _renderEmailThreadModalSync. Previously this modal only ever showed
+  // whatever was in this browser's localStorage.
+  window.openEmailThreadModal = function(appId) {
+    const app = window.APPLICATIONS && APPLICATIONS.find(a => a.id === appId);
+    if (app && app._apiId && typeof window._apiFetchLenderEmailThread === 'function') {
+      window._apiFetchLenderEmailThread(app._apiId).then(function(res) {
+        if (res && res.success && Array.isArray(res.data)) {
+          _threads[appId] = res.data.map(function(e) {
+            return {
+              id: e.id, direction: e.direction, stage: e.stage, rmName: e.rmName, rmEmail: e.rmEmail,
+              subject: e.subject, bodyText: e.bodyText, timestamp: e.createdAt, source: e.source,
+              parsedData: e.parsedDataJson ? JSON.parse(e.parsedDataJson) : null
+            };
+          });
+          _saveThreads();
+        }
+        _renderEmailThreadModalSync(appId);
+      }).catch(function() { _renderEmailThreadModalSync(appId); });
+    } else {
+      _renderEmailThreadModalSync(appId);
+    }
+  };
+
+  function _renderEmailThreadModalSync(appId) {
     const app    = window.APPLICATIONS && APPLICATIONS.find(a => a.id === appId);
     const thread = _getThread(appId);
     if (!app) return;
