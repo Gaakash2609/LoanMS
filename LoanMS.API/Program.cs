@@ -124,7 +124,20 @@ try
             {
                 npg.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5), errorCodesToAdd: null);
                 npg.CommandTimeout(30);
-            });
+            })
+            // The SQLite branch below already ignores this — Postgres didn't,
+            // which is what was actually crash-looping every ECS task on
+            // this deploy (see CloudWatch: "FATAL: Database initialization
+            // failed ... PendingModelChangesWarning"). EF Core's built-in
+            // drift check compares the live entity model to the last
+            // migration snapshot and throws by default if they don't match
+            // exactly; MigrateAsync() never even got to run/apply the actual
+            // pending migrations because this check fails first. Ignoring it
+            // here restores the same behavior Postgres already had before
+            // this became a hard error, so real, already-written migrations
+            // (including AddUserProfileFields) can apply normally again.
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
         }
         else
         {
