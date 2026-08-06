@@ -162,9 +162,17 @@ public class LoansController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Delete loan (Draft only) [Admin only]</summary>
+    /// <summary>
+    /// Delete loan (Draft only). Open to any authenticated role — not just
+    /// Admin — because this is now also how the wizard's Applications →
+    /// Drafts "Discard" button works (see LoansPage.tsx / draftStorage.ts),
+    /// and every non-Admin role needs to be able to discard their own
+    /// in-progress draft. LoanService.DeleteAsync enforces the actual
+    /// authorization (same creator-or-Admin/Manager rule as GetDraft/
+    /// ListDrafts in WizardController) and still only ever allows deleting
+    /// a Draft-status loan — every other status is rejected regardless of role.
+    /// </summary>
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)
     {
         var result = await _loanService.DeleteAsync(id, CurrentUserId, CurrentUserRole);

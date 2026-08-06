@@ -19,6 +19,14 @@ public class Loan : BaseEntity
     public DateTime? DisbursedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
 
+    // ── Wizard draft progress (server-side — replaces the old client-only
+    // localStorage "wizard_draft_meta" index) ─────────────────────────────
+    // Which step of the New Application wizard this Draft-status loan was
+    // last saved on. Only ever meaningful while Status == Draft; lets the
+    // "Applications → Drafts" list and a resumed session pick up on the
+    // exact same step from any device, with nothing kept in the browser.
+    public int? WizardStep { get; set; }
+
     // Foreign Keys
     public int CustomerId { get; set; }
     public int CreatedByUserId { get; set; }

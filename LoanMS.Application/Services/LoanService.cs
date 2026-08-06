@@ -192,18 +192,26 @@ public class LoanService : ILoanService
 
     public async Task<ApiResponseDto<bool>> DeleteAsync(int id, int currentUserId, string currentUserRole)
     {
-        // Phase 3A — Delete is already Admin-only at the controller (Role
-        // attribute), and Admin is unrestricted in ApplyVisibilityScope, so this
-        // check is a no-op for Admin today. Kept here for defense-in-depth and so
-        // Delete follows the same "verify access before acting" pattern as every
-        // other action, in case the allowed-roles list ever changes.
-        if (!await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
-            return ApiResponseDto<bool>.Fail("Loan not found.");
-
+        // Delete is no longer Admin-only at the controller — every role can
+        // reach this for the "Discard draft" action in the wizard (see
+        // LoansController.Delete). The general HasAccessAsync visibility
+        // scope (Dsa/Partner via linked-record indirection, Manager via
+        // Location/Team) doesn't line up with drafts, which are only ever
+        // owned by their creator (WizardController always sets
+        // CreatedByUserId from the JWT, never from the request). So a
+        // Draft's own creator, or an Admin/Manager, may delete it — the
+        // exact same rule already used for GetDraft/ListDrafts in
+        // WizardController — instead of relying on the broader
+        // Sales/Dsa/Partner/Manager visibility scope built for the general
+        // loan-management screens.
         var loan = await _uow.Loans.GetByIdAsync(id);
         if (loan == null) return ApiResponseDto<bool>.Fail("Loan not found.");
         if (loan.Status != LoanStatus.Draft)
             return ApiResponseDto<bool>.Fail("Only Draft loans can be deleted.");
+
+        var isInternal = _internalRoles.Contains(currentUserRole ?? string.Empty);
+        if (!isInternal && loan.CreatedByUserId != currentUserId)
+            return ApiResponseDto<bool>.Fail("Loan not found.");
 
         await _uow.Loans.DeleteAsync(id);
         await _uow.SaveChangesAsync();

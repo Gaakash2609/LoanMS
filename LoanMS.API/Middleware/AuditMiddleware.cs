@@ -1,5 +1,7 @@
 using LoanMS.Domain.Entities;
 using LoanMS.Infrastructure.Data;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -13,6 +15,23 @@ namespace LoanMS.API.Middleware;
 public class AuditMiddleware
 {
     private readonly RequestDelegate _next;
+    // Root cause of "every save feels slow, across every module": this
+    // middleware wraps EVERY POST/PUT/PATCH/DELETE in the app (loans,
+    // users, customers, obligations, wizard, RM emails, everything), and
+    // previously called db.SaveChangesAsync() for the audit row itself
+    // BEFORE letting the request finish — i.e. every single write request
+    // paid for two sequential DB round-trips (the real save + the audit
+    // save) before the browser saw a response. That is a universal,
+    // per-request tax on the whole app, not something specific to any one
+    // screen — which matches the save being slow "sabhi me". The request's
+    // own scoped AppDbContext is disposed the moment this method returns,
+    // so the audit write is moved onto a fresh short-lived scope via
+    // IServiceScopeFactory and fired without awaiting it — the user's
+    // response is no longer held up by the audit log write, while the
+    // audit trail itself (including PII masking) still happens exactly as
+    // before, just after the response has already gone out.
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<AuditMiddleware> _logger;
 
     private static readonly HashSet<string> _auditMethods = new(StringComparer.OrdinalIgnoreCase)
         { "POST", "PUT", "PATCH", "DELETE" };
@@ -31,9 +50,14 @@ public class AuditMiddleware
         { "pan", "aadhar", "aadhaar", "aadhaarnumber", "pannumber", "mobile", "phone",
           "password", "currentpassword", "newpassword", "dob", "dateofbirth", "refreshtoken" };
 
-    public AuditMiddleware(RequestDelegate next) => _next = next;
+    public AuditMiddleware(RequestDelegate next, IServiceScopeFactory scopeFactory, ILogger<AuditMiddleware> logger)
+    {
+        _next = next;
+        _scopeFactory = scopeFactory;
+        _logger = logger;
+    }
 
-    public async Task InvokeAsync(HttpContext ctx, AppDbContext db)
+    public async Task InvokeAsync(HttpContext ctx)
     {
         var method = ctx.Request.Method;
         var path   = ctx.Request.Path.Value ?? "";
@@ -66,44 +90,69 @@ public class AuditMiddleware
         // Only log successful writes
         if (ctx.Response.StatusCode is >= 200 and < 300)
         {
-            try
+            // Everything needed for the audit row is read from ctx HERE,
+            // synchronously, while the request is still alive — ctx (and
+            // the request's own scoped services) must not be touched from
+            // inside the fire-and-forget task below, since ASP.NET Core
+            // is free to recycle/dispose them the moment InvokeAsync
+            // returns.
+            var segments   = path.Trim('/').Split('/');
+            var entityName = segments.Length >= 2 ? segments[1] : "Unknown";
+            var entityId   = segments.Length >= 3 ? segments[2] : null;
+            var action     = method.ToUpper() switch
             {
-                var segments   = path.Trim('/').Split('/');
-                var entityName = segments.Length >= 2 ? segments[1] : "Unknown";
-                var entityId   = segments.Length >= 3 ? segments[2] : null;
-                var action     = method.ToUpper() switch
-                {
-                    "POST"   => "Created",
-                    "PUT"    => "Updated",
-                    "PATCH"  => "Updated",
-                    "DELETE" => "Deleted",
-                    _        => method
-                };
-                if (path.Contains("/status") || path.Contains("/approve") ||
-                    path.Contains("/reject") || path.Contains("/disburse"))
-                    action = "StatusChanged";
+                "POST"   => "Created",
+                "PUT"    => "Updated",
+                "PATCH"  => "Updated",
+                "DELETE" => "Deleted",
+                _        => method
+            };
+            if (path.Contains("/status") || path.Contains("/approve") ||
+                path.Contains("/reject") || path.Contains("/disburse"))
+                action = "StatusChanged";
 
-                var userId   = GetUserId(ctx);
-                var userName = GetUserName(ctx);
-                var ip       = ctx.Connection.RemoteIpAddress?.ToString();
+            var userId   = GetUserId(ctx);
+            var userName = GetUserName(ctx);
+            var ip       = ctx.Connection.RemoteIpAddress?.ToString();
 
-                // Mask PII before storing — never write raw PAN / Aadhaar / passwords to audit log
-                var maskedBody = MaskPiiFields(bodyString);
+            // Mask PII before storing — never write raw PAN / Aadhaar / passwords to audit log
+            var maskedBody = MaskPiiFields(bodyString);
 
-                db.AuditLogs.Add(new AuditLog
-                {
-                    EntityName = Capitalize(entityName),
-                    Action     = action,
-                    EntityId   = entityId,
-                    NewValues  = TruncateJson(maskedBody, 2000),
-                    UserName   = userName,
-                    UserId     = userId,
-                    IpAddress  = ip,
-                    CreatedAt  = DateTime.UtcNow
-                });
-                await db.SaveChangesAsync();
-            }
-            catch { /* Audit failure must never break the main request */ }
+            var entry = new AuditLog
+            {
+                EntityName = Capitalize(entityName),
+                Action     = action,
+                EntityId   = entityId,
+                NewValues  = TruncateJson(maskedBody, 2000),
+                UserName   = userName,
+                UserId     = userId,
+                IpAddress  = ip,
+                CreatedAt  = DateTime.UtcNow
+            };
+
+            // Deliberately not awaited: the user's response has already
+            // been written to origBody above, so blocking here would only
+            // add latency the caller never asked for. Errors are logged,
+            // never thrown back into the request pipeline (which has
+            // already completed by the time this runs).
+            _ = PersistAuditAsync(entry);
+        }
+    }
+
+    private async Task PersistAuditAsync(AuditLog entry)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AuditLogs.Add(entry);
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            // Audit failure must never break the main request — by this
+            // point the request is long finished, so just log it.
+            _logger.LogWarning(ex, "Background audit log persist failed for {Entity} {Action}", entry.EntityName, entry.Action);
         }
     }
 

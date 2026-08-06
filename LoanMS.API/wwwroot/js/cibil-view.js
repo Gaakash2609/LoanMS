@@ -337,6 +337,19 @@
       '.cibil-kv-val.empty{color:var(--text3);font-style:italic;font-weight:400}',
       '.cibil-addr-card{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start}',
       '.cibil-addr-icon{width:32px;height:32px;background:rgba(37,99,235,.08);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}',
+      /* ── TOC + scroll-anchor styles (added) ── */
+      '.cibil-section{scroll-margin-top:64px}',
+      '.cibil-toc{counter-reset:cibil-toc-counter}',
+      '.cibil-toc-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px}',
+      '.cibil-toc-list li{counter-increment:cibil-toc-counter}',
+      '.cibil-toc-list a{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:500;color:var(--text2);text-decoration:none;padding:6px 10px;border-radius:8px;border:1px solid transparent}',
+      '.cibil-toc-list a:hover{background:var(--surface2);border-color:var(--border)}',
+      '.cibil-toc-list a::before{content:counter(cibil-toc-counter);counter-increment:none;flex-shrink:0;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:10.5px;font-weight:700;display:flex;align-items:center;justify-content:center}',
+      '.cibil-contact-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:16px}',
+      '.cibil-contact-table th{padding:9px 12px;text-align:left;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;background:#f8fafc;border-bottom:2px solid #e2e8f0}',
+      '.cibil-contact-table td{padding:9px 12px;border-bottom:1px solid #eef2f6;color:#1e293b}',
+      '.cibil-legend-item{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#334155;line-height:1.5}',
+      '.cibil-legend-key{flex-shrink:0;min-width:52px;font-weight:700;color:#1e3a5f}',
     ].join('');
     document.head.appendChild(s);
   }
@@ -469,6 +482,12 @@
     /* ── ENHANCED: Enquiry Summary + Details Table ── */
     var enquirySection = _buildEnquirySection(enqAnalysis, enqDetails);
 
+    /* ── NEW: Personal & Contact Information (added) ── */
+    var contactSection = _buildContactInfo(appAddresses, appMobiles, appOffice, appEmails);
+
+    /* ── NEW: Support & Legend (added) ── */
+    var supportLegendSection = _buildSupportLegend();
+
     /* ── ENHANCED SECTIONS ── */
     var healthDashboard = _buildCreditHealthDashboard(score, maxSc, minSc, accounts, bd);
     var paymentAnalysis = _buildPaymentAnalysis(accounts);
@@ -487,6 +506,7 @@
     container.innerHTML =
       '<div style="padding:2px 4px">' +
 
+        _buildTOC() +
         _buildSectionNav() +
         toolbar +
 
@@ -511,6 +531,9 @@
 
         // Payment Timeline (after accounts table)
         _buildPaymentTimeline(payHist) +
+
+        // Personal & Contact Information
+        contactSection +
 
         // Account Summary Dashboard
         '<div id="cr-accsum"></div>' +
@@ -543,6 +566,10 @@
         creditEducation +
 
         histBlock +
+
+        // Support & Legend
+        supportLegendSection +
+
         disclaimer +
 
       '</div>';
@@ -796,7 +823,7 @@
       '<tbody>' + rows + '</tbody>' +
     '</table>';
     
-    return '<div class="cibil-section" style="background:#ffffff;border:1px solid #dde6f0;border-radius:10px;padding:20px;margin-bottom:14px;overflow:hidden">' +
+    return '<div class="cibil-section" id="cr-breakdown" style="background:#ffffff;border:1px solid #dde6f0;border-radius:10px;padding:20px;margin-bottom:14px;overflow:hidden">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:16px" onclick="_cibilToggle(\'cibil-bd\',this)">' +
         '<div>' +
           '<h3 style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0 0 3px">📊 Score Breakdown</h3>' +
@@ -1581,7 +1608,7 @@
         (flags.length?'<div style="display:flex;gap:4px">'+flags.join('')+'</div>':'') +
       '</div>';
     }).join('');
-    return '<div class="cibil-section" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px">' +
+    return '<div class="cibil-section" id="cr-timeline" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:12px" onclick="_cibilToggle(\'cibil-timeline-body\',this)">' +
         '<div style="font-size:14px;font-weight:700;color:var(--text)">📅 Payment History Timeline <span style="font-size:11px;background:var(--accent-subtle);color:var(--accent);padding:2px 8px;border-radius:10px;font-weight:600;margin-left:4px">'+monthly.length+' months</span></div>' +
         '<span id="cibil-timeline-body-arrow" style="font-size:12px;color:var(--text3)">▾</span>' +
@@ -1718,7 +1745,7 @@
     var overallHealth = healthScore >= 800 ? 'Excellent' : healthScore >= 700 ? 'Good' : healthScore >= 600 ? 'Fair' : 'Poor';
     var healthColor = healthScore >= 800 ? '#0ea5e9' : healthScore >= 700 ? '#16a34a' : healthScore >= 600 ? '#f97316' : '#dc2626';
     
-    return '<div class="cibil-section" style="background:#fff;border:1px solid #dde6f0;border-radius:10px;padding:20px;margin-bottom:14px">' +
+    return '<div class="cibil-section" id="cr-health" style="background:#fff;border:1px solid #dde6f0;border-radius:10px;padding:20px;margin-bottom:14px">' +
       '<h2 style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0 0 16px">📈 Credit Health Dashboard</h2>' +
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">' +
         '<div style="background:' + healthColor + '10;border:1px solid ' + healthColor + '30;border-radius:8px;padding:14px;text-align:center">' +
@@ -1861,5 +1888,122 @@
     '</div>';
   }
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     11. TABLE OF CONTENTS  (added)
+     Numbered nav at the very top of the report, linking to every section
+     that actually exists in this file's real DOM (unlike the older
+     _buildSectionNav pill-bar, which links to a few sections — e.g.
+     #cr-consumer, #cr-ident, #cr-employ — that were never built; this TOC
+     only ever points at ids that are genuinely rendered).
+  ═══════════════════════════════════════════════════════════════════════ */
+  function _buildTOC() {
+    var items = [
+      ['#cr-score',       'Score & Summary'],
+      ['#cr-breakdown',   'Score Breakdown & Risk Indicators'],
+      ['#cr-health',      'Credit Health Dashboard'],
+      ['#cr-accsum',      'Account Summary'],
+      ['#cr-portfolio',   'Utilization & Portfolio Breakdown'],
+      ['#cr-active-loans','Active Loans'],
+      ['#cr-paybehaviour','Credit Mix / Payment Behaviour'],
+      ['#cr-timeline',    'Payment History Timeline'],
+      ['#cr-contact',     'Personal & Contact Info'],
+      ['#cr-acctable',    'Accounts'],
+      ['#cr-enquiry',     'Enquiries'],
+      ['#cr-legend',      'Support & Legend'],
+    ];
+    var lis = items.map(function(it){
+      return '<li><a href="'+it[0]+'" onclick="(function(id){var el=document.getElementById(id.slice(1));if(el)el.scrollIntoView({behavior:\'smooth\',block:\'start\'});})(this.hash);return false;">'+esc(it[1])+'</a></li>';
+    }).join('');
+    return '<div class="cibil-section cibil-toc" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 20px;margin-bottom:14px">' +
+      '<h2 style="font-size:14px;font-weight:700;color:var(--text);margin:0 0 12px">📑 Table of Contents</h2>' +
+      '<ol class="cibil-toc-list">'+lis+'</ol>' +
+    '</div>';
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     12. CONTACT INFORMATION  (added)
+     Address Details / Phone Numbers / Email IDs — sourced entirely from
+     profile.addresses / profile.mobileNumbers / profile.officeNumber /
+     profile.emailAddresses, which the live API already returns
+     (CustomerProfileDto) but which no existing section actually rendered.
+  ═══════════════════════════════════════════════════════════════════════ */
+  function _buildContactInfo(addresses, mobiles, officeNumber, emails) {
+    addresses = addresses || [];
+    mobiles   = mobiles   || [];
+    emails    = emails    || [];
+
+    // ── Address Details table ──
+    var addrRows = addresses.length
+      ? addresses.map(function(a){
+          var line = [a.street, a.city, a.state, a.postalCode, a.country].filter(Boolean).map(esc).join(', ') || '—';
+          return '<tr><td>'+line+'</td><td>'+esc(a.type||'—')+'</td><td>'+(a.dateReported?fmtDate(a.dateReported):'—')+'</td></tr>';
+        }).join('')
+      : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;font-style:italic">No address on file</td></tr>';
+    var addrTable = '<table class="cibil-contact-table"><thead><tr><th>Address</th><th>Category</th><th>Date Reported</th></tr></thead><tbody>'+addrRows+'</tbody></table>';
+
+    // ── Phone Numbers table ──
+    var phoneRows = mobiles.map(function(m){ return '<tr><td>Mobile Phone</td><td>'+esc(m)+'</td></tr>'; }).join('');
+    if (officeNumber && officeNumber !== '—') phoneRows += '<tr><td>Office</td><td>'+esc(officeNumber)+'</td></tr>';
+    if (!phoneRows) phoneRows = '<tr><td colspan="2" style="text-align:center;color:#94a3b8;font-style:italic">No phone number on file</td></tr>';
+    var phoneTable = '<table class="cibil-contact-table"><thead><tr><th>Type</th><th>Number</th></tr></thead><tbody>'+phoneRows+'</tbody></table>';
+
+    // ── Email IDs table ──
+    var emailRows = emails.length
+      ? emails.map(function(e){ return '<tr><td>'+esc(e)+'</td></tr>'; }).join('')
+      : '<tr><td style="text-align:center;color:#94a3b8;font-style:italic">No email on file</td></tr>';
+    var emailTable = '<table class="cibil-contact-table"><thead><tr><th>Email ID</th></tr></thead><tbody>'+emailRows+'</tbody></table>';
+
+    return '<div class="cibil-section" id="cr-contact" style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:20px 22px;margin-bottom:14px">' +
+      '<h2 style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0 0 4px">📇 Personal &amp; Contact Information</h2>' +
+      '<p style="font-size:12.5px;color:#64748b;margin:0 0 16px">Addresses, phone numbers, and email IDs as reported to the bureau.</p>' +
+      '<div style="display:grid;grid-template-columns:1fr;gap:4px">' +
+        '<div><div style="font-size:12px;font-weight:700;color:#1e3a5f;margin-bottom:6px">Address Details</div>'+addrTable+'</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">' +
+          '<div><div style="font-size:12px;font-weight:700;color:#1e3a5f;margin-bottom:6px">Phone Numbers</div>'+phoneTable+'</div>' +
+          '<div><div style="font-size:12px;font-weight:700;color:#1e3a5f;margin-bottom:6px">Email IDs</div>'+emailTable+'</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     13. SUPPORT & LEGEND  (added)
+     Static reference content — no live-data dependency, no mock-mode
+     caveat (this tool is live-API-only).
+  ═══════════════════════════════════════════════════════════════════════ */
+  function _buildSupportLegend() {
+    function legendItem(key, desc) {
+      return '<div class="cibil-legend-item"><span class="cibil-legend-key">'+esc(key)+'</span><span>'+esc(desc)+'</span></div>';
+    }
+    return '<div class="cibil-section" id="cr-legend" style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:20px 22px;margin-bottom:14px">' +
+      '<h2 style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0 0 14px">❓ Support &amp; Legend</h2>' +
+      '<div style="background:rgba(37,99,235,.05);border:1px solid rgba(37,99,235,.16);border-radius:8px;padding:14px 16px;margin-bottom:16px">' +
+        '<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:4px">See something wrong on this report?</div>' +
+        '<div style="font-size:12.5px;color:var(--text2);line-height:1.6">Raise a dispute with our support team and we\'ll investigate with the bureau on your behalf.<br>' +
+          '📧 <a href="mailto:support@loanms.example" style="color:var(--accent)">support@loanms.example</a> &nbsp;·&nbsp; 🔗 <a href="#" style="color:var(--accent)">Raise a Dispute</a>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 24px">' +
+        legendItem('SF', 'Suit Filed — legal proceedings initiated by the lender for recovery.') +
+        legendItem('WD', 'Written-off and Dispute — account written off and disputed by the borrower.') +
+        legendItem('WO', 'Written-Off — lender has classified the outstanding as a loss.') +
+        legendItem('Settled', 'Account closed after a negotiated payment lower than the full amount owed.') +
+        legendItem('Active*', 'Account currently active with less than 90 days past due (DPD < 90).') +
+        legendItem('Active**', 'Account currently active with 90 or more days past due (DPD ≥ 90).') +
+        legendItem('Closed', 'Account fully repaid and closed in the bureau\'s records.') +
+        legendItem('DPD', 'Days Past Due — number of days a payment is overdue as of the report date.') +
+      '</div>' +
+      '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">' +
+        '<div style="font-size:12px;font-weight:700;color:#1e3a5f;margin-bottom:8px">RBI Asset Classification</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 24px">' +
+          legendItem('S', 'Standard — regular, no overdue beyond the normal term.') +
+          legendItem('M', 'Special Mention — early signs of stress, not yet a Non-Performing Asset.') +
+          legendItem('B', 'Substandard — remained a Non-Performing Asset for up to 12 months.') +
+          legendItem('D', 'Doubtful — remained substandard for more than 12 months.') +
+          legendItem('L', 'Loss — identified as a loss asset, largely uncollectible.') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
 
 })(window);

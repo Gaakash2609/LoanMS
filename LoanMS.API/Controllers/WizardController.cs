@@ -537,6 +537,7 @@ public class WizardController : BaseController
         var dto = new WizardSubmitDto
         {
             LoanId      = loan.Id,
+            Step        = loan.WizardStep,
             FullName    = c?.FullName ?? string.Empty,
             Mobile      = c?.Phone ?? string.Empty,
             Email       = c?.Email ?? string.Empty,
@@ -573,6 +574,57 @@ public class WizardController : BaseController
         };
 
         return Ok(ApiResponseDto<WizardSubmitDto>.Ok(dto));
+    }
+
+    /// <summary>
+    /// List this user's in-progress wizard drafts, for the Applications → Drafts
+    /// list. Replaces the old client-only localStorage index (draftStorage.ts) —
+    /// the id/step/label/loanType/timestamps needed to render that list, and to
+    /// resume a draft on any device, now come entirely from the database.
+    /// Admin/Manager see every draft (same visibility rule as GetDraft); every
+    /// other role only sees drafts they created.
+    /// </summary>
+    [HttpGet("drafts")]
+    public async Task<IActionResult> ListDrafts()
+    {
+        var isInternal = CurrentUserRole is "Admin" or "Manager";
+
+        var q = _db.Loans
+            .Include(l => l.Customer)
+            .Where(l => !l.IsDeleted && l.Status == LoanStatus.Draft);
+
+        if (!isInternal)
+            q = q.Where(l => l.CreatedByUserId == CurrentUserId);
+
+        var drafts = await q
+            .OrderByDescending(l => l.UpdatedAt ?? l.CreatedAt)
+            .Select(l => new
+            {
+                loanId    = l.Id,
+                step      = l.WizardStep,
+                loanType  = l.LoanType,
+                fullName  = l.Customer.FullName,
+                createdAt = l.CreatedAt,
+                updatedAt = l.UpdatedAt ?? l.CreatedAt
+            })
+            .ToListAsync();
+
+        // Map LoanType enum back to the short key the wizard/frontend uses
+        // (e.g. LoanType.Car -> "new_car"), and build a small, generic label —
+        // no PII beyond what a Draft/Applications-list entry already implies.
+        var result = drafts.Select(d => new
+        {
+            loanId    = d.loanId,
+            step      = d.step,
+            loanType  = _loanTypeMap.FirstOrDefault(kv => kv.Value == d.loanType).Key ?? "personal_loan",
+            label     = string.IsNullOrWhiteSpace(d.fullName)
+                        ? "Untitled application"
+                        : d.fullName,
+            createdAt = d.createdAt,
+            updatedAt = d.updatedAt
+        });
+
+        return Ok(ApiResponseDto<object>.Ok(result));
     }
 
     /// <summary>
@@ -629,6 +681,7 @@ public class WizardController : BaseController
                 loan.TenureMonths    = dto.Tenure > 0 ? dto.Tenure : 24;
                 loan.Purpose         = dto.Purpose;
                 loan.UpdatedAt       = DateTime.UtcNow;
+                if (dto.Step.HasValue) loan.WizardStep = dto.Step;
                 ApplyMapping(loan, dto);
             }
             else
@@ -651,6 +704,7 @@ public class WizardController : BaseController
                     InterestRate    = dto.LoanRate > 0 ? dto.LoanRate : 12,
                     TenureMonths    = dto.Tenure > 0 ? dto.Tenure : 24,
                     Purpose         = dto.Purpose,
+                    WizardStep      = dto.Step,
                     CustomerId      = customer.Id,
                     // CreatedByUserId always comes from the authenticated JWT identity —
                     // never from the request body — so the request cannot spoof authorship.

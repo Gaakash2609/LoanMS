@@ -2493,29 +2493,93 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       }).catch(function(e) { console.warn('[Bridge] doc upload:', e); });
   };
 
-  /* Smart polling — sync data every 60s when tab is visible */
+  /* Smart polling — sync data every 60s when tab is visible.
+     Previously this loop only synced Loans + Tickets, so any tab left
+     open on a second device never picked up changes made anywhere else
+     until that tab did a full page reload/re-login (the only other place
+     most of these _syncX functions were called — see doLogin and the
+     DOMContentLoaded session-restore block above, same list as
+     window._apiSyncAll). That is the general cause behind "saves feel
+     slow / sometimes never show on another device, across every screen":
+     most entities were simply not part of the recurring sync, only the
+     one-time login/refresh sync. This now mirrors _apiSyncAll's full list
+     so an already-open tab picks up cross-device changes in ANY module
+     within one polling cycle, not just Loans/Tickets/Users/RM Emails. */
+  function _pollTick() {
+    if (!_lsGet('loanms_token')) return;
+    if (document.hidden) return;
+    // Each sync function below is a plain identifier in this same closure
+    // (defined earlier in this file), so it's referenced directly rather
+    // than via a name string — a string-keyed window[...] lookup would
+    // only find functions explicitly attached to window and silently miss
+    // these closure-local ones, which is not the case for all of them.
+    if (typeof _syncLoans === 'function') _syncLoans();
+    else if (typeof window._apiSyncLoans === 'function') window._apiSyncLoans();
+    if (typeof _syncUsers === 'function') _syncUsers();
+    else if (typeof window._apiSyncUsers === 'function') window._apiSyncUsers();
+    if (typeof _syncTeams === 'function') _syncTeams();
+    else if (typeof window._apiSyncTeams === 'function') window._apiSyncTeams();
+    if (typeof _syncLocations === 'function') _syncLocations();
+    else if (typeof window._apiSyncLocations === 'function') window._apiSyncLocations();
+    if (typeof _syncTasks === 'function') _syncTasks();
+    else if (typeof window._apiSyncTasks === 'function') window._apiSyncTasks();
+    if (typeof _syncTickets === 'function') _syncTickets();
+    else if (typeof window._apiSyncTickets === 'function') window._apiSyncTickets();
+    if (typeof _syncDsaPartners === 'function') _syncDsaPartners();
+    else if (typeof window._apiSyncDsaPartners === 'function') window._apiSyncDsaPartners();
+    if (typeof _syncRmEmails === 'function') _syncRmEmails();
+    else if (typeof window._apiSyncRmEmails === 'function') window._apiSyncRmEmails();
+    if (typeof _syncBanks === 'function') _syncBanks();
+    else if (typeof window._apiSyncBanks === 'function') window._apiSyncBanks();
+    if (typeof _syncReportTargets === 'function') _syncReportTargets();
+    else if (typeof window._apiSyncReportTargets === 'function') window._apiSyncReportTargets();
+    if (typeof _syncAssignmentAuditLog === 'function') _syncAssignmentAuditLog();
+    else if (typeof window._apiSyncAssignmentAuditLog === 'function') window._apiSyncAssignmentAuditLog();
+    if (typeof _syncRejectionReasons === 'function') _syncRejectionReasons();
+    else if (typeof window._apiSyncRejectionReasons === 'function') window._apiSyncRejectionReasons();
+    if (typeof _syncEmailTemplates === 'function') _syncEmailTemplates();
+    else if (typeof window._apiSyncEmailTemplates === 'function') window._apiSyncEmailTemplates();
+    if (typeof _syncProductOfferMatrix === 'function') _syncProductOfferMatrix();
+    else if (typeof window._apiSyncProductOfferMatrix === 'function') window._apiSyncProductOfferMatrix();
+  }
   (function _smartPoller() {
     var _pollInterval = null;
     function startPoll() {
       if (_pollInterval) return;
-      _pollInterval = setInterval(function() {
-        if (!_lsGet('loanms_token')) return;
-        if (document.hidden) return;
-        // Only sync loans (most critical) on poll; full sync on demand
-        if (typeof _syncLoans === 'function') _syncLoans();
-        else if (typeof window._apiSyncLoans === 'function') window._apiSyncLoans();
-        if (typeof _syncTickets === 'function') _syncTickets();
-        else if (typeof window._apiSyncTickets === 'function') window._apiSyncTickets();
-      }, 60000); // 60 second polling
+      _pollInterval = setInterval(_pollTick, 60000); // 60 second polling
     }
     function stopPoll() {
       if (_pollInterval) { clearInterval(_pollInterval); _pollInterval = null; }
     }
     document.addEventListener('visibilitychange', function() {
-      if (document.hidden) stopPoll(); else startPoll();
+      if (document.hidden) { stopPoll(); return; }
+      startPoll();
+      // Tab regaining focus (e.g. switching back from device 2's other
+      // apps, or coming back to an already-open tab) previously had to
+      // wait up to 60s for the next poll tick before showing anything
+      // changed elsewhere. Fire one sync immediately on refocus instead.
+      _pollTick();
     });
     // Start polling after initial load
     setTimeout(startPoll, 5000);
+  })();
+
+  /* Instant refresh when opening the pages that showed this staleness —
+     All Users and InCred RM Emails — so the admin never has to wait for
+     the 60s poll just because they navigated there right after someone
+     else's change. Same wrapping pattern already used for 'reports'
+     above (_patchReportsToApi). */
+  (function _patchInstantRefreshOnOpen() {
+    if (window._bridgeInstantRefreshPatched) return;
+    window._bridgeInstantRefreshPatched = true;
+    var _origSP = window.showPage;
+    if (typeof _origSP !== 'function') return;
+    window.showPage = function(name, navEl) {
+      var result = _origSP.apply(this, arguments);
+      if (name === 'users-mgmt' && typeof _syncUsers === 'function') _syncUsers();
+      if (name === 'incred' && typeof _syncRmEmails === 'function') _syncRmEmails();
+      return result;
+    };
   })();
 
   console.info('[LoanMS Bridge v6] Features: Bulk sync, EMI calc, PAN check, Doc upload, Session timer, 60s polling');

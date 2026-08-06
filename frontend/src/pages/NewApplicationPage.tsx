@@ -10,7 +10,7 @@ import { CheckCircle, ChevronRight, ChevronLeft, AlertCircle, Upload, Loader, Ch
 
 import { emiReducing as computeEmiReducing } from '@/utils/emi'
 import { extractPanData, extractAadhaarData } from '@/utils/kycExtraction'
-import { createDraftId, saveDraftMeta, getDraftMeta, deleteDraftMeta } from '@/utils/draftStorage'
+import { createDraftId } from '@/utils/draftStorage'
 import { LOAN_KEYS } from '@/hooks/useLoans'
 
 function fmtINR(n: number) {
@@ -163,6 +163,23 @@ function payloadToWizardData(p: Partial<WizardSubmitPayload>, fallback: WizardDa
     state: p.state ?? fallback.state,
     zip: p.zip ?? fallback.zip,
     homeType: p.homeType ?? fallback.homeType,
+    // Step 2 (KYC manual-entry) fields are a separate mirror of the Step 3/4
+    // fields above (see the onChange handlers below, which always set both
+    // together). The server only stores the Step 3/4 side (fullName/aadhar/
+    // dob/gender/city/state/zip), so on resume these must be back-filled
+    // from the same payload values — otherwise a draft resumed at/after
+    // Step 2 shows an empty, re-validation-failing KYC step even though the
+    // data already exists on the server.
+    kycFirstName: firstName || fallback.kycFirstName,
+    kycLastName: lastName || fallback.kycLastName,
+    kycFather: p.fatherName ?? fallback.kycFather,
+    kycAadhar: p.aadhar ?? fallback.kycAadhar,
+    kycDob: p.dob ?? fallback.kycDob,
+    kycGender: p.gender ?? fallback.kycGender,
+    kycCity: p.city ?? fallback.kycCity,
+    kycState: p.state ?? fallback.kycState,
+    kycPin: p.zip ?? fallback.kycPin,
+    kycStreet1: p.street1 ?? fallback.kycStreet1,
     empType: p.empType ?? fallback.empType,
     compName: p.compName ?? fallback.compName,
     compType: p.compType ?? fallback.compType,
@@ -1295,19 +1312,23 @@ export default function NewApplicationPage() {
   const [searchParams] = useSearchParams()
 
   // Resuming only happens when arriving with an explicit ?draftId= from the
-  // Applications → Drafts list (see LoansPage). Visiting the wizard any other
-  // way ("Register New" / New Application) always starts a brand-new draft —
-  // it never reads, overwrites, or deletes another draft.
+  // Applications → Drafts list (see LoansPage) — that value IS the backend
+  // Loan id now (the list itself comes from GET /api/wizard/drafts).
+  // Visiting the wizard any other way ("Register New" / New Application)
+  // always starts a brand-new draft — it never reads, overwrites, or
+  // deletes another draft.
   //
-  // The local index (draftStorage) only tells us *which* backend loanId to
-  // resume and what step it was on — the actual form data (PAN, Aadhar,
-  // address, salary, references, ...) is fetched fresh from the server via
-  // wizardApi.getDraft, never read out of localStorage.
-  const resumeDraftId = searchParams.get('draftId')
-  const resumedMeta    = resumeDraftId ? getDraftMeta(resumeDraftId) : null
+  // Nothing about a draft (which id exists, what step it's on, its form
+  // data) is read from or written to localStorage anymore — the step
+  // starts at 1 here and is corrected once the resumed draft's real data
+  // (including its saved step, via Loan.WizardStep) comes back from the
+  // server below.
+  const resumeDraftId  = searchParams.get('draftId')
+  const resumeLoanId   = resumeDraftId ? parseInt(resumeDraftId, 10) : NaN
+  const isResumingDraft = resumeDraftId != null && !Number.isNaN(resumeLoanId)
 
-  const [draftId]          = useState<string>(() => (resumeDraftId && resumedMeta) ? resumeDraftId : createDraftId())
-  const [step, setStep]    = useState(resumedMeta?.step ?? 1)
+  const [draftId]          = useState<string>(() => createDraftId())
+  const [step, setStep]    = useState(1)
   const [data, setData]    = useState<WizardData>(() => ({
     ...emptyData,
     salesPerson: user?.fullName ?? '',
@@ -1315,7 +1336,7 @@ export default function NewApplicationPage() {
   // True while we're fetching a resumed draft's form data back from the
   // server (GET /api/wizard/draft/{loanId}) — gates the wizard body so the
   // person doesn't see a flash of empty fields before their data loads.
-  const [isResuming, setIsResuming] = useState(!!(resumeDraftId && resumedMeta?.loanId))
+  const [isResuming, setIsResuming] = useState(isResumingDraft)
   const [resumeError, setResumeError] = useState('')
   // Which fields the person has actually interacted with (typed into or
   // blurred), keyed by WizardData field name (or document key for Step 8).
@@ -1332,20 +1353,22 @@ export default function NewApplicationPage() {
   // (see wizardApi.saveDraft). Once set, every subsequent draft-save,
   // validate, and final submit call reuses this same record instead of the
   // final submit accidentally creating a brand-new, duplicate Loan.
-  const [serverLoanId, setServerLoanId] = useState<number | undefined>(resumedMeta?.loanId)
+  const [serverLoanId, setServerLoanId] = useState<number | undefined>(
+    isResumingDraft ? resumeLoanId : undefined
+  )
 
-  // Fetch the resumed draft's real form data from the database. Runs once,
-  // only when arriving via ?draftId= for a locally-known draft that has a
-  // backend loanId attached.
+  // Fetch the resumed draft's real form data (and its saved step) from the
+  // database. Runs once, only when arriving via a numeric ?draftId=.
   useEffect(() => {
-    if (!resumeDraftId || !resumedMeta?.loanId) return
+    if (!isResumingDraft) return
     let cancelled = false
-    wizardApi.getDraft(resumedMeta.loanId)
+    wizardApi.getDraft(resumeLoanId)
       .then(res => {
         if (cancelled) return
         const payload = res.data.data
         if (payload) {
           setData(prev => payloadToWizardData(payload, prev))
+          if (payload.step) setStep(payload.step)
         }
       })
       .catch(() => {
@@ -1371,6 +1394,7 @@ export default function NewApplicationPage() {
   // currently looks like.
   const buildPayload = useCallback((): WizardSubmitPayload => ({
     loanId:      serverLoanId,
+    step:        step,
     mobile:      data.mobile,
     pan:         data.pan,
     fullName:    [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' '),
@@ -1414,42 +1438,30 @@ export default function NewApplicationPage() {
     dsaId:       data.channel === 'dsa'   && data.dsaId     ? parseInt(data.dsaId)     : undefined,
     partnerId:   data.channel === 'agent' && data.partnerId ? parseInt(data.partnerId) : undefined,
     locationId:  data.location ? parseInt(data.location) : undefined,
-  }), [data, serverLoanId])
+  }), [data, serverLoanId, step])
 
   // Autosave the in-progress wizard so it can be resumed later from
-  // Applications → Drafts. Debounced to avoid writing on every keystroke.
-  // File uploads (Step 8) are intentionally excluded — they cannot be
-  // serialized and are re-attached on resume.
+  // Applications → Drafts, on any device. Debounced to avoid writing on
+  // every keystroke. File uploads (Step 8) are intentionally excluded —
+  // they cannot be serialized and are re-attached on resume.
   //
-  // The actual form data (business/PII) is saved ONLY to the backend Draft
-  // Loan record once there's enough to save (mobile or name). Only a small,
-  // non-sensitive index (step/label/loanId) is kept in localStorage, purely
-  // so the Applications → Drafts list can render without a round trip.
+  // Everything about the draft — form data (business/PII) AND which step
+  // it's on (Loan.WizardStep, via the `step` field in buildPayload()) —
+  // goes to the backend Draft Loan record in this one call. Nothing is
+  // kept in the browser.
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
-      // IMPORTANT: this label is stored in localStorage (see draftStorage.ts),
-      // so it must NEVER contain applicant name, mobile, or any other
-      // business/PII data — only a generic, non-identifying label built from
-      // the loan type. The real applicant details live only in the backend
-      // Draft Loan record and are fetched via wizardApi.getDraft on resume.
-      const loanTypeLabel = LOAN_TYPES.find(lt => lt.value === data.loanType)?.label
-      const label = loanTypeLabel || 'Untitled application'
-      saveDraftMeta(draftId, step, label, data.loanType, serverLoanId)
-
       const fullName = [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ')
       if (data.mobile || fullName) {
         wizardApi.saveDraft(buildPayload()).then(res => {
           const loanId = res.data.data?.loanId
-          if (loanId) {
-            setServerLoanId(loanId)
-            saveDraftMeta(draftId, step, label, data.loanType, loanId)
-          }
+          if (loanId) setServerLoanId(loanId)
         }).catch(() => {
-          // Autosave to the backend failed — the local index above still
-          // reflects "step" progress, but the actual form data for this
-          // round only lives in memory until the next successful autosave.
+          // Autosave to the backend failed — this round's progress only
+          // lives in memory until the next successful autosave; nothing
+          // falls back to localStorage.
         })
       }
     }, 800)
@@ -1557,7 +1569,9 @@ export default function NewApplicationPage() {
     },
     onSuccess: (res) => {
       const result = res.data.data
-      deleteDraftMeta(draftId) // completed application — no longer a draft
+      // No draft cleanup call needed here — Submit already moves this Loan's
+      // Status off Draft server-side, so GET /api/wizard/drafts stops
+      // returning it on its own; there's no separate local index to clear.
       // The backend already invalidates its own cache on submit (WizardController.
       // Submit → ICacheService.RemoveByPrefixAsync), but that doesn't touch this
       // browser tab's React Query cache. Without this, the Applications list /

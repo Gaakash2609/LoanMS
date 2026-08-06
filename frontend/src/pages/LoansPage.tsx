@@ -8,7 +8,7 @@ import { StatusBadge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency, formatDate } from '@/utils/format'
 import { Plus, Search, RefreshCw, ChevronLeft, ChevronRight, FileClock, Play, Trash2 } from 'lucide-react'
-import { listDraftMetas, deleteDraftMeta, type WizardDraftMeta } from '@/utils/draftStorage'
+import { listDraftMetas, deleteDraftMeta, type WizardDraftSummary } from '@/utils/draftStorage'
 
 const STATUSES = ['', 'Draft', 'Submitted', 'UnderReview', 'Approved', 'Disbursed', 'Rejected', 'Closed']
 
@@ -17,16 +17,24 @@ export default function LoansPage() {
   const { data, isLoading, refetch } = useLoans(filter)
   const [search, setSearch] = useState(filter.search ?? '')
   const [section, setSection] = useState<'applications' | 'drafts'>('applications')
-  const [drafts, setDrafts] = useState<WizardDraftMeta[]>([])
+  const [drafts, setDrafts] = useState<WizardDraftSummary[]>([])
+  const [draftsLoading, setDraftsLoading] = useState(false)
 
-  const refreshDrafts = () => setDrafts(listDraftMetas())
+  const refreshDrafts = async () => {
+    setDraftsLoading(true)
+    try {
+      setDrafts(await listDraftMetas())
+    } finally {
+      setDraftsLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (section === 'drafts') refreshDrafts()
   }, [section])
 
-  const handleDiscardDraft = (id: string) => {
-    deleteDraftMeta(id)
+  const handleDiscardDraft = async (loanId: number) => {
+    await deleteDraftMeta(loanId)
     refreshDrafts()
   }
 
@@ -167,12 +175,14 @@ export default function LoansPage() {
         <Card>
           <div className="mb-4">
             <p className="text-xs text-gray-500">
-              In-progress applications are saved here automatically and kept for 7 days.
+              In-progress applications are saved here automatically.
               Starting a new application never affects any draft below.
             </p>
           </div>
 
-          {drafts.length === 0 ? (
+          {draftsLoading ? (
+            <div className="py-12 flex justify-center"><LoadingSpinner /></div>
+          ) : drafts.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm">
               No active drafts. Drafts appear here automatically as you fill out a New Application.
             </div>
@@ -188,17 +198,17 @@ export default function LoansPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {drafts.map((d) => (
-                    <tr key={d.id} className="hover:bg-gray-50 transition-colors">
+                    <tr key={d.loanId} className="hover:bg-gray-50 transition-colors">
                       <td className="py-3 pr-4 font-medium text-gray-900">{d.label}</td>
                       <td className="py-3 pr-4 text-gray-600">{d.loanType || '—'}</td>
-                      <td className="py-3 pr-4 text-xs text-gray-500">Step {d.step} of 9</td>
-                      <td className="py-3 pr-4 text-xs text-gray-500">{formatDate(new Date(d.updatedAt).toISOString())}</td>
+                      <td className="py-3 pr-4 text-xs text-gray-500">{d.step ? `Step ${d.step} of 9` : '—'}</td>
+                      <td className="py-3 pr-4 text-xs text-gray-500">{formatDate(d.updatedAt)}</td>
                       <td className="py-3">
                         <div className="flex items-center gap-3">
-                          <Link to={`/loans/new?draftId=${d.id}`} className="text-efin-blue hover:underline text-xs font-medium flex items-center gap-1">
+                          <Link to={`/loans/new?draftId=${d.loanId}`} className="text-efin-blue hover:underline text-xs font-medium flex items-center gap-1">
                             <Play size={12} />Resume
                           </Link>
-                          <button onClick={() => handleDiscardDraft(d.id)}
+                          <button onClick={() => handleDiscardDraft(d.loanId)}
                             className="text-gray-400 hover:text-red-500 text-xs font-medium flex items-center gap-1">
                             <Trash2 size={12} />Discard
                           </button>

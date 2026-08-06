@@ -8,6 +8,10 @@ public class WizardSubmitDto
     // When set, identifies an existing Draft loan to resume/complete instead of
     // creating a brand-new Loan/Customer record. Leave null/0 for a fresh application.
     public int?    LoanId      { get; set; }
+    // Which wizard step this draft was last saved on (1-based). Persisted
+    // onto Loan.WizardStep so resume/list-drafts work purely from the
+    // server — never from browser localStorage.
+    public int?    Step        { get; set; }
     public string FullName     { get; set; } = string.Empty;
     public string Mobile       { get; set; } = string.Empty;
     public string Email        { get; set; } = string.Empty;

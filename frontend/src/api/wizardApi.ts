@@ -5,6 +5,10 @@ export interface WizardSubmitPayload {
   // When resuming a previously-saved draft, pass its loan id so the wizard
   // completes/updates that same record instead of creating a new one.
   loanId?: number
+  // Which wizard step (1-based) this draft was last saved on — persisted
+  // server-side on Loan.WizardStep so resume/list-drafts never need
+  // browser localStorage.
+  step?: number
   // Step 1 — Contact & Assignment
   mobile: string
   pan: string
@@ -71,6 +75,19 @@ export interface WizardSubmitResponse {
   status: string
 }
 
+// One entry in the Applications → Drafts list. Comes entirely from the
+// database (GET /api/wizard/drafts) — replaces the old localStorage-only
+// WizardDraftMeta index, so drafts started on one device show up on every
+// other device/browser too.
+export interface WizardDraftSummary {
+  loanId: number
+  step: number | null
+  loanType: string
+  label: string
+  createdAt: string
+  updatedAt: string
+}
+
 export const wizardApi = {
   submit: (data: WizardSubmitPayload) =>
     api.post<ApiResponse<WizardSubmitResponse>>('/api/wizard/submit', data),
@@ -88,6 +105,11 @@ export const wizardApi = {
   // hold that data itself.
   getDraft: (loanId: number) =>
     api.get<ApiResponse<WizardSubmitPayload>>(`/api/wizard/draft/${loanId}`),
+
+  // Applications → Drafts list, read live from the database every time —
+  // no local index to keep in sync.
+  listDrafts: () =>
+    api.get<ApiResponse<WizardDraftSummary[]>>('/api/wizard/drafts'),
 
   // On failure the backend returns { success: false, errors: string[] } (no
   // `data` payload) rather than `{ valid, errors }` — ApiResponse already
