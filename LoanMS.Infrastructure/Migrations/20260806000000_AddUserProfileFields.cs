@@ -13,6 +13,20 @@ namespace LoanMS.Infrastructure.Migrations
     /// so they were silently dropped on save even after wiring the Add User
     /// button to a real API call. Additive only — 4 new nullable columns, no
     /// changes to any existing column.
+    ///
+    /// IMPORTANT — written as idempotent raw SQL (ADD COLUMN IF NOT EXISTS),
+    /// not migrationBuilder.AddColumn(). Program.cs re-throws on any
+    /// migration failure to fail startup fast, and the plain AddColumn
+    /// form throws "column already exists" if one of these 4 columns was
+    /// ever added by hand directly on the production DB (the same class of
+    /// out-of-band change described in docs/DATABASE_SCHEMA_FIX.md for the
+    /// Customers table). That exception was crash-looping every new ECS
+    /// task on this deploy — the container never got PostgreSQL migrations
+    /// applied, so the previous task (which never had this migration)
+    /// stayed the only Running/Healthy one and the deployment timed out
+    /// waiting for the new task to stabilize. IF NOT EXISTS makes Up()
+    /// safe to run against a DB that already has some or all of these
+    /// columns, whatever the reason.
     /// </summary>
     /// <inheritdoc />
     [DbContext(typeof(LoanMS.Infrastructure.Data.AppDbContext))]
@@ -22,42 +36,26 @@ namespace LoanMS.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "PhoneNumber",
-                table: "Users",
-                type: "character varying(30)",
-                maxLength: 30,
-                nullable: true);
+            migrationBuilder.Sql(
+                "ALTER TABLE \"Users\" ADD COLUMN IF NOT EXISTS \"PhoneNumber\" character varying(30);");
 
-            migrationBuilder.AddColumn<string>(
-                name: "LocationName",
-                table: "Users",
-                type: "character varying(150)",
-                maxLength: 150,
-                nullable: true);
+            migrationBuilder.Sql(
+                "ALTER TABLE \"Users\" ADD COLUMN IF NOT EXISTS \"LocationName\" character varying(150);");
 
-            migrationBuilder.AddColumn<string>(
-                name: "SalesTeam",
-                table: "Users",
-                type: "character varying(150)",
-                maxLength: 150,
-                nullable: true);
+            migrationBuilder.Sql(
+                "ALTER TABLE \"Users\" ADD COLUMN IF NOT EXISTS \"SalesTeam\" character varying(150);");
 
-            migrationBuilder.AddColumn<string>(
-                name: "OpTeam",
-                table: "Users",
-                type: "character varying(150)",
-                maxLength: 150,
-                nullable: true);
+            migrationBuilder.Sql(
+                "ALTER TABLE \"Users\" ADD COLUMN IF NOT EXISTS \"OpTeam\" character varying(150);");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(name: "PhoneNumber", table: "Users");
-            migrationBuilder.DropColumn(name: "LocationName", table: "Users");
-            migrationBuilder.DropColumn(name: "SalesTeam", table: "Users");
-            migrationBuilder.DropColumn(name: "OpTeam", table: "Users");
+            migrationBuilder.Sql("ALTER TABLE \"Users\" DROP COLUMN IF EXISTS \"PhoneNumber\";");
+            migrationBuilder.Sql("ALTER TABLE \"Users\" DROP COLUMN IF EXISTS \"LocationName\";");
+            migrationBuilder.Sql("ALTER TABLE \"Users\" DROP COLUMN IF EXISTS \"SalesTeam\";");
+            migrationBuilder.Sql("ALTER TABLE \"Users\" DROP COLUMN IF EXISTS \"OpTeam\";");
         }
     }
 }
