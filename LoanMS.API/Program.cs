@@ -420,8 +420,15 @@ try
     // ── Controllers with proper JSON + FluentValidation integration ───────────
     builder.Services.AddControllers()
         .AddNewtonsoftJson(options =>
+        {
             options.SerializerSettings.ReferenceLoopHandling =
-                Newtonsoft.Json.ReferenceLoopHandling.Ignore);
+                Newtonsoft.Json.ReferenceLoopHandling.Ignore;
+            // Without this, enum properties (e.g. UserRole) only accept/return
+            // their numeric value over JSON — a frontend sending role: "Admin"
+            // would fail to bind with an opaque 400, and GET responses would
+            // return 0/1/2 instead of readable names.
+            options.SerializerSettings.Converters.Add(new Newtonsoft.Json.Converters.StringEnumConverter());
+        });
 
     // ── Swagger ───────────────────────────────────────────────────────────────
     builder.Services.AddEndpointsApiExplorer();

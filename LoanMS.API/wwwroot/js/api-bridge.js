@@ -15,7 +15,12 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   var LS_AUTH    = 'efin_auth';  // React authStore uses 'efin_auth' key
   var LS_SESSION = 'efin_session'; // Legacy display-only cache
 
-  var ROLE_MAP   = { Admin:'admin', Manager:'manager', Sales:'sales_executive', Operations:'login_team', Partner:'partner' };
+  var ROLE_MAP   = {
+    Admin: 'admin', Manager: 'manager', Sales: 'sales_executive', Dsa: 'dsa_user',
+    Partner: 'partner', LoginTeam: 'login_team', TeamLeader: 'team_leader',
+    Accounts: 'accounts', LocationHead: 'location_head',
+    OperationManager: 'operation_manager', ProductTeam: 'product_team'
+  };
   var STATUS_MAP = { Draft:'wip', Submitted:'login', UnderReview:'underwriting', Approved:'approved', Rejected:'rejected', Disbursed:'disbursed', Closed:'disbursed', Hold:'hold' };
   var STATUS_REV = { wip:'Draft', login:'Submitted', underwriting:'UnderReview', approved:'Approved', rejected:'Rejected', disbursed:'Disbursed', hold:'Hold' };
   var LTYPE_MAP  = { Personal:'personal_loan', Home:'home_loan', Business:'business_loan', Education:'education_loan', Car:'new_car_loan' };
@@ -257,12 +262,17 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     return apiReq('GET', '/users').then(function(res) {
       if (!res || !res.success || !res.data) return;
       var apiUsers = res.data.map(function(u) {
+        var roleKey = ROLE_MAP[u.role] || 'sales_executive';
+        var roleLabel = (typeof window.ROLES !== 'undefined' && window.ROLES[roleKey] && window.ROLES[roleKey].label) || u.role || roleKey;
         return {
           id: 'API' + u.id, _apiId: u.id,
           name: u.fullName, email: (u.email || '').toLowerCase(),
-          role: ROLE_MAP[u.role] || 'sales_executive',
-          location: u.locationId ? String(u.locationId) : '',
-          phone: u.phoneNumber || '',
+          role: roleLabel, roleKey: roleKey,
+          mobile: u.phoneNumber || '',
+          loc: u.locationName || '', st: u.salesTeam || '', ot: u.opTeam || '',
+          locs: u.locationName ? [u.locationName] : [],
+          salesTeams: u.salesTeam ? [u.salesTeam] : [],
+          opTeams: u.opTeam ? [u.opTeam] : [],
           status: u.isActive ? 'active' : 'inactive',
           joinDate: _fmtDate(u.createdAt)
         };
@@ -279,6 +289,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     }).catch(function(e){ console.warn('[Bridge] syncUsers:',e); });
   }
 
+  // Frontend snake_case role key (ROLES config in efin-app.js) → backend
+  // UserRole enum name. Previously only 5 of 11 roles had any mapping at
+  // all (and the reverse GET-side map didn't match real enum names either
+  // — e.g. 'Operations' isn't a UserRole value, 'Dsa' is), so most roles
+  // could never round-trip correctly even once the API call itself worked.
+  var ROLE_KEY_TO_ENUM = {
+    admin: 'Admin', manager: 'Manager', sales_executive: 'Sales', dsa_user: 'Dsa',
+    partner: 'Partner', login_team: 'LoginTeam', team_leader: 'TeamLeader',
+    accounts: 'Accounts', location_head: 'LocationHead',
+    operation_manager: 'OperationManager', product_team: 'ProductTeam'
+  };
+
   /* Patch: twSaveUser → POST/PUT /api/users */
   function _patchTwSaveUser() {
     if (window._bridgeTwSaveUserPatched) return;
@@ -286,40 +308,73 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     var _orig = window.twSaveUser;
     if (typeof _orig !== 'function') return;
     window.twSaveUser = function() {
+      // Read the form BEFORE calling the original — it clears the edit-id
+      // state and closes the modal, and by then the fields aren't reliably
+      // readable.
+      var nameEl  = document.getElementById('tw-um-name');
+      var emailEl = document.getElementById('tw-um-email');
+      var mobileEl= document.getElementById('tw-um-mobile');
+      var passEl  = document.getElementById('tw-um-password');
+      var roleEl  = document.getElementById('tw-um-role');
+      var locEl   = document.getElementById('tw-um-loc');
+      var stEl    = document.getElementById('tw-um-st');
+      var otEl    = document.getElementById('tw-um-ot');
+      var editingUser = (typeof window._twEditUserId === 'number' && window.twUsers && window.twUsers[window._twEditUserId])
+        ? window.twUsers[window._twEditUserId] : null;
+
       var result = _orig.apply(this, arguments);
-      // After local save, find the newly added/updated user and sync to API
-      setTimeout(function() {
-        var form = document.getElementById('tw-user-form') || document.getElementById('user-detail-panel');
-        if (!form) { _syncUsers(); return; }
-        var nameEl  = document.getElementById('ud-name')  || document.getElementById('tw-new-name');
-        var emailEl = document.getElementById('ud-email') || document.getElementById('tw-new-email');
-        var roleEl  = document.getElementById('ud-role')  || document.getElementById('tw-new-role');
-        var passEl  = document.getElementById('ud-pass')  || document.getElementById('tw-new-pass');
-        if (!emailEl || !emailEl.value) { _syncUsers(); return; }
-        var email = emailEl.value.trim().toLowerCase();
-        var existing = (window.twUsers || []).find(function(u){ return u.email === email && u._apiId; });
-        var payload = {
-          fullName: nameEl ? nameEl.value.trim() : '',
-          email:    email,
-          role:     roleEl ? (roleEl.value.charAt(0).toUpperCase() + roleEl.value.slice(1)) : 'Sales',
-          password: passEl ? passEl.value : undefined,
-          phoneNumber: '',
-          isActive: true
-        };
-        if (!payload.password) delete payload.password;
-        var req = existing
-          ? apiReq('PUT', '/users/' + existing._apiId, payload)
-          : apiReq('POST', '/users', payload);
-        req.then(function(r) {
-          if (r && r.success) {
-            if (typeof window.showToast === 'function') window.showToast('User saved to database ✓', 'success');
-            setTimeout(_syncUsers, 500);
-          } else if (typeof window.showToast === 'function') {
-            var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
-            window.showToast('⚠ User saved locally, but database sync failed: ' + msg, 'warn');
+
+      if (!emailEl || !emailEl.value || !nameEl) { _syncUsers(); return result; }
+      var email = emailEl.value.trim().toLowerCase();
+      var roleKey = roleEl ? roleEl.value : '';
+      var payload = {
+        fullName: nameEl.value.trim(),
+        email: email,
+        role: ROLE_KEY_TO_ENUM[roleKey] || 'Sales',
+        phoneNumber: mobileEl ? mobileEl.value.trim() : '',
+        locationName: locEl ? locEl.value : '',
+        salesTeam: stEl ? stEl.value : '',
+        opTeam: otEl ? otEl.value : '',
+        isActive: true
+      };
+      if (passEl && passEl.value) payload.password = passEl.value;
+
+      var existingApiId = editingUser && editingUser._apiId;
+      if (!existingApiId) {
+        var match = (window.twUsers || []).find(function(u){ return u.email === email && u._apiId; });
+        if (match) existingApiId = match._apiId;
+      }
+      if (!existingApiId && !payload.password) {
+        // New user with no password can't be created server-side (Password
+        // is required by CreateUserRequestDto) — the local twSaveUser()
+        // already validates this and blocks the save before we get here,
+        // so this is just a safety net.
+        _syncUsers();
+        return result;
+      }
+
+      var isCreate = !existingApiId;
+      var req = existingApiId
+        ? apiReq('PUT', '/users/' + existingApiId, payload)
+        : apiReq('POST', '/users', payload);
+      req.then(function(r) {
+        if (r && r.success) {
+          if (r.data && r.data.id) {
+            if (editingUser) editingUser._apiId = r.data.id;
+            // twSaveUser() unshifts new users to index 0 — that's the object
+            // we just created, unless the id sequencing scheme means it's
+            // no longer there (defensive email check as a fallback).
+            else if (isCreate && window.twUsers && window.twUsers[0] && window.twUsers[0].email === email) {
+              window.twUsers[0]._apiId = r.data.id;
+            }
           }
-        });
-      }, 300);
+          if (typeof window.showToast === 'function') window.showToast('User saved to database ✓', 'success');
+          setTimeout(_syncUsers, 500);
+        } else if (typeof window.showToast === 'function') {
+          var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+          window.showToast('⚠ User saved locally, but database sync failed: ' + msg, 'warn');
+        }
+      });
       return result;
     };
   }

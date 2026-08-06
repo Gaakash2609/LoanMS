@@ -13,6 +13,13 @@ public class User : BaseEntity
     public string? RefreshToken { get; set; }
     public DateTime? RefreshTokenExpiry { get; set; }
 
+    // Added — the Add/Edit User form (twSaveUser, tw-um-mobile/loc/st/ot)
+    // already captures these; they simply had nowhere to be saved.
+    public string? PhoneNumber { get; set; }
+    public string? LocationName { get; set; }
+    public string? SalesTeam { get; set; }
+    public string? OpTeam { get; set; }
+
     // Security fields
     /// <summary>Forces password change on next login (set true for all seeded users).</summary>
     public bool MustChangePassword { get; set; } = false;

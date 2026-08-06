@@ -65,6 +65,10 @@ public class AppDbContext : DbContext
             e.Property(u => u.Email).HasMaxLength(200).IsRequired();
             e.Property(u => u.PasswordHash).IsRequired();
             e.Property(u => u.Role).HasConversion<string>();
+            e.Property(u => u.PhoneNumber).HasMaxLength(30);
+            e.Property(u => u.LocationName).HasMaxLength(150);
+            e.Property(u => u.SalesTeam).HasMaxLength(150);
+            e.Property(u => u.OpTeam).HasMaxLength(150);
             e.HasQueryFilter(u => !u.IsDeleted);
         });
 

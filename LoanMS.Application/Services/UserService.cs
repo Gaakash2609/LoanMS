@@ -50,7 +50,11 @@ public class UserService : IUserService
             Email        = request.Email.ToLower().Trim(),
             PasswordHash = _auth.HashPassword(request.Password),
             Role         = request.Role,
-            IsActive     = true
+            IsActive     = true,
+            PhoneNumber  = request.PhoneNumber?.Trim(),
+            LocationName = request.LocationName?.Trim(),
+            SalesTeam    = request.SalesTeam?.Trim(),
+            OpTeam       = request.OpTeam?.Trim()
         };
 
         await _uow.Users.AddAsync(user);
@@ -63,10 +67,14 @@ public class UserService : IUserService
         var user = await _uow.Users.GetByIdAsync(id);
         if (user == null) return ApiResponseDto<UserDto>.Fail("User not found.");
 
-        user.FullName   = request.FullName.Trim();
-        user.IsActive   = request.IsActive;
-        user.Role       = request.Role;
-        user.UpdatedAt  = DateTime.UtcNow;
+        user.FullName     = request.FullName.Trim();
+        user.IsActive     = request.IsActive;
+        user.Role         = request.Role;
+        user.PhoneNumber  = request.PhoneNumber?.Trim();
+        user.LocationName = request.LocationName?.Trim();
+        user.SalesTeam    = request.SalesTeam?.Trim();
+        user.OpTeam       = request.OpTeam?.Trim();
+        user.UpdatedAt    = DateTime.UtcNow;
 
         await _uow.Users.UpdateAsync(user);
         await _uow.SaveChangesAsync();
@@ -120,11 +128,15 @@ public class UserService : IUserService
 
     private static UserDto MapToDto(User u) => new()
     {
-        Id        = u.Id,
-        FullName  = u.FullName,
-        Email     = u.Email,
-        Role      = u.Role.ToString(),
-        IsActive  = u.IsActive,
-        CreatedAt = u.CreatedAt
+        Id           = u.Id,
+        FullName     = u.FullName,
+        Email        = u.Email,
+        Role         = u.Role.ToString(),
+        IsActive     = u.IsActive,
+        CreatedAt    = u.CreatedAt,
+        PhoneNumber  = u.PhoneNumber,
+        LocationName = u.LocationName,
+        SalesTeam    = u.SalesTeam,
+        OpTeam       = u.OpTeam
     };
 }
