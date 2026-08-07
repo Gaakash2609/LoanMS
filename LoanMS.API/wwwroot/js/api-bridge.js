@@ -2140,11 +2140,23 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           return;
         }
         // Real validation/business failure — retrying identical data
-        // cannot succeed, so stop here instead of looping.
+        // cannot succeed, so stop here instead of looping. This app was
+        // never actually persisted to the database, so remove it from the
+        // visible list instead of leaving a "phantom" application that only
+        // ever existed in this browser's local state — this mismatch (looked
+        // saved on this device, never existed on any other device) was the
+        // root cause of the cross-device sync confusion.
         app._bridgeSyncInFlight = false;
         _setWizardSyncState(app, 'failed', msg);
         console.warn('[Bridge] Wizard DB save rejected:', msg);
-        _wizardToast('⚠ Application NOT saved to database: ' + msg, 'warn');
+        _wizardToast('⚠ Application NOT saved — ' + msg + ' Please correct and resubmit.', 'error');
+        if (window.APPLICATIONS) {
+          var _failIdx = APPLICATIONS.indexOf(app);
+          if (_failIdx !== -1) APPLICATIONS.splice(_failIdx, 1);
+        }
+        if (typeof window.persistSave === 'function') window.persistSave();
+        if (typeof updateDashboardStats === 'function') updateDashboardStats();
+        if (typeof renderTable === 'function') renderTable();
         return;
       }
 

@@ -69,6 +69,14 @@
     'Very Poor': 'High risk — most mainstream lenders will decline.',
   };
 
+  // ── Lender/account-type icon (used next to lender names throughout the report) ──
+  function _lenderIcon(accountType) {
+    var t = String(accountType || '');
+    if (/Housing|Home|Property/i.test(t)) return '🏛';
+    if (/Credit Card/i.test(t)) return '💳';
+    return '🏦';
+  }
+
   /* Inject print + responsive styles once */
   var _printStyleInjected = false;
   function _injectPrintStyle() {
@@ -638,26 +646,32 @@
 
   /* ── Gauge ── */
   function _buildGauge(score, minSc, maxSc, pct, color, status, isEligible, isLive) {
-    var cx=90, cy=85, R=68, stroke=13;
-    var circ   = Math.PI * R;
-    var offset = circ - (pct/100) * circ;
-    var angleRad = Math.PI - (pct/100) * Math.PI;
-    var nx = cx + (R-2) * Math.cos(angleRad);
-    var ny = cy - (R-2) * Math.sin(angleRad);
+    var cx=95, cy=90, R=62, stroke=14;
+    var ptAt = function(deg){ var t=deg*Math.PI/180; return { x: cx + R*Math.sin(t), y: cy - R*Math.cos(t) }; };
+    var thetaFor = function(frac){ return 180 + frac*360; };
+
+    var bandArcs = BANDS.map(function(b){
+      var s=(b.min-minSc)/(maxSc-minSc), e=(b.max-minSc+1)/(maxSc-minSc);
+      var t1=thetaFor(s), t2=thetaFor(e);
+      var p1=ptAt(t1), p2=ptAt(t2);
+      var largeArc=(t2-t1)>180?1:0;
+      return '<path d="M '+p1.x+' '+p1.y+' A '+R+' '+R+' 0 '+largeArc+' 1 '+p2.x+' '+p2.y+'" fill="none" stroke="'+b.color+'" stroke-width="'+stroke+'" stroke-linecap="butt"/>';
+    }).join('');
+
+    var pTheta = thetaFor(pct/100);
+    var triTop = cy - R;
+    var pointer = '<g transform="rotate('+pTheta+' '+cx+' '+cy+')" style="transition:transform 1.4s cubic-bezier(.4,0,.2,1)">' +
+        '<polygon points="'+(cx-6)+','+(triTop-6)+' '+(cx+6)+','+(triTop-6)+' '+cx+','+(triTop+7)+'" fill="#1e293b" stroke="var(--surface)" stroke-width="1"/>' +
+      '</g>';
 
     return '<div class="cibil-section" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px 22px 16px;min-width:195px;flex:0 0 auto;text-align:center;box-shadow:var(--shadow)">' +
-      '<svg width="180" height="100" viewBox="0 0 180 100">' +
-        BANDS.map(function(b){
-          var s=(b.min-minSc)/(maxSc-minSc), e=(b.max-minSc+1)/(maxSc-minSc);
-          var bcirc=Math.PI*R, bStart=bcirc*(1-s), bLen=bcirc*(e-s);
-          return '<path d="M 15 '+cy+' A '+R+' '+R+' 0 0 1 '+(cx*2-15)+' '+cy+'" fill="none" stroke="'+b.color+'" stroke-width="'+stroke+'" stroke-linecap="butt" stroke-dasharray="'+bLen+' '+bcirc+'" stroke-dashoffset="'+bStart+'" opacity="0.18"/>';
-        }).join('') +
-        '<path d="M 15 '+cy+' A '+R+' '+R+' 0 0 1 '+(cx*2-15)+' '+cy+'" fill="none" stroke="var(--surface3)" stroke-width="'+stroke+'" stroke-linecap="round"/>' +
-        '<path d="M 15 '+cy+' A '+R+' '+R+' 0 0 1 '+(cx*2-15)+' '+cy+'" fill="none" stroke="'+color+'" stroke-width="'+stroke+'" stroke-linecap="round" stroke-dasharray="'+circ+'" stroke-dashoffset="'+offset+'" style="transition:stroke-dashoffset 1.4s cubic-bezier(.4,0,.2,1)"/>' +
-        '<line x1="'+cx+'" y1="'+cy+'" x2="'+nx+'" y2="'+ny+'" stroke="'+color+'" stroke-width="2.5" stroke-linecap="round" style="transition:all 1.4s cubic-bezier(.4,0,.2,1)"/>' +
-        '<circle cx="'+cx+'" cy="'+cy+'" r="4" fill="'+color+'"/>' +
-        '<text x="'+cx+'" y="76" text-anchor="middle" font-size="26" font-weight="800" fill="'+color+'" font-family="var(--font-head)">'+score+'</text>' +
-        '<text x="'+cx+'" y="91" text-anchor="middle" font-size="10" fill="var(--text3)">out of '+maxSc+'</text>' +
+      '<svg width="190" height="180" viewBox="0 0 190 180">' +
+        bandArcs +
+        pointer +
+        '<text x="'+cx+'" y="'+(cy-9)+'" text-anchor="middle" font-size="26" font-weight="800" fill="'+color+'" font-family="var(--font-head)">'+score+'</text>' +
+        '<text x="'+cx+'" y="'+(cy+6)+'" text-anchor="middle" font-size="10" fill="var(--text3)">out of '+maxSc+'</text>' +
+        '<text x="15" y="'+(cy+R+12)+'" text-anchor="start" font-size="12" font-weight="700" fill="'+BANDS[0].color+'">'+minSc+'</text>' +
+        '<text x="'+(cx*2-15)+'" y="'+(cy+R+12)+'" text-anchor="end" font-size="12" font-weight="700" fill="'+BANDS[BANDS.length-1].color+'">'+maxSc+'</text>' +
       '</svg>' +
       '<div style="font-size:16px;font-weight:800;color:'+color+';margin:-4px 0 3px;letter-spacing:-.3px">'+esc(status)+'</div>' +
       '<div style="font-size:11px;color:var(--text3);margin-bottom:10px">'+(isLive?'✅ Live CIBIL Score':'🔷 Simulated Score')+'</div>' +
@@ -1010,7 +1024,7 @@
       return '<div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:14px 16px;background:var(--surface2)">' +
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
           '<div>' +
-            '<div style="font-size:14px;font-weight:700;color:var(--text)">' + esc(a.lenderName || '—') + '</div>' +
+            '<div style="font-size:14px;font-weight:700;color:var(--text)">' + _lenderIcon(a.loanType) + ' ' + esc(a.lenderName || '—') + '</div>' +
             '<div style="font-size:11.5px;color:var(--text3);margin-top:1px">' + esc(a.loanType || 'Loan') + ' · ' + esc(a.accountNumberMasked || '—') + '</div>' +
           '</div>' +
           '<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;border:1.5px solid var(--success);color:var(--success);background:var(--success-subtle)">ACTIVE</span>' +
@@ -1155,7 +1169,7 @@
     var summaryRows = accounts.map(function(a, idx) {
       var bg = idx%2===0 ? '#fff' : '#fafbfc';
       return '<tr style="background:'+bg+';cursor:pointer" onclick="_cibilToggleDetail(\'cibil-acct-detail-'+idx+'\')" title="Click to view account details">' +
-        TD('<strong style="color:#1e3a5f">'+esc(a.lenderName||'—')+'</strong>') +
+        TD('<strong style="color:#1e3a5f">'+_lenderIcon(a.loanType)+' '+esc(a.lenderName||'—')+'</strong>') +
         TD(esc(a.loanType||'—')) +
         TD('<a style="color:#2563eb;text-decoration:underline;font-family:monospace;font-size:12px">'+esc(a.accountNumberMasked||'—')+'</a>') +
         TD(esc(a.ownership||'Individual')) +
@@ -1243,7 +1257,7 @@
       '<div style="background:#fff;border-bottom:1px solid #e2e8f0;padding:16px 22px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">' +
         '<div style="display:flex;align-items:center;gap:14px">' +
           '<div style="width:36px;height:36px;background:#fee2e2;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🏦</div>' +
-          '<span style="font-size:16px;font-weight:700;color:#1e3a5f">'+esc(a.lenderName||'—')+'</span>' +
+          '<span style="font-size:16px;font-weight:700;color:#1e3a5f">'+_lenderIcon(a.loanType)+' '+esc(a.lenderName||'—')+'</span>' +
         '</div>' +
         '<span style="display:inline-block;padding:4px 14px;border-radius:20px;font-size:12.5px;font-weight:600;border:1.5px solid '+(isActive?'#10b981':'#94a3b8')+';color:'+(isActive?'#059669':'#64748b')+';background:'+(isActive?'#f0fdf4':'#f8fafc')+'">'+(isActive?'ACTIVE':'CLOSED')+'</span>' +
       '</div>' +

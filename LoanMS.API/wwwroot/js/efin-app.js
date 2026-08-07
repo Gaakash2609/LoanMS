@@ -7953,7 +7953,7 @@
         const pan      = document.getElementById('w-pan').value.trim().toUpperCase();
         const sales    = document.getElementById('w-sales').value;
         const location = document.getElementById('w-location')?.value || '';
-        if (!mob || mob.length !== 10) { showToast('Enter valid 10-digit mobile', 'error'); return false; }
+        if (!mob || !/^\d{10}$/.test(mob)) { showToast('Enter valid 10-digit mobile', 'error'); return false; }
         if (!pan || pan.length !== 10) { showToast('Enter valid 10-character PAN', 'error'); return false; }
         if (!location) { showToast('Please select a Location', 'error'); return false; }
         if (!sales) {
@@ -8042,6 +8042,9 @@
           { id: 'w-mname2',  label: "Mother's Name" },
         ])) return false;
 
+        const emailVal3 = (document.getElementById('w-email')?.value || '').trim();
+        if (emailVal3 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal3)) { showToast('⚠ Enter a valid Email Address', 'error'); return false; }
+
         // Co-Applicant — mandatory only for Home Loan / LAP; optional (no validation) for
         // Business Loan and every other product. Reuses the same PAN/Aadhaar patterns used
         // elsewhere in the wizard (KYC extraction, etc.) for consistency.
@@ -8112,6 +8115,17 @@
           { id: 'w-coapplicant-email', label: 'Co-applicant Email' },
         ])) return false;
 
+        const coApplicantMobileEl6 = document.getElementById('w-coapplicant-mobile');
+        if (coApplicantMobileEl6 && coApplicantMobileEl6.closest('.form-group')?.offsetParent !== null) {
+          const cam6 = (coApplicantMobileEl6.value || '').trim();
+          if (cam6 && !/^\d{10}$/.test(cam6)) { showToast('⚠ Enter a valid 10-digit Co-applicant Mobile', 'error'); return false; }
+        }
+        const coApplicantEmailEl6 = document.getElementById('w-coapplicant-email');
+        if (coApplicantEmailEl6 && coApplicantEmailEl6.closest('.form-group')?.offsetParent !== null) {
+          const cae6 = (coApplicantEmailEl6.value || '').trim();
+          if (cae6 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cae6)) { showToast('⚠ Enter a valid Co-applicant Email', 'error'); return false; }
+        }
+
         // Insurance skips step 6 entirely (wizardSteps: [1,2,3,4,5,8,9]) — pass through safely
         if (_ltVal6 === 'insurance') {
           return true;
@@ -8169,6 +8183,10 @@
           { id: 'w-r2no',   label: 'Reference 2 Mobile' },
           { id: 'w-r2rel',  label: 'Reference 2 Relationship' },
         ])) return false;
+        const r1noVal = (document.getElementById('w-r1no')?.value || '').trim();
+        if (!/^\d{10}$/.test(r1noVal)) { showToast('⚠ Enter a valid 10-digit Reference 1 Mobile', 'error'); return false; }
+        const r2noVal = (document.getElementById('w-r2no')?.value || '').trim();
+        if (!/^\d{10}$/.test(r2noVal)) { showToast('⚠ Enter a valid 10-digit Reference 2 Mobile', 'error'); return false; }
       }
       // Step 8 (Documents) — mandatory Banking (Bank Statement) and Income &
       // Employment (Salary Slips for Salaried / Business Vintage Proof for
@@ -37242,22 +37260,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     return loaded;
   }
 
-  function _showStorageBanner() {
-    var dash = document.getElementById('page-dashboard');
-    if (!dash) return;
-    if (dash.querySelector('.storage-banner')) return;
-    var banner = document.createElement('div');
-    banner.className = 'storage-banner';
-    var appCount = window.APPLICATIONS
-      ? APPLICATIONS.filter(function(a) { return !a.id.startsWith('H') && !a.is_draft; }).length
-      : 0;
-    banner.innerHTML =
-      '<span style="font-size:16px">💾</span>' +
-      '<span>Session data restored from last visit — ' + appCount + ' applications loaded.</span>' +
-      '<button class="storage-banner-btn" onclick="efinClearStorage()">Clear Saved Data</button>';
-    dash.insertBefore(banner, dash.firstChild);
-  }
-
   window.efinClearStorage = function () {
     Object.keys(STORE_KEYS).forEach(function (k) { _lsRemove(STORE_KEYS[k]); });
     var banner = document.querySelector('.storage-banner');
@@ -37864,7 +37866,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       // Load saved data
       var loaded = persistLoad();
       if (loaded) {
-        _showStorageBanner();
         if (typeof updateDashboardStats === 'function') updateDashboardStats();
         if (typeof renderTable         === 'function') renderTable();
       }

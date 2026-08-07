@@ -1445,7 +1445,7 @@
               <div class="wiz-required-note"><span class="req-dot"></span> Fields marked with * are required to proceed.</div>
               <div class="form-grid">
                 <div class="form-group"><label>Mobile Number <span class="req">*</span></label><input type="tel" id="w-mobile"
-                    placeholder="10-digit mobile" maxlength="10"></div>
+                    placeholder="10-digit mobile" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
                 <div class="form-group"><label>PAN Card Number <span class="req">*</span></label><input type="text" id="w-pan"
                     placeholder="ABCDE1234F" maxlength="10" style="text-transform:uppercase" oninput="wPanCheck()"></div>
                 <div class="form-group">
@@ -1847,7 +1847,7 @@
                 <div class="form-group"><label>Email Address <span class="req">*</span></label><input type="email" id="w-email"
                     placeholder="email@example.com"></div>
                 <div class="form-group"><label>Alternate Phone</label><input type="tel" id="w-phone"
-                    placeholder="Alternate number"></div>
+                    placeholder="Alternate number" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
                 <div class="form-group"><label>Father's Name <span class="req">*</span></label><input type="text" id="w-father"
                     placeholder="Father's name (from PAN)"></div>
                 <div class="form-group"><label>Mother's Name <span class="req">*</span></label><input type="text" id="w-mname2"
@@ -1866,7 +1866,7 @@
                   <div class="form-group"><label>Aadhaar Number <span id="wstep3-coapp-aadhar-req" class="req"></span></label><input type="text" id="w-coapp-aadhar"
                       placeholder="12-digit Aadhaar" maxlength="12"></div>
                   <div class="form-group"><label>Mobile Number <span id="wstep3-coapp-mobile-req" class="req"></span></label><input type="tel" id="w-coapp-mobile"
-                      placeholder="10-digit mobile" maxlength="10"></div>
+                      placeholder="10-digit mobile" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
                 </div>
               </div>
             </div>
@@ -2196,7 +2196,7 @@
                     <option value="guardian">Guardian</option>
                     <option value="other">Other</option>
                   </select></div>
-                  <div class="form-group"><label>Co-applicant Mobile <span class="req">*</span></label><input type="tel" id="w-coapplicant-mobile" placeholder="10-digit mobile" maxlength="10"></div>
+                  <div class="form-group"><label>Co-applicant Mobile <span class="req">*</span></label><input type="tel" id="w-coapplicant-mobile" placeholder="10-digit mobile" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
                   <div class="form-group"><label>Co-applicant PAN <span class="req">*</span></label><input type="text" id="w-coapplicant-pan" placeholder="ABCDE1234F" maxlength="10" style="text-transform:uppercase"></div>
                   <div class="form-group"><label>Co-applicant Email <span class="req">*</span></label><input type="email" id="w-coapplicant-email" placeholder="email@example.com"></div>
                 </div>
@@ -2578,7 +2578,7 @@
 
               <div class="form-grid">
                 <div class="form-group"><label>Name <span class="req">*</span></label><input type="text" id="w-r1name" placeholder="Full name"></div>
-                <div class="form-group"><label>Mobile <span class="req">*</span></label><input type="tel" id="w-r1no" placeholder="10-digit mobile"></div>
+                <div class="form-group"><label>Mobile <span class="req">*</span></label><input type="tel" id="w-r1no" placeholder="10-digit mobile" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
                 <div class="form-group"><label>Relationship <span class="req">*</span></label><select id="w-r1rel">
                     <option value="">Select</option>
                     <option value="family">Family</option>
@@ -2608,7 +2608,7 @@
               <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--accent);margin:18px 0 10px;padding-bottom:6px;border-bottom:1.5px solid var(--border)">🤝 Reference 2</div>
               <div class="form-grid">
                 <div class="form-group"><label>Name <span class="req">*</span></label><input type="text" id="w-r2name" placeholder="Full name"></div>
-                <div class="form-group"><label>Mobile <span class="req">*</span></label><input type="tel" id="w-r2no" placeholder="10-digit mobile"></div>
+                <div class="form-group"><label>Mobile <span class="req">*</span></label><input type="tel" id="w-r2no" placeholder="10-digit mobile" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
                 <div class="form-group"><label>Relationship <span class="req">*</span></label><select id="w-r2rel">
                     <option value="">Select</option>
                     <option value="family">Family</option>

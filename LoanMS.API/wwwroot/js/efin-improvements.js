@@ -220,22 +220,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     return loaded;
   }
 
-  function _showStorageBanner() {
-    var dash = document.getElementById('page-dashboard');
-    if (!dash) return;
-    if (dash.querySelector('.storage-banner')) return;
-    var banner = document.createElement('div');
-    banner.className = 'storage-banner';
-    var appCount = window.APPLICATIONS
-      ? APPLICATIONS.filter(function(a) { return !a.id.startsWith('H') && !a.is_draft; }).length
-      : 0;
-    banner.innerHTML =
-      '<span style="font-size:16px">💾</span>' +
-      '<span>Session data restored from last visit — ' + appCount + ' applications loaded.</span>' +
-      '<button class="storage-banner-btn" onclick="efinClearStorage()">Clear Saved Data</button>';
-    dash.insertBefore(banner, dash.firstChild);
-  }
-
   window.efinClearStorage = function () {
     Object.keys(STORE_KEYS).forEach(function (k) { _lsRemove(STORE_KEYS[k]); });
     var banner = document.querySelector('.storage-banner');
@@ -844,7 +828,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       // Load saved data
       var loaded = persistLoad();
       if (loaded) {
-        _showStorageBanner();
         if (typeof updateDashboardStats === 'function') updateDashboardStats();
         if (typeof renderTable         === 'function') renderTable();
       }
