@@ -279,6 +279,19 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       });
       if (typeof window.twUsers !== 'undefined' && Array.isArray(window.twUsers)) {
         var seededIds = new Set(window.twUsers.filter(function(u){ return !String(u.id).startsWith('API'); }).map(function(u){ return u.email; }));
+        // Wholesale replace (was merge/push-only — a user deleted or
+        // deactivated server-side via DELETE /api/users/{id}, or on another
+        // device, never disappeared here because this only ever added/
+        // updated, never removed). Any API-sourced row (has _apiId) whose id
+        // no longer appears in the server's response is dropped; a
+        // hardcoded seed user (no _apiId) is left alone. Matching rows are
+        // updated in place (Object.assign) rather than replaced with a
+        // fresh object, same reasoning as _syncTasks.
+        var freshUserIds = new Set(apiUsers.map(function(u){ return u._apiId; }));
+        for (var ui = window.twUsers.length - 1; ui >= 0; ui--) {
+          var urow = window.twUsers[ui];
+          if (urow._apiId && !freshUserIds.has(urow._apiId)) window.twUsers.splice(ui, 1);
+        }
         apiUsers.forEach(function(au) {
           var existing = window.twUsers.findIndex(function(u){ return u.email === au.email; });
           if (existing >= 0) { window.twUsers[existing] = Object.assign(window.twUsers[existing], au); }
@@ -388,8 +401,19 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       var salesTeams = res.data.filter(function(t){ return t.type === 'Sales'; });
       var loginTeams = res.data.filter(function(t){ return t.type === 'Login'; });
 
+      // Wholesale replace (was merge/push-only — a team no longer returned by
+      // the server, or edited on another device, never disappeared/updated
+      // here because this only ever added/updated, never removed). Any row
+      // whose _apiId no longer appears in this type's server response is
+      // dropped; a row with no _apiId yet (a draft not yet POSTed) is left
+      // alone — same grace-window as _syncLoans/_syncTasks.
       function mergeTeams(apiList, store) {
         if (!Array.isArray(store)) return;
+        var freshTeamIds = new Set(apiList.map(function(at){ return at.id; }));
+        for (var tmi = store.length - 1; tmi >= 0; tmi--) {
+          var trow = store[tmi];
+          if (trow._apiId && !freshTeamIds.has(trow._apiId)) store.splice(tmi, 1);
+        }
         apiList.forEach(function(at) {
           var mapped = { id:'API'+at.id, _apiId:at.id, name:at.name, lead:at.teamLead||'',
                          members:(at.members||[]).map(function(m){ return m.fullName; }), location:at.locationId||'' };
@@ -591,6 +615,21 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     return apiReq('GET', '/tasks').then(function(res) {
       if (!res || !res.success || !res.data) return;
       if (typeof window.TASK_STORE !== 'undefined' && Array.isArray(window.TASK_STORE)) {
+        // Wholesale replace (was merge/push-only — a task deleted server-side
+        // via DELETE /api/tasks/{id}, or on another device, never disappeared
+        // here because this only ever added/updated, never removed). Any row
+        // whose _apiId no longer appears in the server's response is dropped;
+        // a row with no _apiId yet (a draft not yet POSTed) is left alone —
+        // same grace-window as _syncLoans. Matching rows are updated in place
+        // (Object.assign) rather than replaced with a fresh object, so
+        // client-only fields the API doesn't send back (completed_user/
+        // completion_date/completion_remark, _agentCreated — set directly on
+        // the TASK_STORE object elsewhere in efin-app.js) survive the sync.
+        var freshTaskIds = new Set(res.data.map(function(t){ return t.id; }));
+        for (var ti = window.TASK_STORE.length - 1; ti >= 0; ti--) {
+          var trow = window.TASK_STORE[ti];
+          if (trow._apiId && !freshTaskIds.has(trow._apiId)) window.TASK_STORE.splice(ti, 1);
+        }
         res.data.forEach(function(t) {
           var mapped = {
             id:'API'+t.id, _apiId:t.id,
@@ -828,8 +867,25 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       var dsaItems     = res.data.filter(function(d){ return d.partnerType === 'Dsa'; });
       var partnerItems = res.data.filter(function(d){ return d.partnerType === 'Partner'; });
 
+      // Wholesale replace (was merge/push-only — a DSA/Partner deleted
+      // server-side via DELETE /api/dsa/{id}, or on another device, never
+      // disappeared here because this only ever added/updated, never
+      // removed). Any row whose _apiId no longer appears in this type's
+      // server response is dropped; a row with no _apiId yet (a draft not
+      // yet POSTed) is left alone — same grace-window as _syncLoans/
+      // _syncTasks. Matching rows are updated in place (via the existing
+      // Object.assign onto a copy of the current row) rather than replaced
+      // with a bare fresh object, so twDSAList's client-only linkedPartners
+      // array (computed elsewhere from twPartnerList.mappedDsaId — see the
+      // note above _dsaToLocal) survives the sync instead of resetting to
+      // empty/undefined on every boot/refresh/poll.
       function merge(apiList, store, extraDefaults) {
         if (!Array.isArray(store)) return;
+        var freshDsaIds = new Set(apiList.map(function(d){ return d.id; }));
+        for (var dmi = store.length - 1; dmi >= 0; dmi--) {
+          var drow = store[dmi];
+          if (drow._apiId && !freshDsaIds.has(drow._apiId)) store.splice(dmi, 1);
+        }
         apiList.forEach(function(d) {
           var mapped = _dsaToLocal(d);
           var existing = store.findIndex(function(x){ return x._apiId === d.id; });
@@ -960,6 +1016,32 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     return apiReq('GET', '/productoffermatrix').then(function(res) {
       if (!res || !res.success || !res.data) return;
       if (!window.PRODUCT_CAM_MATRICES) window.PRODUCT_CAM_MATRICES = {};
+      // Wholesale replace + delete-detection (same pattern as _syncTasks/
+      // _syncUsers/_syncTeams/_syncDsaPartners). Previously this only ever
+      // overwrote window.PRODUCT_CAM_MATRICES[p.productKey] for keys present
+      // in the response — if a product offer matrix row was deleted
+      // server-side (or on another device), the stale locally-cached matrix
+      // for that key was never removed and lingered forever as a "ghost"
+      // entry, out of sync with the DB (the actual source of truth).
+      // The 8 product keys are fixed/enum-driven (PP_PRODUCTS in
+      // product-offer-matrix.js) — there's no concept of a user creating a
+      // brand-new, not-yet-synced productKey the way TASK_STORE rows can be
+      // local-only drafts — so a key missing from the server response falls
+      // back to its built-in default matrix (via window._ppResetToDefault,
+      // exposed by product-offer-matrix.js) rather than being left as
+      // whatever was last synced. If that helper isn't available yet
+      // (product-offer-matrix.js not loaded), the stale key is dropped
+      // instead so it can't survive as a ghost either way.
+      var freshKeys = {};
+      res.data.forEach(function(p) { freshKeys[p.productKey] = true; });
+      Object.keys(window.PRODUCT_CAM_MATRICES).forEach(function(existingKey) {
+        if (freshKeys[existingKey]) return;
+        if (typeof window._ppResetToDefault === 'function') {
+          window.PRODUCT_CAM_MATRICES[existingKey] = window._ppResetToDefault(existingKey);
+        } else {
+          delete window.PRODUCT_CAM_MATRICES[existingKey];
+        }
+      });
       res.data.forEach(function(p) {
         try { window.PRODUCT_CAM_MATRICES[p.productKey] = JSON.parse(p.matrixJson); }
         catch (e) { console.warn('[Bridge] bad matrixJson for', p.productKey, e); }
@@ -1869,6 +1951,12 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           _syncRejectionReasons();
           _syncEmailTemplates();
           _syncProductOfferMatrix();
+          // Roles & permissions (ROLES / roleMenuVisibility) — previously
+          // only synced when the Settings → Access tab was opened, so a
+          // permission change made by one admin didn't apply anywhere else
+          // until that tab happened to be visited. Now part of the regular
+          // boot sync, same as every other entity above.
+          if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer();
           setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500); // after loans have _apiId populated
           setTimeout(tkMigrateLegacyLocalTickets, 1000);
         }, 800);
@@ -1974,6 +2062,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             _syncRejectionReasons();
             _syncEmailTemplates();
             _syncProductOfferMatrix();
+            // See the matching comment in the login-success sync block above.
+            if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer();
             setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500);
             setTimeout(tkMigrateLegacyLocalTickets, 1400);
           }, 1200);
@@ -2440,7 +2530,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
 
   // Expose sync functions for manual refresh
-  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); _syncRmEmails(); _syncBanks(); _syncReportTargets(); _syncAssignmentAuditLog(); _syncRejectionReasons(); _syncEmailTemplates(); _syncProductOfferMatrix(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
+  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); _syncRmEmails(); _syncBanks(); _syncReportTargets(); _syncAssignmentAuditLog(); _syncRejectionReasons(); _syncEmailTemplates(); _syncProductOfferMatrix(); if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
   window._syncPayoutClaimsFromServer = _syncPayoutClaimsFromServer;
   window._apiSyncLoans  = _syncLoans;
   window._apiSyncUsers  = _syncUsers;

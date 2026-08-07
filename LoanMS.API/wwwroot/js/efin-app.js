@@ -37126,19 +37126,21 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     // while genuinely offline), but nothing reads that snapshot back into
     // APPLICATIONS on startup anymore.
 
-    // Tasks
-    var savedTasks = safeJSON(_lsGet(STORE_KEYS.tasks), null);
-    if (savedTasks && Array.isArray(savedTasks) && window.TASK_STORE) {
-      var existIds = new Set(TASK_STORE.map(function (t) { return t.id; }));
-      savedTasks.filter(function (t) { return !existIds.has(t.id); }).forEach(function (t) { TASK_STORE.push(t); });
-    }
+    // Tasks — previously merged from localStorage here. Now database-backed
+    // (Task table via /api/tasks) — _syncTasks() in api-bridge.js is the sole
+    // source of truth and replaces TASK_STORE wholesale (minus any not-yet-
+    // synced local draft with no _apiId) on login/session-restore/refresh/
+    // poll, same as Applications/Banks/tickets. Merging a stale local copy on
+    // top of it here would let a task deleted on the server (or on another
+    // device) keep reappearing in this browser forever, so this restore path
+    // is removed.
 
-    // Users
-    var savedUsers = safeJSON(_lsGet(STORE_KEYS.users), null);
-    if (savedUsers && Array.isArray(savedUsers) && window.twUsers) {
-      var existEmails = new Set(twUsers.map(function (u) { return u.email; }));
-      savedUsers.filter(function (u) { return !existEmails.has(u.email); }).forEach(function (u) { twUsers.push(u); });
-    }
+    // Users — previously merged from localStorage here. Now database-backed
+    // (User table via /api/users) — _syncUsers() in api-bridge.js is the sole
+    // source of truth and replaces twUsers wholesale on login/session-restore/
+    // refresh/poll, same as Applications/Banks/tickets. Merging a stale local
+    // copy on top of it here would let a deactivated/deleted user keep
+    // reappearing in this browser forever, so this restore path is removed.
 
     // Phase 4B: tickets are no longer restored from localStorage here.
     // TK_STORE is populated exclusively from GET /api/tickets (see
@@ -37165,97 +37167,67 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     // Merging a stale local copy on top of it here would risk it winning
     // over the server until the next sync, so this restore path is removed.
 
-    // Roles & permissions (merge persisted perms onto live ROLES; never add/remove roles)
-    var savedRoles = safeJSON(_lsGet(STORE_KEYS.roles), null);
-    if (savedRoles && typeof savedRoles === 'object' && window.ROLES) {
-      Object.keys(savedRoles).forEach(function (rk) {
-        if (rk === 'admin') return; // admin stays full-access
-        if (!ROLES[rk] || typeof savedRoles[rk] !== 'object') return;
-        Object.keys(savedRoles[rk]).forEach(function (pk) {
-          if (typeof savedRoles[rk][pk] === 'boolean' && pk in ROLES[rk]) {
-            ROLES[rk][pk] = savedRoles[rk][pk];
-          }
-        });
-      });
-      loaded = true;
-    }
+    // Roles & permissions: previously merged from localStorage here. Now
+    // database-backed (AppSetting rows via /api/settings) — the Enterprise
+    // Upgrade block above already calls stgSyncPermissionsFromServer() as
+    // the sole source of truth for ROLES/roleMenuVisibility, and (as of this
+    // fix) that call now also runs at boot/login/refresh, not only when the
+    // Settings → Access tab is opened. Merging a stale local copy on top of
+    // it here would risk it winning over the server until the next sync, so
+    // this restore path is removed, same reasoning as Banks/Report Targets.
 
-    // Sales Teams
-    var savedST = safeJSON(_lsGet(STORE_KEYS.salesTeams), null);
-    if (savedST && Array.isArray(savedST) && savedST.length && window.twSalesTeams) {
-      var stIds = new Set(twSalesTeams.map(function(t){ return t.id; }));
-      savedST.filter(function(t){ return !stIds.has(t.id); }).forEach(function(t){ twSalesTeams.push(t); });
-      // Overwrite seed entries that were edited
-      savedST.forEach(function(saved){
-        var idx = twSalesTeams.findIndex(function(t){ return t.id === saved.id; });
-        if (idx >= 0) twSalesTeams[idx] = saved;
-      });
-      loaded = true;
-    }
+    // Sales Teams / Login Teams — previously merged from localStorage here.
+    // Now database-backed (Team table via /api/teams) — _syncTeams() in
+    // api-bridge.js is the sole source of truth and replaces twSalesTeams/
+    // twLoginTeams wholesale (minus any not-yet-synced local draft with no
+    // _apiId) on login/session-restore/refresh/poll, same as Applications/
+    // Banks/tickets. Merging a stale local copy on top of it here would let
+    // an edited-elsewhere or removed team keep reappearing in this browser
+    // forever, so this restore path is removed.
 
-    // Login Teams
-    var savedLT = safeJSON(_lsGet(STORE_KEYS.loginTeams), null);
-    if (savedLT && Array.isArray(savedLT) && savedLT.length && window.twLoginTeams) {
-      var ltIds = new Set(twLoginTeams.map(function(t){ return t.id; }));
-      savedLT.filter(function(t){ return !ltIds.has(t.id); }).forEach(function(t){ twLoginTeams.push(t); });
-      savedLT.forEach(function(saved){
-        var idx = twLoginTeams.findIndex(function(t){ return t.id === saved.id; });
-        if (idx >= 0) twLoginTeams[idx] = saved;
-      });
-      loaded = true;
-    }
+    // Assignment Audit Log — previously merged from localStorage here. Now
+    // database-backed (AssignmentAuditLog table via /api/assignment-audit) —
+    // _syncAssignmentAuditLog() in api-bridge.js is the sole source of truth
+    // and replaces ASSIGNMENT_AUDIT_LOG wholesale on login/session-restore/
+    // refresh/poll, same as Banks/Report Targets. This is a read-only history
+    // view (entries are POSTed inline where they're created, not merged from
+    // a local cache), so this restore path is removed.
 
-    // Assignment Audit Log (append-only — merge by id, never drop history)
-    var savedAssignLog = safeJSON(_lsGet(STORE_KEYS.assignmentLog), null);
-    if (savedAssignLog && Array.isArray(savedAssignLog) && window.ASSIGNMENT_AUDIT_LOG) {
-      var assignIds = new Set(ASSIGNMENT_AUDIT_LOG.map(function(e){ return e.id; }));
-      savedAssignLog.filter(function(e){ return e && e.id && !assignIds.has(e.id); })
-        .forEach(function(e){ ASSIGNMENT_AUDIT_LOG.push(e); });
-      loaded = true;
-    }
+    // Payout Claims — previously merged from localStorage here. Now
+    // database-backed (PayoutClaim table via /api/payout) — _syncPayoutClaimsFromServer()
+    // in api-bridge.js is the sole source of truth for server-known claims
+    // (called on login/session-restore/refresh, after loans have _apiId
+    // populated) and _syncOwnPayoutClaims() pushes any still-local claim
+    // (no _apiId — e.g. against a local-only demo loan) up to the server.
+    // Merging a stale local copy on top of it here would risk it winning
+    // over the server's status/amount until the next sync, so this restore
+    // path is removed.
 
-    // Payout Claims
-    var savedClaims = safeJSON(_lsGet(STORE_KEYS.payoutClaims), null);
-    if (savedClaims && Array.isArray(savedClaims) && window.PAYOUT_CLAIMS) {
-      var claimIds = new Set(PAYOUT_CLAIMS.map(function(c){ return c.id; }));
-      savedClaims.filter(function(c){ return !claimIds.has(c.id); }).forEach(function(c){ PAYOUT_CLAIMS.push(c); });
-    }
-
-    // Partners
-    var savedPartners = safeJSON(_lsGet(STORE_KEYS.partners), null);
-    if (savedPartners && Array.isArray(savedPartners) && window.twPartnerList) {
-      var pIds = new Set(twPartnerList.map(function(p){ return p.id; }));
-      savedPartners.filter(function(p){ return !pIds.has(p.id); }).forEach(function(p){ twPartnerList.push(p); });
-      savedPartners.forEach(function(saved){
-        var idx = twPartnerList.findIndex(function(p){ return p.id === saved.id; });
-        if (idx >= 0) twPartnerList[idx] = saved;
-      });
-    }
-
-    // DSA List
-    var savedDSA = safeJSON(_lsGet(STORE_KEYS.dsaList), null);
-    if (savedDSA && Array.isArray(savedDSA) && window.twDSAList) {
-      var dIds = new Set(twDSAList.map(function(d){ return d.id; }));
-      savedDSA.filter(function(d){ return !dIds.has(d.id); }).forEach(function(d){ twDSAList.push(d); });
-      savedDSA.forEach(function(saved){
-        var idx = twDSAList.findIndex(function(d){ return d.id === saved.id; });
-        if (idx >= 0) twDSAList[idx] = saved;
-      });
-    }
+    // Partners / DSA List — previously merged from localStorage here. Now
+    // database-backed (DsaPartner table via /api/dsa) — _syncDsaPartners()
+    // in api-bridge.js is the sole source of truth and replaces twDSAList/
+    // twPartnerList wholesale (minus any not-yet-synced local draft with no
+    // _apiId) on login/session-restore/refresh/poll, same as Applications/
+    // Banks/tickets. Merging a stale local copy on top of it here would let
+    // a deleted DSA/Partner keep reappearing in this browser forever, so
+    // this restore path is removed.
 
     // Phase 4B: twTickets (Team Overview dashboard projection) is likewise no
     // longer restored from localStorage — it's derived from TK_STORE via
     // tkSaveTicket()/_syncTickets(), which is itself API-backed. See the note
     // above the removed TK_STORE restore block.
 
-    // Obligations — keyed by appId
-    var savedObligations = safeJSON(_lsGet(STORE_KEYS.obligations), null);
-    if (savedObligations && typeof savedObligations === 'object' && window.OBLIGATIONS) {
-      Object.keys(savedObligations).forEach(function(appId) {
-        OBLIGATIONS[appId] = savedObligations[appId];
-        loaded = true;
-      });
-    }
+    // Obligations — previously merged from localStorage here (keyed by
+    // appId). Now database-backed (LoanObligation table via
+    // /api/loans/{loanId}/obligations) — _syncObligations(appId) in
+    // api-bridge.js is the sole source of truth and replaces
+    // OBLIGATIONS[appId] wholesale, same approach as _syncRmEmails/
+    // _syncBanks. It's fetched on demand (when an application's detail view
+    // opens) rather than as part of this boot-time restore, same as the
+    // Lender Email Thread and AI Agent run history — see _patchOpenDetailObligations()
+    // in api-bridge.js. Merging a stale local copy on top of it here would
+    // risk it winning over the server until that detail view is opened, so
+    // this restore path is removed.
 
     return loaded;
   }

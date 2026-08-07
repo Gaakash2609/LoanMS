@@ -107,7 +107,19 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       if (window.PAYOUT_CLAIMS) localStorage.setItem(STORE_KEYS.payoutClaims, JSON.stringify(PAYOUT_CLAIMS));
       if (window.twPartnerList) localStorage.setItem(STORE_KEYS.partners,     JSON.stringify(twPartnerList));
       if (window.twDSAList)     localStorage.setItem(STORE_KEYS.dsaList,      JSON.stringify(twDSAList));
-      if (window.twTickets)     localStorage.setItem(STORE_KEYS.tickets,      JSON.stringify(twTickets));
+      // Phase 3 audit fix: tickets (twTickets / TK_STORE) are intentionally
+      // NOT written to localStorage anymore — this module's copy of
+      // persistSave() had been left out of sync with the Phase 4B fix
+      // already made to the *other* persistSave() in efin-app.js (both
+      // files declare their own local persistSave(), same STORE_KEYS
+      // values, independently wired to their own event patches). Until
+      // now this one kept re-writing 'efin_v22_tickets' on every
+      // efinMarkTaskDone/changeStatus-style call, undoing the exact
+      // protection Phase 4B added: /api/tickets (via _syncTickets() in
+      // api-bridge.js) is the sole source of truth, and a stale local
+      // ticket snapshot must never be able to shadow or resurrect a
+      // server-deleted ticket. See the matching note in efin-app.js's
+      // persistSave().
     } catch (e) {
       // Storage quota exceeded — attempt to save only critical data
       try {
@@ -134,88 +146,26 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   function persistLoad() {
     var loaded = false;
 
-    // Applications — DB (GET /api/loans, via _syncLoans() in api-bridge.js)
-    // is the single source of truth. This used to unconditionally merge
-    // every cached app back into APPLICATIONS on every page load with no
-    // check for whether it was already confirmed saved to the database —
-    // running right after efin-app.js's own (more careful) persistLoad()
-    // and silently re-adding stale/duplicate records every time. Removed;
-    // see the matching removal and explanation in efin-app.js's persistLoad().
-
-    // Tasks
-    var savedTasks = safeJSON(_lsGet(STORE_KEYS.tasks), null);
-    if (savedTasks && Array.isArray(savedTasks) && window.TASK_STORE) {
-      var existIds = new Set(TASK_STORE.map(function (t) { return t.id; }));
-      savedTasks.filter(function (t) { return !existIds.has(t.id); }).forEach(function (t) { TASK_STORE.push(t); });
-    }
-
-    // Users
-    var savedUsers = safeJSON(_lsGet(STORE_KEYS.users), null);
-    if (savedUsers && Array.isArray(savedUsers) && window.twUsers) {
-      var existEmails = new Set(twUsers.map(function (u) { return u.email; }));
-      savedUsers.filter(function (u) { return !existEmails.has(u.email); }).forEach(function (u) { twUsers.push(u); });
-    }
-
-    // Sales Teams
-    var savedST = safeJSON(_lsGet(STORE_KEYS.salesTeams), null);
-    if (savedST && Array.isArray(savedST) && savedST.length && window.twSalesTeams) {
-      var stIds = new Set(twSalesTeams.map(function(t){ return t.id; }));
-      savedST.filter(function(t){ return !stIds.has(t.id); }).forEach(function(t){ twSalesTeams.push(t); });
-      // Overwrite seed entries that were edited
-      savedST.forEach(function(saved){
-        var idx = twSalesTeams.findIndex(function(t){ return t.id === saved.id; });
-        if (idx >= 0) twSalesTeams[idx] = saved;
-      });
-      loaded = true;
-    }
-
-    // Login Teams
-    var savedLT = safeJSON(_lsGet(STORE_KEYS.loginTeams), null);
-    if (savedLT && Array.isArray(savedLT) && savedLT.length && window.twLoginTeams) {
-      var ltIds = new Set(twLoginTeams.map(function(t){ return t.id; }));
-      savedLT.filter(function(t){ return !ltIds.has(t.id); }).forEach(function(t){ twLoginTeams.push(t); });
-      savedLT.forEach(function(saved){
-        var idx = twLoginTeams.findIndex(function(t){ return t.id === saved.id; });
-        if (idx >= 0) twLoginTeams[idx] = saved;
-      });
-      loaded = true;
-    }
-
-    // Payout Claims
-    var savedClaims = safeJSON(_lsGet(STORE_KEYS.payoutClaims), null);
-    if (savedClaims && Array.isArray(savedClaims) && window.PAYOUT_CLAIMS) {
-      var claimIds = new Set(PAYOUT_CLAIMS.map(function(c){ return c.id; }));
-      savedClaims.filter(function(c){ return !claimIds.has(c.id); }).forEach(function(c){ PAYOUT_CLAIMS.push(c); });
-    }
-
-    // Partners
-    var savedPartners = safeJSON(_lsGet(STORE_KEYS.partners), null);
-    if (savedPartners && Array.isArray(savedPartners) && window.twPartnerList) {
-      var pIds = new Set(twPartnerList.map(function(p){ return p.id; }));
-      savedPartners.filter(function(p){ return !pIds.has(p.id); }).forEach(function(p){ twPartnerList.push(p); });
-      savedPartners.forEach(function(saved){
-        var idx = twPartnerList.findIndex(function(p){ return p.id === saved.id; });
-        if (idx >= 0) twPartnerList[idx] = saved;
-      });
-    }
-
-    // DSA List
-    var savedDSA = safeJSON(_lsGet(STORE_KEYS.dsaList), null);
-    if (savedDSA && Array.isArray(savedDSA) && window.twDSAList) {
-      var dIds = new Set(twDSAList.map(function(d){ return d.id; }));
-      savedDSA.filter(function(d){ return !dIds.has(d.id); }).forEach(function(d){ twDSAList.push(d); });
-      savedDSA.forEach(function(saved){
-        var idx = twDSAList.findIndex(function(d){ return d.id === saved.id; });
-        if (idx >= 0) twDSAList[idx] = saved;
-      });
-    }
-
-    // Tickets
-    var savedTickets = safeJSON(_lsGet(STORE_KEYS.tickets), null);
-    if (savedTickets && Array.isArray(savedTickets) && window.twTickets) {
-      var tIds = new Set(twTickets.map(function(t){ return t.id; }));
-      savedTickets.filter(function(t){ return !tIds.has(t.id); }).forEach(function(t){ twTickets.push(t); });
-    }
+    // Phase 3 audit fix: every restore-from-localStorage block below (Tasks,
+    // Users, Sales Teams, Login Teams, Payout Claims, Partners, DSA List,
+    // Tickets) has been removed. This module declares its own persistLoad(),
+    // separate from efin-app.js's, and — unlike that one — had never been
+    // updated for the Phase 1/2 "DB is sole source of truth" fixes: it kept
+    // doing an ADD-only union (push whatever's in localStorage that isn't
+    // already in memory by id/email), which is exactly the ghost-entry bug
+    // those phases fixed in the corresponding _syncX() functions in
+    // api-bridge.js. Since this file's DOMContentLoaded handler runs
+    // persistLoad() at boot (~600ms) — before/alongside those syncs — a
+    // task/user/team/partner/DSA/ticket deleted on the server (or on another
+    // device) could still get pushed back into the live in-memory store from
+    // a stale local cache here, only to be removed again moments later by
+    // the wholesale-replace + delete-detection sync (or, for stores that
+    // sync less eagerly, linger visibly until the next sync). All of Tasks/
+    // Users/Teams/Payout Claims/Partners/DSA/Tickets are now exclusively
+    // populated from the API (_syncTasks/_syncUsers/_syncTeams/
+    // _syncPayoutClaimsFromServer/_syncDsaPartners/_syncTickets in
+    // api-bridge.js) — see the matching, more detailed rationale in
+    // efin-app.js's own persistLoad(), which this mirrors.
 
     return loaded;
   }

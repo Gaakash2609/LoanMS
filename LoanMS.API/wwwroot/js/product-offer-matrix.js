@@ -390,6 +390,14 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     return window.PRODUCT_CAM_MATRICES[key] || [];
   };
 
+  // Exposed for api-bridge.js's _syncProductOfferMatrix delete-detection:
+  // when a product's matrix row has been deleted server-side, the local
+  // cache falls back to this built-in default instead of keeping the last
+  // synced (now stale/deleted) matrix around as a ghost entry.
+  window._ppResetToDefault = function (key) {
+    return (PP_DEFAULTS[key] || []).map(function (r) { return Object.assign({}, r); });
+  };
+
   // ── MutationObserver: watch #page-policy-product 'active' class ───────
   //    Works regardless of how many showPage wrappers exist.
   function _startObserver() {

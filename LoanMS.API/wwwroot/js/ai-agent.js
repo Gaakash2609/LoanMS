@@ -76,6 +76,39 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   let _runs = {};
   function _loadRuns() { try { var r=localStorage.getItem(AGENT_STORE); _runs=r?JSON.parse(r):{} } catch(e){_runs={};} }
   function _saveRuns() { try { localStorage.setItem(AGENT_STORE,JSON.stringify(_runs)); } catch(e){} }
+
+  // Pull the latest run history for one application from the server
+  // (source of truth) and replace _runs[appId] wholesale — mirrors
+  // window.openEmailThreadModal in lender-email-workflow.js. Was
+  // localStorage-only (_loadRuns above), so a run triggered on one
+  // browser/device was invisible everywhere else. localStorage stays as
+  // the instant-render cache/fallback via _saveRuns(); this always
+  // resolves (never rejects) so callers can safely chain a re-render.
+  function _syncAiAgentRuns(appId) {
+    var app = window.APPLICATIONS && APPLICATIONS.find(function (a) { return a.id === appId; });
+    if (app && app._apiId && typeof window._apiFetchAiAgentRuns === 'function') {
+      return window._apiFetchAiAgentRuns(app._apiId).then(function (res) {
+        if (res && res.success && Array.isArray(res.data)) {
+          _runs[appId] = res.data.map(function (r) {
+            var steps = [];
+            try { steps = r.stepsJson ? JSON.parse(r.stepsJson) : []; } catch (e) { steps = []; }
+            return {
+              runId: r.runId,
+              startedAt: r.startedAt,
+              finishedAt: r.finishedAt,
+              steps: steps,
+              status: r.status,
+              error: r.error,
+              _dbId: r.id
+            };
+          });
+          _saveRuns();
+        }
+      }).catch(function () { /* server unreachable — keep local cache as fallback */ });
+    }
+    return Promise.resolve();
+  }
+
   function _startRun(id, app) {
     if(!_runs[id]) _runs[id]=[];
     var run={runId:'RUN-'+Date.now(),startedAt:new Date().toISOString(),finishedAt:null,steps:[],status:'running',error:null};
@@ -1018,7 +1051,15 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   };
 
   // ── HISTORY ───────────────────────────────────────────────────────────────
+  // Public entry point — fetches the latest run history from the server
+  // before rendering, same pattern as window.openEmailThreadModal in
+  // lender-email-workflow.js. Previously this modal only ever showed
+  // whatever was in this browser's localStorage.
   function openHistory(appId){
+    _syncAiAgentRuns(appId).then(function(){ _renderHistorySync(appId); });
+  }
+
+  function _renderHistorySync(appId){
     var runs=_runs[appId]||[];
     document.getElementById('agent-history-modal')&&document.getElementById('agent-history-modal').remove();
     var rows=runs.length===0?'<div style="text-align:center;padding:32px;color:#9ca3af">No runs yet</div>'
@@ -1082,7 +1123,12 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     window._agentTrackingHooked=true;
     window.renderTrackingSection=function(app){
       try{_orig.call(this,app);}catch(e){console.warn('[agent] renderTrackingSection:',e);}
-      setTimeout(function(){_injectBar(app);},60);
+      // Reconcile run history from the server before the bar (and its
+      // last-run status badge) is injected — was localStorage-only, so
+      // the badge only ever reflected runs triggered on this browser.
+      _syncAiAgentRuns(app && app.id).then(function(){
+        setTimeout(function(){_injectBar(app);},60);
+      });
     };
   }
 

@@ -72,13 +72,14 @@ public class LoansController : BaseController
 
     /// <summary>
     /// Update loan details (Draft/Submitted only).
-    /// [Admin/Manager/Sales only] — DSA/Partner never get automatic edit rights.
+    /// [Roles with canEditDetails:true in the frontend ROLES matrix]
+    /// — DSA/Partner/Accounts never get automatic edit rights.
     /// Ownership/location scope is verified server-side before the write
     /// (see ILoanRepository.HasAccessAsync) — a loanId outside the caller's
     /// scope returns "not found", it does not execute the update.
     /// </summary>
     [HttpPut("{id:int}")]
-    [Authorize(Roles = "Admin,Manager,Sales")]
+    [Authorize(Roles = "Admin,Manager,Sales,LoginTeam,TeamLeader,LocationHead,OperationManager,ProductTeam")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateLoanRequestDto request)
     {
         if (!ModelState.IsValid)
@@ -90,12 +91,13 @@ public class LoansController : BaseController
     }
 
     /// <summary>
-    /// Update loan status [Manager/Admin only]. Manager's existing location
-    /// restriction is enforced here too — approving/rejecting a loan outside
-    /// their authorized location now fails the same access check as viewing it.
+    /// Update loan status [Roles with canChangeStatus:true in the frontend
+    /// ROLES matrix]. Manager's existing location restriction is enforced
+    /// here too — approving/rejecting a loan outside their authorized
+    /// location now fails the same access check as viewing it.
     /// </summary>
     [HttpPatch("{id:int}/status")]
-    [Authorize(Roles = "Admin,Manager")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
     public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdateLoanStatusRequestDto request)
     {
         if (!ModelState.IsValid)
@@ -120,9 +122,9 @@ public class LoansController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Approve loan [Manager/Admin only]</summary>
+    /// <summary>Approve loan [Roles with canChangeStatus:true — approval is a status transition]</summary>
     [HttpPatch("{id:int}/approve")]
-    [Authorize(Roles = "Admin,Manager")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
     public async Task<IActionResult> Approve(int id, [FromBody] ApproveRequestDto request)
     {
         var result = await _loanService.UpdateStatusAsync(id,
@@ -136,9 +138,9 @@ public class LoansController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Reject loan [Manager/Admin only]</summary>
+    /// <summary>Reject loan [Roles with canRejectApp:true in the frontend ROLES matrix]</summary>
     [HttpPatch("{id:int}/reject")]
-    [Authorize(Roles = "Admin,Manager")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
     public async Task<IActionResult> Reject(int id, [FromBody] RejectRequestDto request)
     {
         var result = await _loanService.UpdateStatusAsync(id,
@@ -151,9 +153,9 @@ public class LoansController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Disburse loan [Admin only]</summary>
+    /// <summary>Disburse loan [Roles with canDisburse:true in the frontend ROLES matrix]</summary>
     [HttpPatch("{id:int}/disburse")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
     public async Task<IActionResult> Disburse(int id)
     {
         var result = await _loanService.UpdateStatusAsync(id,
