@@ -12,6 +12,15 @@ public interface ILoanRepository : IGenericRepository<Loan>
     // this is what blocks direct loanId-swap access to someone else's loan.
     Task<Loan?> GetWithDetailsAsync(int id, int? currentUserId = null, string? currentUserRole = null);
     Task<PagedResultDto<LoanListDto>> GetPagedAsync(LoanFilterDto filter, int? currentUserId = null, string? currentUserRole = null);
+    // Applications → Export: same filters/visibility scope as GetPagedAsync,
+    // but returns up to a capped set of matching rows (not paginated) for a
+    // CSV download. See LoansController.Export.
+    Task<List<LoanListDto>> GetForExportAsync(LoanFilterDto filter, int? currentUserId = null, string? currentUserRole = null, int maxRows = 5000);
+    // Productivity audit (P1) — latest persisted BureauReport.RiskGrade for
+    // a customer, null if none exists. Used to surface risk on the single-
+    // loan detail view (LoanDto.RiskGrade) the same way the list views
+    // already do inline.
+    Task<string?> GetLatestRiskGradeAsync(int customerId);
     Task<string> GenerateLoanNumberAsync();
     Task<DashboardStatsDto> GetDashboardStatsAsync(int? userId = null, string? role = null);
     Task<IEnumerable<Loan>> GetLoansByCustomerAsync(int customerId);

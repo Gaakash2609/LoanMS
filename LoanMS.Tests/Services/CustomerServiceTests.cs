@@ -37,9 +37,9 @@ public class CustomerServiceTests
     [Fact]
     public async Task GetByIdAsync_WhenNotFound_ReturnsFail()
     {
-        _repoMock.Setup(r => r.GetWithLoansAsync(99)).ReturnsAsync((Customer?)null);
+        _repoMock.Setup(r => r.GetWithLoansAsync(99, 1, "Admin")).ReturnsAsync((Customer?)null);
         var svc    = CreateService();
-        var result = await svc.GetByIdAsync(99);
+        var result = await svc.GetByIdAsync(99, 1, "Admin");
         result.Success.Should().BeFalse();
     }
 
@@ -115,13 +115,13 @@ public class CustomerServiceTests
         // call reaching into ICacheService at all, is exactly the bug this
         // guards against.
         var page = new PagedResultDto<CustomerDto> { Items = new List<CustomerDto>(), TotalCount = 0, Page = 1, PageSize = 20 };
-        _repoMock.Setup(r => r.GetPagedAsync(1, 20, null)).ReturnsAsync(page);
+        _repoMock.Setup(r => r.GetPagedAsync(1, 20, null, 1, "Admin")).ReturnsAsync(page);
 
         var svc = CreateService();
-        await svc.GetAllAsync(1, 20, null);
-        await svc.GetAllAsync(1, 20, null);
+        await svc.GetAllAsync(1, 20, null, 1, "Admin");
+        await svc.GetAllAsync(1, 20, null, 1, "Admin");
 
-        _repoMock.Verify(r => r.GetPagedAsync(1, 20, null), Times.Exactly(2));
+        _repoMock.Verify(r => r.GetPagedAsync(1, 20, null, 1, "Admin"), Times.Exactly(2));
         _cacheMock.Verify(c => c.GetAsync<PagedResultDto<CustomerDto>>(It.IsAny<string>()), Times.Never);
         _cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<PagedResultDto<CustomerDto>>(), It.IsAny<TimeSpan?>()), Times.Never);
         _cacheMock.Verify(c => c.RemoveByPrefixAsync(It.IsAny<string>()), Times.Never);

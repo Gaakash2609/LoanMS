@@ -23,11 +23,13 @@ public class UsersController : BaseController
 
     /// <summary>Get minimal active-user list (id, name, role) for dropdowns like the wizard's
     /// Sales Person selector. Available to any authenticated role — does not expose email,
-    /// active status, or other Admin user-management fields.</summary>
+    /// active status, or other Admin user-management fields. Phase 4: which USERS appear is
+    /// now also role-scoped server-side (see IUserService.GetLookupAsync) — Admin/Manager get
+    /// the full active-user list, every other role only sees active Sales-role users.</summary>
     [HttpGet("lookup")]
     public async Task<IActionResult> GetLookup()
     {
-        var result = await _userService.GetLookupAsync();
+        var result = await _userService.GetLookupAsync(CurrentUserRole);
         return ApiResult(result);
     }
 
@@ -48,6 +50,22 @@ public class UsersController : BaseController
         var result = await _userService.GetByIdAsync(CurrentUserId);
         if (!result.Success) return NotFound(result);
         return Ok(result);
+    }
+
+    /// <summary>Update current user's own profile (PhoneNumber/PhotoData only).
+    /// Self-service — no Admin role required, since `id` always comes from
+    /// the caller's own JWT via CurrentUserId, never from the request body.
+    /// Does not touch FullName/Role/IsActive; use the Admin-only PUT /{id}
+    /// endpoint above for those.</summary>
+    [HttpPut("profile")]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequestDto request)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ApiResponseDto<UserDto>.Fail(
+                ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
+
+        var result = await _userService.UpdateProfileAsync(CurrentUserId, request);
+        return ApiResult(result);
     }
 
     /// <summary>Create new user [Admin only]</summary>

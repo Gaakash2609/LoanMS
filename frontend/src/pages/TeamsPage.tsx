@@ -23,18 +23,17 @@ export default function TeamsPage() {
             <div className="flex items-start justify-between mb-3">
               <div>
                 <p className="font-semibold text-gray-900">{team.name}</p>
-                {team.locationName && <p className="text-xs text-gray-500">{team.locationName}</p>}
               </div>
               <Badge variant={team.type === 'Sales' ? 'info' : 'warning'}>{team.type}</Badge>
             </div>
             <div className="flex items-center gap-4 text-sm">
               <div className="flex items-center gap-1.5 text-gray-600">
                 <Users size={14} />
-                <span>{team.memberCount} members</span>
+                <span>{team.members.length} members</span>
               </div>
-              {team.teamLeadName && (
+              {team.teamLead && (
                 <div className="text-gray-600">
-                  Lead: <span className="font-medium">{team.teamLeadName}</span>
+                  Lead: <span className="font-medium">{team.teamLead}</span>
                 </div>
               )}
             </div>

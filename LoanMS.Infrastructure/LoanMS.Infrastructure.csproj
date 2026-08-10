@@ -24,6 +24,14 @@
     <!-- Email — MailKit replaces System.Net.Mail for production -->
     <PackageReference Include="MailKit" Version="4.17.0" />
     <PackageReference Include="MimeKit" Version="4.17.0" />
+    <!-- File storage — S3-backed document uploads (see IFileStorageService /
+         S3FileStorageService). Added because loan/DSA document uploads were
+         writing to the ECS Fargate container's local disk, which is
+         ephemeral and wiped on every deploy/restart/scale event.
+         NOTE: this exact version could not be verified against NuGet from
+         the sandbox this change was written in (no NuGet network access
+         there) — confirm/bump to the latest 3.7.x patch before deploying. -->
+    <PackageReference Include="AWSSDK.S3" Version="3.7.405.4" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LoanMS.Application\LoanMS.Application.csproj" />

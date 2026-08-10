@@ -3,8 +3,8 @@ import type { ApiResponse } from '@/types'
 
 export interface Team {
   id: number; name: string; type: string; locationId?: number
-  teamLeadUserId?: number; memberCount: number; createdAt: string
-  teamLeadName?: string; locationName?: string
+  teamLead?: string
+  members: { userId: number; fullName: string; email: string }[]
 }
 export interface TeamMember { id: number; userId: number; teamId: number; userName: string }
 

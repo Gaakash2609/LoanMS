@@ -167,6 +167,64 @@ try
     builder.Services.AddScoped<IEmailService, LoanMS.Infrastructure.Services.EmailService>();
     builder.Services.AddScoped<ICibilAnalysisService, CibilAnalysisService>();
 
+    // ── SLA breach + task follow-up automation (🔴 CRITICAL item #4/#9) ──────
+    // Registered as a hosted BackgroundService — see SlaAndTaskAutomationService's
+    // own doc comment for the full reasoning (no other job infra exists in
+    // this project; configurable interval via Automation:IntervalMinutes;
+    // never blocks HTTP request handling since it runs on its own timer loop
+    // in a background scope).
+    builder.Services.AddHostedService<LoanMS.Infrastructure.Services.SlaAndTaskAutomationService>();
+
+    // ── File storage — S3 required in Production, local disk in dev only ────
+    // Loan/DSA document uploads used to always write to the ECS Fargate
+    // container's local disk (AppContext.BaseDirectory/secure_uploads) —
+    // ephemeral storage that's wiped on every deploy/restart/scale event,
+    // and invisible across the multiple tasks a service can run.
+    //
+    // Fail-fast in Production instead of silently falling back to local disk
+    // — same reasoning, and the same pattern, as the Database:Provider check
+    // above. A missing/misspelled Storage__S3BucketName env var on any one
+    // ECS task would otherwise make that task quietly write uploaded
+    // documents to its own local disk instead of the shared S3 bucket;
+    // those files would then be permanently lost on the next deploy/restart/
+    // scale event, with the LoanDocument/DsaDocument database row surviving
+    // as an orphaned reference to nothing. Refuse to start rather than serve
+    // upload traffic that would silently produce unrecoverable data loss.
+    var s3Bucket = builder.Configuration["Storage:S3BucketName"];
+    if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(s3Bucket))
+    {
+        throw new InvalidOperationException(
+            "Storage:S3BucketName is not configured in a Production environment. Refusing to start " +
+            "with a local-disk fallback for document uploads, which would be silently wiped on the next " +
+            "deploy/restart/scale event and invisible to any other running ECS task — the exact same class " +
+            "of data-loss bug the Database:Provider check above exists to prevent. Set the " +
+            "Storage__S3BucketName (and, if the bucket isn't in the task's default region, " +
+            "Storage__S3Region) environment variable in the ECS task definition, and ensure the task's " +
+            "IAM role (taskRoleArn) has s3:PutObject/s3:GetObject/s3:GetObjectMetadata permission on that " +
+            "bucket, before deploying.");
+    }
+
+    if (!string.IsNullOrWhiteSpace(s3Bucket))
+    {
+        var s3Region = builder.Configuration["Storage:S3Region"];
+        builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ =>
+            string.IsNullOrWhiteSpace(s3Region)
+                ? new Amazon.S3.AmazonS3Client()
+                : new Amazon.S3.AmazonS3Client(Amazon.RegionEndpoint.GetBySystemName(s3Region)));
+        builder.Services.AddScoped<LoanMS.Application.Interfaces.IFileStorageService>(sp =>
+            new LoanMS.Infrastructure.Services.S3FileStorageService(sp.GetRequiredService<Amazon.S3.IAmazonS3>(), s3Bucket));
+    }
+    else
+    {
+        // Reached only in non-Production environments (Development/Staging/
+        // local) — the Production branch above already refused to start
+        // rather than fall through to here. Kept exactly as before so local
+        // development needs no S3 setup at all.
+        var localRoot = Path.Combine(AppContext.BaseDirectory, "secure_uploads");
+        builder.Services.AddScoped<LoanMS.Application.Interfaces.IFileStorageService>(_ =>
+            new LoanMS.Infrastructure.Services.LocalFileStorageService(localRoot));
+    }
+
     // ── AutoMapper ────────────────────────────────────────────────────────────
     builder.Services.AddAutoMapper(typeof(MappingProfile));
 
@@ -512,11 +570,16 @@ try
             }
 
             // ── Seed / reset default users ───────────────────────────────────────
-            // Runs on EVERY startup: creates users if missing, resets passwords to defaults.
-            // This guarantees login always works even if DB was partially migrated.
+            // Runs on EVERY startup: creates users if missing.
+            // Passwords are ONLY set for newly-created users. Existing users' passwords
+            // are never touched on restart — that would silently overwrite a real
+            // password the user set from Settings. Set Seed:ForcePasswordReset=true
+            // explicitly (e.g. emergency admin lockout) to opt back into overwriting
+            // an existing user's password with the default.
             var adminPw   = builder.Configuration["Seed:AdminPassword"]   ?? "Admin@123";
             var managerPw = builder.Configuration["Seed:ManagerPassword"] ?? "Manager@123";
             var salesPw   = builder.Configuration["Seed:SalesPassword"]   ?? "Sales@123";
+            var forcePasswordReset = builder.Configuration.GetValue<bool>("Seed:ForcePasswordReset", false);
 
             var defaultUsers = new[]
             {
@@ -543,11 +606,19 @@ try
                 }
                 else
                 {
-                    // Always reset password to default on startup so login always works
-                    existing.PasswordHash = BCrypt.Net.BCrypt.HashPassword(u.Password, workFactor: 12);
-                    existing.IsActive     = true;
+                    existing.IsActive = true; // never leave a default account locked out
+
+                    if (forcePasswordReset)
+                    {
+                        existing.PasswordHash = BCrypt.Net.BCrypt.HashPassword(u.Password, workFactor: 12);
+                        logger.LogInformation("Seed:ForcePasswordReset=true — password force-reset for: {Email}", u.Email);
+                    }
+                    else
+                    {
+                        logger.LogInformation("Default user already exists, password preserved: {Email}", u.Email);
+                    }
+
                     db.Users.Update(existing);
-                    logger.LogInformation("Reset password for: {Email}", u.Email);
                 }
             }
             db.SaveChanges();

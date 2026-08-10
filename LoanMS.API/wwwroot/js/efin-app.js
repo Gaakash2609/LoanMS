@@ -62,6 +62,7 @@
             renderLoanTypeChart();
             updateDashboardStats();
             renderActivity();
+            if (typeof renderActionQueue === 'function') renderActionQueue();
             renderBanksTable();
             // Load InCred credentials from server (secure), then render
             _loadIncredConfigFromServer().then(() => renderIncredPage());
@@ -905,18 +906,21 @@
     //  since nothing in the app called it, and login never read from
     //  that store either.)
     // ═══════════════════════════════════════════════════════
+    // Only the 3 accounts the backend actually seeds on startup (see
+    // Program.cs "Seed / reset default users" — admin@efin.com,
+    // manager@efin.com, sales@efin.com). The other 8 entries removed here
+    // (login@efin.com, tl@efin.com, partner@efin.com, accounts@efin.com,
+    // product@efin.com, locationhead@efin.com, opmanager@efin.com,
+    // dsa@efin.com) had no real backend account behind them at all — they
+    // were fake placeholder names/emails that still fed into real assignee
+    // dropdowns (see USER_ACCOUNTS usage below: "assign-to" name lists,
+    // Team Leader/member selectors), so picking one would silently fail
+    // (no such login exists) or misattribute a task/team to a name nobody
+    // could ever actually log in as.
     const USER_ACCOUNT_DEFAULTS = [
       { email: 'admin@efin.com',       name: 'Admin User',        role: 'admin' },
-      { email: 'login@efin.com',       name: 'Login Officer',     role: 'login_team' },
-      { email: 'tl@efin.com',          name: 'Team Lead',         role: 'team_leader' },
-      { email: 'sales@efin.com',       name: 'Sales Exec',        role: 'sales_executive' },
-      { email: 'partner@efin.com',     name: 'Partner User',      role: 'partner' },
-      { email: 'accounts@efin.com',    name: 'Accounts Team',     role: 'accounts' },
-      { email: 'product@efin.com',     name: 'Product Team',      role: 'product_team' },
-      { email: 'locationhead@efin.com',name: 'Location Head',     role: 'location_head' },
       { email: 'manager@efin.com',     name: 'Manager User',      role: 'manager' },
-      { email: 'opmanager@efin.com',   name: 'Operation Manager', role: 'operation_manager' },
-      { email: 'dsa@efin.com',         name: 'DSA User',          role: 'dsa_user' },
+      { email: 'sales@efin.com',       name: 'Sales Exec',        role: 'sales_executive' },
     ];
 
     // In-memory array used throughout the app for name/role lookups.
@@ -1862,7 +1866,7 @@
       if (navEl) { document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); navEl.classList.add('active'); }
       if (name === 'applications') renderTable();
       if (name === 'settings') { setTimeout(function() { if (typeof _renderKycProxySettingsCard === 'function') _renderKycProxySettingsCard(); }, 80); }
-      if (name === 'dashboard') { renderPipeline(); renderChart(); renderLoanTypeChart(); updateDashboardStats(); renderActivity(); }
+      if (name === 'dashboard') { renderPipeline(); renderChart(); renderLoanTypeChart(); updateDashboardStats(); renderActivity(); if (typeof renderActionQueue === 'function') renderActionQueue(); }
       if (name === 'incred') renderIncredPage();
       if (name === 'lender-config') {
         lcShowProductPicker();
@@ -1910,6 +1914,80 @@
     // ═══════════════════════════════════════════════════════
     //  TABLE
     // ═══════════════════════════════════════════════════════
+    // 🔴 Bulk Actions (item #3) — selection state + apply. The backend
+    // (PATCH /api/loans/bulk-status) independently re-checks authorization
+    // for every single loan id regardless of what's selected here — this
+    // is purely UI-side selection bookkeeping, never a security boundary.
+    let _bulkSelectedIds = new Set();
+
+    function toggleBulkSelect(appId, checked) {
+      if (checked) _bulkSelectedIds.add(appId); else _bulkSelectedIds.delete(appId);
+      renderBulkActionsBar();
+    }
+
+    function toggleBulkSelectAll(checked) {
+      document.querySelectorAll('.bulk-select-row').forEach(function(cb) {
+        cb.checked = checked;
+        if (checked) _bulkSelectedIds.add(cb.dataset.appId); else _bulkSelectedIds.delete(cb.dataset.appId);
+      });
+      var head = document.getElementById('bulk-select-all');
+      if (head) head.checked = checked;
+      renderBulkActionsBar();
+    }
+
+    function renderBulkActionsBar() {
+      var bar = document.getElementById('bulk-actions-bar');
+      var countEl = document.getElementById('bulk-actions-count');
+      if (!bar || !countEl) return;
+      var n = _bulkSelectedIds.size;
+      bar.style.display = n > 0 ? 'flex' : 'none';
+      countEl.textContent = n + ' application' + (n !== 1 ? 's' : '') + ' selected';
+    }
+
+    async function bulkApplyStatus() {
+      var statusSel = document.getElementById('bulk-actions-status');
+      var newStatus = statusSel && statusSel.value;
+      if (!newStatus) { if (typeof showToast === 'function') showToast('Select a status first', 'warn'); return; }
+      if (_bulkSelectedIds.size === 0) return;
+      if (!confirm('Change status to "' + newStatus + '" for ' + _bulkSelectedIds.size + ' selected application(s)? This cannot be undone in bulk.')) return;
+      if (typeof apiReq !== 'function') { if (typeof showToast === 'function') showToast('Not connected to server', 'error'); return; }
+
+      // Map display app ids ("EFIN2026...") to real database ids (_apiId) —
+      // the bulk endpoint operates on numeric loan ids, same as every other
+      // loan endpoint.
+      var loanIds = Array.from(_bulkSelectedIds)
+        .map(function(appId) {
+          var app = (typeof APPLICATIONS !== 'undefined' ? APPLICATIONS : []).find(function(a) { return a.id === appId; });
+          return app && app._apiId;
+        })
+        .filter(Boolean);
+
+      if (!loanIds.length) { if (typeof showToast === 'function') showToast('Selected applications are not yet synced to the server', 'warn'); return; }
+
+      const applyBtn = document.querySelector('#bulk-actions-bar button.btn:not(.btn-ghost)');
+      if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Applying…'; }
+
+      try {
+        var res = await apiReq('PATCH', '/loans/bulk-status', { loanIds: loanIds, newStatus: newStatus });
+        if (!res || !res.success) throw new Error((res && res.message) || 'Bulk update failed.');
+        var d = res.data || {};
+        if (typeof showToast === 'function') {
+          showToast(
+            d.succeededCount + ' updated, ' + d.failedCount + ' failed (permission/transition rules apply per-record) ✓',
+            d.failedCount > 0 ? 'warn' : 'success'
+          );
+        }
+        _bulkSelectedIds.clear();
+        renderBulkActionsBar();
+        if (typeof _syncLoans === 'function') _syncLoans();
+        else if (typeof renderTable === 'function') renderTable();
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('⚠ ' + (e.message || 'Bulk update failed'), 'error');
+      } finally {
+        if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Apply'; }
+      }
+    }
+
     function renderTable(filter) {
       const f = filter || activeFilter;
       // Exclude only historical seed entries (H*** ids) — wizard drafts are
@@ -1927,21 +2005,15 @@
       const rd = ROLES[currentUser.role];
       const isAdmin = currentUser.role === 'admin';
       const pageApps = _appsPaginate(apps);
-      body.innerHTML = pageApps.map(a => a.is_draft ? `
-    <tr onclick="resumeDraftFromList('${a.id}')" style="cursor:pointer">
-      <td><span class="app-id">${a.id || '—'}</span></td>
-      <td><strong>${a.name}</strong></td>
-      <td>${loanTypeLabel(a.loanType)}</td>
-      <td>${a.loanamt ? '₹' + Number(a.loanamt).toLocaleString('en-IN') : '—'}</td>
-      <td><span class="badge" style="background:rgba(230,126,0,.1);color:#b45309">Draft</span></td>
-      <td>${a.sales || '—'}</td>
-      <td>${a.date || '—'}</td>
-      <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <button onclick="resumeDraftFromList('${a.id}')" style="display:inline-flex;align-items:center;gap:5px;padding:5px 14px;border-radius:8px;font-size:12px;font-weight:600;border:1.5px solid var(--accent);background:var(--surface2);color:var(--accent);cursor:pointer">▶ Continue</button>
-        ${isAdmin ? `<button onclick="if(typeof deleteDraftById==='function'){deleteDraftById('${a.id}');renderTable();}" style="display:inline-flex;align-items:center;gap:4px;padding:5px 12px;background:rgba(192,57,43,.08);border:1px solid rgba(192,57,43,.25);color:var(--danger);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer" title="Delete draft">🗑 Delete</button>` : ''}
-      </td>
-    </tr>
-  ` : `
+      // Admin/Manager get every user's draft back from the server (backend
+      // isInternal visibility rule — untouched), so a draft row here can
+      // belong to someone else. Flag that clearly instead of letting it read
+      // as if it were the viewer's own — this is the same identity check
+      // findMyDraft() (below, in the wizard-draft IIFE) uses, kept in sync
+      // with it deliberately.
+      const _viewerDraftId = (currentUser && (currentUser.email || currentUser.name)) || 'anon';
+      body.innerHTML = pageApps.map(a => {
+        if (!a.is_draft) return `
     <tr onclick="openDetail('${a.id}')">
       <td><span class="app-id">${a.id || a._tempAppNo || '—'}</span></td>
       <td><strong>${a.name}</strong></td>
@@ -1956,7 +2028,27 @@
         ${isAdmin ? `<button onclick="deleteApplication('${a.id}',event)" style="display:inline-flex;align-items:center;gap:4px;padding:5px 12px;background:rgba(192,57,43,.08);border:1px solid rgba(192,57,43,.25);color:var(--danger);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer" title="Delete application">🗑 Delete</button>` : ''}
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">No applications found</td></tr>';
+  `;
+        const isOwnDraft = a.draft_owner === _viewerDraftId;
+        const ownerNote = (!isOwnDraft && a.draft_owner)
+          ? `<div style="font-size:11px;color:var(--text3);font-weight:500;margin-top:2px">Draft by ${a.draft_owner}</div>`
+          : '';
+        return `
+    <tr onclick="resumeDraftFromList('${a.id}')" style="cursor:pointer">
+      <td><span class="app-id">${a.id || '—'}</span></td>
+      <td><strong>${a.name}</strong>${ownerNote}</td>
+      <td>${loanTypeLabel(a.loanType)}</td>
+      <td>${a.loanamt ? '₹' + Number(a.loanamt).toLocaleString('en-IN') : '—'}</td>
+      <td><span class="badge" style="background:rgba(230,126,0,.1);color:#b45309">Draft${!isOwnDraft && a.draft_owner ? ' (other)' : ''}</span></td>
+      <td>${a.draft_owner && !isOwnDraft ? a.draft_owner : (a.sales || '—')}</td>
+      <td>${a.date || '—'}</td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap">
+        <button onclick="resumeDraftFromList('${a.id}')" style="display:inline-flex;align-items:center;gap:5px;padding:5px 14px;border-radius:8px;font-size:12px;font-weight:600;border:1.5px solid var(--accent);background:var(--surface2);color:var(--accent);cursor:pointer">${isOwnDraft ? '▶ Continue' : '👁 View/Continue'}</button>
+        ${isAdmin ? `<button onclick="if(typeof deleteDraftById==='function'){deleteDraftById('${a.id}');renderTable();}" style="display:inline-flex;align-items:center;gap:4px;padding:5px 12px;background:rgba(192,57,43,.08);border:1px solid rgba(192,57,43,.25);color:var(--danger);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer" title="Delete draft">🗑 Delete</button>` : ''}
+      </td>
+    </tr>
+  `;
+      }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">No applications found</td></tr>';
     }
 
     function getActionBtn(a) {
@@ -2142,9 +2234,10 @@
       const pageApps = _appsPaginate(apps);
       body.innerHTML = pageApps.length ? pageApps.map(a => `
     <tr onclick="openDetail('${a.id}')">
+      <td onclick="event.stopPropagation()"><input type="checkbox" class="bulk-select-row" data-app-id="${a.id}" onchange="toggleBulkSelect('${a.id}', this.checked)"></td>
       <td><span class="app-id">${a.id || a._tempAppNo || '—'}</span></td>
       <td>
-        <strong>${a.name}</strong>
+        <strong>${a.name}</strong>${a.riskGrade ? ` <span title="Bureau risk grade" style="display:inline-block;margin-left:5px;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:800;background:${a.riskGrade==='A'?'rgba(26,115,64,.12);color:#1a7340':a.riskGrade==='D'?'rgba(212,43,43,.12);color:#d42b2b':'rgba(230,126,0,.12);color:#e67e00'}">${a.riskGrade}</span>` : ''}
       </td>
       <td>${loanTypeLabel(a.loanType)}</td>
       <td>₹${Number(a.amount).toLocaleString('en-IN')}</td>
@@ -2156,7 +2249,7 @@
         ${isAdmin ? `<button onclick="openDetail('${a.id}')" style="display:inline-flex;align-items:center;gap:5px;padding:5px 14px;border-radius:8px;font-size:12px;font-weight:600;border:1.5px solid var(--border2);background:var(--surface2);color:var(--text);cursor:pointer;transition:all .18s;margin-right:6px" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text)'">&#128065; Open</button><button onclick="deleteApplication('${a.id}',event)" style="display:inline-flex;align-items:center;gap:4px;padding:5px 12px;background:rgba(192,57,43,.08);border:1px solid rgba(192,57,43,.25);color:var(--danger);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer" title="Delete application">🗑 Delete</button>` : ''}
       </td>
     </tr>`).join('')
-      : '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text3)">No applications match your search</td></tr>';
+      : '<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">No applications match your search</td></tr>';
     }
 
     // ═══════════════════════════════════════════════════════
@@ -3958,52 +4051,20 @@
     }
 
     function initSamplePayoutData() {
-      if (PAYOUT_CLAIMS.length > 0) return;
-      // Seed sample claims from multiple partners using HISTORICAL_APPS
-      const allApps = [...(typeof APPLICATIONS !== 'undefined' ? APPLICATIONS : []), ...(typeof HISTORICAL_APPS !== 'undefined' ? HISTORICAL_APPS : [])];
-      const partnerNames = ['Partner User', 'Amit Verma', 'Priya Singh'];
-      const statusCycle = ['pending','pending','approved','pending','paid','rejected','pending','approved'];
-      let si = 0;
-      allApps.filter(a => a.status === 'disbursed').slice(0, 18).forEach((app, idx) => {
-        const partner = partnerNames[idx % partnerNames.length];
-        const claimMonth = (() => {
-          const months = ['2026-01','2026-02','2026-03','2025-12','2025-11','2025-10'];
-          return months[idx % months.length];
-        })();
-        const status = statusCycle[si++ % statusCycle.length];
-        const claimAmt = Math.round(Number(app.amount) * 0.015 / 1000) * 1000;
-        PAYOUT_CLAIMS.push({
-          id: 'CLM-' + Math.random().toString(36).substr(2,6).toUpperCase(),
-          partner,
-          loanApac: app.id || '',
-          loanRefId: app.id || '',
-          customerName: app.name || '',
-          firstName: (app.fname || '').split(' ')[0],
-          lastName: app.lname || '',
-          bank: app.bank || '',
-          loanType: app.loanType || 'personal_loan',
-          disbAmount: app.amount || 0,
-          disbDate: app.date || '',
-          claimMonth,
-          city: app.city || 'Mumbai',
-          bizCategory: app.loanType || 'loan_tbc',
-          bizHead: app.sales || app.rm || 'Direct',
-          userType: 'individual',
-          dsaMobile: '9' + Math.floor(Math.random()*900000000+100000000),
-          contests: idx % 3 === 0 ? 'q1_2026' : '',
-          companyName: app.compName || '',
-          splitCase: false,
-          confirmationRequired: idx % 4 === 0,
-          vendorRemark: idx % 5 === 0 ? 'Verified by field team' : '',
-          claimAmount: claimAmt,
-          payoutAmount: status === 'approved' || status === 'paid' ? claimAmt : 0,
-          status,
-          accountsRemark: status === 'rejected' ? 'Document mismatch' : status === 'approved' ? 'Verified ✓' : '',
-          createdAt: new Date().toLocaleDateString('en-IN'),
-          isAuto: true,
-        });
-      });
-      updatePayoutNavBadge();
+      // BUGFIX (hardcoded-data sweep): this used to fabricate 18 fake payout
+      // claims — random partner names ('Amit Verma', 'Priya Singh'), random
+      // DSA mobile numbers, random claim amounts/statuses — attached to
+      // REAL disbursed loans the moment any existed in APPLICATIONS
+      // (via _syncLoans from the live database). That's not sample/demo
+      // data shown in isolation, it's fabricated financial records grafted
+      // onto real customer loan data — worse than the other hardcoded-data
+      // issues found in this sweep. Real payout claims are already fully
+      // server-backed (PayoutController, see _syncPayoutClaimsFromServer /
+      // _syncOwnPayoutClaims in api-bridge.js), so this generator has no
+      // legitimate purpose anymore. Left as a no-op (rather than deleting
+      // the function outright) so the unconditional call at boot and the
+      // window.initSamplePayoutData export don't need to be hunted down too.
+      return;
     }
 
     // ═══════════════════════════════════════════════════════
@@ -4766,6 +4827,26 @@
           const bSel = document.getElementById('cl-bank');
           Array.from(bSel.options).forEach(o => { if (o.value === prefillApp.bank || o.text === prefillApp.bank) bSel.value = o.value; });
         }
+        // 🔴 Auto Payout Suggestion (item #2) — fetch and display, purely
+        // informational (see box's own HTML comment for why the actual
+        // submit logic is untouched).
+        const sugBox = document.getElementById('cl-suggested-amount-box');
+        if (sugBox && prefillApp._apiId && typeof apiReq === 'function') {
+          sugBox.style.display = '';
+          sugBox.innerHTML = '⏳ Calculating suggested payout…';
+          apiReq('GET', '/payout/suggest/' + prefillApp._apiId).then(function(res) {
+            if (!res || !res.success || !res.data) { sugBox.style.display = 'none'; return; }
+            const d = res.data;
+            if (!d.ruleConfigured) {
+              sugBox.innerHTML = '⚠ No payout rule configured for this loan type yet.';
+              return;
+            }
+            sugBox.innerHTML = '💰 <strong>Suggested payout: ₹' + Number(d.suggestedAmount).toLocaleString('en-IN') + '</strong>' +
+              (d.canOverride ? ' (you may adjust within the configured band)' : ' — calculated automatically from the configured payout rule');
+          }).catch(function() { sugBox.style.display = 'none'; });
+        } else if (sugBox) {
+          sugBox.style.display = 'none';
+        }
       }
 
       const overlay = document.getElementById('claim-modal-overlay');
@@ -4865,39 +4946,49 @@
           showToast('Claim updated successfully ✓', 'success');
         }
       } else {
-        // Create new
-        PAYOUT_CLAIMS.push({
-          id: 'CLM-' + Math.random().toString(36).substr(2,6).toUpperCase(),
-          partner: currentUser.name,
-          loanApac: apac, loanRefId: loanN,
-          customerName: (fname + ' ' + lname).trim() || 'Unknown',
-          firstName: fname, lastName: lname,
-          bank: bank,
-          loanType: document.getElementById('cl-product').value,
-          disbAmount: disbAmt,
-          disbDate: document.getElementById('cl-disb-date').value,
-          claimMonth: cMonth, city: city,
-          bizCategory: document.getElementById('cl-biz-cat').value,
-          bizHead: currentUser.name,
-          userType: document.getElementById('cl-user-type').value,
-          dsaMobile: document.getElementById('cl-dsa-mobile').value,
-          contests: document.getElementById('cl-contests').value,
-          companyName: document.getElementById('cl-company').value,
-          confirmationRequired: document.getElementById('cl-confirmation').checked,
-          splitCase: document.getElementById('cl-split-case').checked,
-          vendorRemark: document.getElementById('cl-vendor-remark').value,
-          bankerEmail:  document.getElementById('cl-banker-email').value,
-          bankerName:   document.getElementById('cl-banker-name').value,
-          bankerMobile: document.getElementById('cl-banker-mobile').value,
-          asmEmail:     document.getElementById('cl-asm-email').value,
-          asmName:      document.getElementById('cl-asm-name').value,
-          asmMobile:    document.getElementById('cl-asm-mobile').value,
-          claimAmount: 0, payoutAmount: 0,
-          status: 'pending', accountsRemark: '',
-          createdAt: new Date().toLocaleDateString('en-IN'),
-          isAuto: false,
-        });
-        showToast('Claim submitted successfully! ✓', 'success');
+        // Create new — BUGFIX (adversarial audit): this never called the
+        // backend at all. PAYOUT_CLAIMS.push() + "Claim submitted
+        // successfully! ✓" was pure local-array mutation — PAYOUT_CLAIMS is
+        // NOT written to localStorage either (confirmed dead-write cleanup),
+        // so a manually-submitted claim existed ONLY in this browser tab's
+        // memory: invisible to Accounts/Admin on any other device, and
+        // gone entirely on refresh. Wired to the real POST /api/payout
+        // endpoint (same one _patchPayoutClaimCreate already uses for the
+        // auto-created-on-disbursement path — this was the one call site
+        // that patch didn't cover). Amount is intentionally NOT sent from
+        // here — PayoutController.Submit already computes it authoritatively
+        // server-side from the configured PayoutRule (see the Suggested
+        // Payout preview in this same modal).
+        if (typeof apiReq !== 'function') { showToast('Not connected to server', 'error'); return; }
+        const app = (typeof APPLICATIONS !== 'undefined' ? APPLICATIONS : []).find(a => a.id === apac || a.id === loanN);
+        if (!app || !app._apiId) {
+          showToast('This application is not yet synced to the server — cannot submit a claim for it.', 'error');
+          return;
+        }
+        const submitBtn = document.querySelector('#claim-modal-overlay button.btn-primary, #claim-modal-overlay button[onclick="submitClaim()"]');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Submitting…'; }
+
+        apiReq('POST', '/payout', { loanId: app._apiId, month: cMonth, notes: document.getElementById('cl-vendor-remark')?.value || '' })
+          .then(function(res) {
+            if (!res || !res.success) {
+              const msg = (res && (res.message || (res.errors && res.errors[0]))) || 'Claim could not be saved to the server.';
+              showToast('⚠ ' + msg, 'error');
+              return;
+            }
+            if (typeof _syncOwnPayoutClaims === 'function') _syncOwnPayoutClaims();
+            else if (typeof _syncPayoutClaimsFromServer === 'function') _syncPayoutClaimsFromServer();
+            showToast('Claim submitted successfully ✓', 'success');
+            closeClaimModal();
+            updatePayoutNavBadge();
+            renderMyPayout();
+          })
+          .catch(function(e) {
+            showToast('⚠ Network error — claim was not saved: ' + (e.message || ''), 'error');
+          })
+          .finally(function() {
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Submit Claim'; }
+          });
+        return; // async path handles closeClaimModal/toast/render itself on success
       }
       closeClaimModal();
       updatePayoutNavBadge();
@@ -6947,6 +7038,26 @@
         if (msgEl) msgEl.innerHTML = `⚠ Customer has a recent <strong>${stateMap[dup.status]||dup.status}</strong> application (${dup.id} — ${dup.name || ''}). Created within 60 days.`;
       } else {
         alertEl.style.display = 'none';
+        // Duplicate-application detection (productivity audit) — the check
+        // above only ever looked at APPLICATIONS, this browser's locally-
+        // synced (capped/paginated) copy, so it could miss a genuine recent
+        // duplicate sourced by a DIFFERENT sales rep that never synced to
+        // THIS browser. Falls back to the authoritative server-side check
+        // (GET /api/loans/duplicate-check) only when the local check found
+        // nothing — same warning-only UX, same 60-day/non-Draft rule,
+        // just reliable against the full database instead of one browser's
+        // partial local copy.
+        if (typeof apiReq === 'function') {
+          apiReq('GET', '/loans/duplicate-check?pan=' + encodeURIComponent(pan)).then(function(res) {
+            if (!res || !res.success || !res.data || !res.data.hasDuplicate) return;
+            // Re-check the PAN field still matches — user may have kept typing.
+            const stillPan = (document.getElementById('w-pan')?.value || '').trim().toUpperCase();
+            if (stillPan !== pan) return;
+            const d = res.data;
+            alertEl.style.display = '';
+            if (msgEl) msgEl.innerHTML = `⚠ Customer has a recent <strong>${d.status}</strong> application (${d.loanNumber} — ${d.customerName || ''}). Created ${d.daysAgo} days ago.`;
+          }).catch(function() {});
+        }
       }
     }
 
@@ -7786,6 +7897,21 @@
       if (dir === 1 && currentStep === wTotal) {
         // Run final-step validation before submitting
         if (!validateStep(currentStep)) return;
+        // BUGFIX (adversarial audit — double-click submission): this had no
+        // guard against a rapid double-click/double-tap on the final Next/
+        // Submit action. submitWizard()'s actual network call is async and
+        // deep in the call chain (_attemptWizardBackendSubmit), so a second
+        // click landing before the first request completes could fire two
+        // concurrent submissions for a brand-new (not-yet-drafted)
+        // application, risking two separate Loan records for the same
+        // submission. A simple time-based guard (ignore a repeat call
+        // within 4s of the first) is the safest minimal fix here — it
+        // doesn't require hooking into the async completion of the existing
+        // submit chain, which is shared with several other patched hooks
+        // (AI Agent, KYC, persistence) per the comment below.
+        var _now = Date.now();
+        if (window._wizLastSubmitAttemptAt && (_now - window._wizLastSubmitAttemptAt) < 2500) return;
+        window._wizLastSubmitAttemptAt = _now;
         try {
           // IMPORTANT: call via window.submitWizard (not the bare local
           // identifier) so that external hooks patched onto
@@ -7799,6 +7925,12 @@
         } catch (err) {
           console.error('[EFIN] submitWizard error:', err);
           showToast('⚠ Submission error — please try again. (' + (err.message || err) + ')', 'error');
+          // Reset the debounce guard on a known failure so the user's very
+          // next click (as the error message itself tells them to do) isn't
+          // silently swallowed — the guard exists only to stop a rapid
+          // double-click firing two submissions while one might still be in
+          // flight, not to block a legitimate retry after a confirmed error.
+          window._wizLastSubmitAttemptAt = 0;
         }
         return;
       }
@@ -10048,6 +10180,9 @@
         if (!alreadyPosted) addTrackingEntry(app, 'EFIN-Underwriting', dept, 'Move', ' ');
         addTrackingEntry(app, 'EFIN-Verification', 'System Comments', 'Application under review', ' ');
         addTrackingEntry(app, 'EFIN-PD Call', 'System Comments', 'Our credit team will contact you shortly.', ' ');
+        // 🟡 Extend Notifications (item #10) — underwriting was one of the
+        // status transitions with no topbar-bell entry at all before.
+        if (typeof pushNotif === 'function') pushNotif('🔍', `${id} — ${app.name} moved to Underwriting`);
       }
       if (newStatus === 'disbursed') {
         const loanNo = 'E-LAN' + Math.floor(100000 + Math.random() * 900000);
@@ -10914,6 +11049,116 @@
         : buildAmortSchedule(P, annualRate, months);
 
       renderAmortTable();
+    }
+
+    // ── Save to Application ──────────────────────────────────────────
+    // Populates the "Save to Application" dropdown on the Standard-mode
+    // results card with editable (Draft/Submitted, in the current user's
+    // visibility scope) applications, so a computed EMI can be pushed onto
+    // a real loan instead of the sales team re-typing the same numbers into
+    // the wizard/detail view by hand.
+    function calcPopulateSaveToApp() {
+      const sel = document.getElementById('calc-save-app-select');
+      if (!sel || sel.dataset.populated === '1') return; // populate once per page load — cheap guard against re-querying on every dropdown click
+      sel.dataset.populated = '1';
+      const editable = (typeof APPLICATIONS !== 'undefined' ? APPLICATIONS : [])
+        .filter(a => a._apiId && !a.is_draft && ['wip', 'login'].includes(a.status)); // Draft/Submitted only — mirrors LoanService.UpdateAsync's own status gate
+      sel.innerHTML = '<option value="">— Select an application —</option>' +
+        editable.map(a => `<option value="${a._apiId}">${a.id} — ${a.name || 'Unnamed'} (₹${fmtINR(a.amount || 0)})</option>`).join('');
+      if (!editable.length) {
+        sel.innerHTML = '<option value="">No editable applications (Draft/Submitted only)</option>';
+      }
+    }
+
+    // Pushes the calculator's current Amount/Rate/Tenure onto the selected
+    // application via the existing PUT /api/loans/{id} endpoint — reuses
+    // LoanService.UpdateAsync's own validation (assignee exists+active,
+    // status must still be Draft/Submitted) rather than any new backend logic.
+    // Fetches the loan's current fields first so fields the calculator
+    // doesn't touch (LoanType, Purpose, Remarks, AssignedTo, LoginUser)
+    // are preserved, not silently reset to defaults.
+    function calcSaveToApplication() {
+      const sel = document.getElementById('calc-save-app-select');
+      const btn = document.getElementById('calc-save-app-btn');
+      const loanId = sel && sel.value;
+      if (!loanId) { if (typeof showToast === 'function') showToast('Select an application first', 'warn'); return; }
+
+      const amount = parseFloat(document.getElementById('calc-amt')?.value) || 0;
+      const rate   = parseFloat(document.getElementById('calc-rate')?.value) || 0;
+      const tenure = parseInt(document.getElementById('calc-tenure')?.value) || 0;
+      if (!amount || !rate || !tenure) {
+        if (typeof showToast === 'function') showToast('Enter Amount, Rate and Tenure before saving', 'warn');
+        return;
+      }
+      if (typeof apiReq !== 'function') { if (typeof showToast === 'function') showToast('Not connected to server', 'error'); return; }
+
+      if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+      apiReq('GET', '/loans/' + loanId).then(function(r) {
+        if (!r || !r.success || !r.data) throw new Error((r && r.message) || 'Could not load application details.');
+        const cur = r.data;
+        const payload = {
+          loanType:         cur.loanType,
+          requestedAmount:  amount,
+          interestRate:     rate,
+          tenureMonths:     tenure,
+          purpose:          cur.purpose || '',
+          remarks:          cur.remarks || '',
+          assignedToUserId: cur.assignedTo ? cur.assignedTo.id : null,
+          loginUserId:      cur.loginUser  ? cur.loginUser.id  : null
+        };
+        return apiReq('PUT', '/loans/' + loanId, payload);
+      }).then(function(r) {
+        if (!r || !r.success) throw new Error((r && (r.message || (r.errors && r.errors.join(' ')))) || 'Save failed.');
+        if (typeof showToast === 'function') showToast('EMI saved to application ✓', 'success');
+        if (typeof _syncLoans === 'function') _syncLoans();
+      }).catch(function(e) {
+        if (typeof showToast === 'function') showToast('⚠ ' + (e.message || 'Could not save to application'), 'error');
+      }).finally(function() {
+        if (btn) { btn.disabled = false; btn.textContent = '💾 Save EMI to Application'; }
+      });
+    }
+
+    // 🟡 EMI Calculator two-way sync (item #12) — reverse of
+    // calcSaveToApplication(): reads an application's persisted Amount/
+    // Rate/Tenure via GET /api/loans/{id} (never writes) and fills the
+    // calculator inputs, then re-runs calcEmi() to render results. The
+    // application's own database values remain the single source of truth —
+    // this is a read-only convenience, not a second copy of the calculation.
+    async function calcLoadFromApplication() {
+      if (typeof apiReq !== 'function') { if (typeof showToast === 'function') showToast('Not connected to server', 'error'); return; }
+      const editable = (typeof APPLICATIONS !== 'undefined' ? APPLICATIONS : [])
+        .filter(a => a._apiId && !a.is_draft);
+      if (!editable.length) { if (typeof showToast === 'function') showToast('No applications available to load from', 'warn'); return; }
+
+      const choice = prompt(
+        'Enter the Application ID to load numbers from:\n\n' +
+        editable.slice(0, 15).map(a => a.id + ' — ' + (a.name || 'Unnamed')).join('\n') +
+        (editable.length > 15 ? '\n… and ' + (editable.length - 15) + ' more' : '')
+      );
+      if (!choice) return;
+      const app = editable.find(a => a.id === choice.trim());
+      if (!app) { if (typeof showToast === 'function') showToast('Application not found', 'error'); return; }
+
+      try {
+        const res = await apiReq('GET', '/loans/' + app._apiId);
+        if (!res || !res.success || !res.data) throw new Error('Could not load application.');
+        const d = res.data;
+        const amtEl = document.getElementById('calc-amt');
+        const rateEl = document.getElementById('calc-rate');
+        const tenEl = document.getElementById('calc-tenure');
+        if (amtEl) amtEl.value = d.requestedAmount || '';
+        if (rateEl) rateEl.value = d.interestRate || '';
+        if (tenEl) tenEl.value = d.tenureMonths || '';
+        if (typeof calcSyncInput === 'function') { calcSyncInput('amt'); calcSyncInput('rate'); calcSyncInput('tenure'); }
+        if (typeof calcEmi === 'function') calcEmi();
+        // Pre-select this same application in "Save to Application" too, so
+        // an edit-and-resave round trip doesn't require re-picking it.
+        const sel = document.getElementById('calc-save-app-select');
+        if (sel) { calcPopulateSaveToApp(); sel.value = app._apiId; }
+        if (typeof showToast === 'function') showToast('Loaded numbers from ' + app.id + ' ✓', 'success');
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('⚠ ' + (e.message || 'Could not load application'), 'error');
+      }
     }
 
     // ── Compare mode ──
@@ -13206,20 +13451,20 @@ ${printContent}
 
     // ═══════════════════════════════════════════════════════
     //  BANKS STORE  (backed by GET/POST/PUT/DELETE /api/banks —
-    //  see api-bridge.js _syncBanks(). The seed rows below are only a
-    //  first-paint fallback shown before the initial sync completes /
-    //  if the API is unreachable; _syncBanks() replaces this array
+    //  see api-bridge.js _syncBanks(). _syncBanks() replaces this array
     //  wholesale with the real data from the Banks table on login,
     //  session-restore, and manual refresh — same convention as
-    //  RM_EMAILS/_syncRmEmails.)
+    //  RM_EMAILS/_syncRmEmails, so this starting array is only ever visible
+    //  for the brief moment before that first sync completes.)
     // ═══════════════════════════════════════════════════════
-    var BANKS_STORE = [
-      { id: 1, name: 'InCred Financial Services', ifsc: 'INCR0001234', location: 'Mumbai', rm: 'Anjali Sharma', rmMobile: '9876543210', email: 'anjali.sharma@incred.com', empCode: 'EMP-INC-001', bankLocation: 'BKC, Mumbai', remarks: 'Preferred Partner' },
-      { id: 2, name: 'HDFC Bank', ifsc: 'HDFC0001234', location: 'Pune', rm: 'Deepak Mehta', rmMobile: '9871234567', email: 'deepak.mehta@hdfc.com', empCode: 'EMP-HDFC-012', bankLocation: 'Koregaon Park, Pune', remarks: '—' },
-      { id: 3, name: 'Bajaj Finserv', ifsc: 'BAJF0005678', location: 'Delhi', rm: 'Kavita Joshi', rmMobile: '9864321098', email: 'kavita@bajaj.com', empCode: 'EMP-BAJ-034', bankLocation: 'Connaught Place, Delhi', remarks: 'Quick Disbursal' },
-      { id: 4, name: 'ICICI Bank', ifsc: 'ICIC0009876', location: 'Bangalore', rm: 'Suresh Nair', rmMobile: '9843219876', email: 'suresh@icici.com', empCode: 'EMP-ICI-056', bankLocation: 'MG Road, Bangalore', remarks: '—' },
-    ];
-    let bankNextId = 5;
+    // Hardcoded sample banks (InCred Financial Services / HDFC / Bajaj
+    // Finserv / ICICI with fake RM names/emails/mobiles) removed per the
+    // business owner — same sweep as LA_DB.banks/twUsers/twLocations. Even
+    // though _syncBanks() correctly replaces this wholesale (unlike the
+    // buggier twUsers/twLocations merge patterns), a brief flash of fake RM
+    // contact details before that sync completes isn't acceptable either.
+    var BANKS_STORE = [];
+    let bankNextId = 1;
     // Set to a bank's id while the "Add Bank" modal is being reused to edit
     // that record; null means the modal is in "create" mode. Mirrors the
     // id-hidden-field pattern used by saveRm()/deleteRm() (rm-modal-id).
@@ -15150,6 +15395,116 @@ ${printContent}
     window.expertExportCheckAccess = expertExportCheckAccess;
     window.expertExportInvalidateCache = function() { _expertExportAllowed = null; _expertExportCheckedAt = 0; };
 
+    // 🔴 Unified Action Queue (productivity audit, P0) — fetches
+    // GET /api/dashboard/action-queue and renders a compact, prioritized
+    // list of everything needing this user's attention right now. Hidden
+    // entirely if the queue is empty (no "0 items" clutter). Read-only —
+    // clicking an item just navigates to the relevant page, same as every
+    // other dashboard stat-card already does.
+    async function renderActionQueue() {
+      var widget = document.getElementById('action-queue-widget');
+      var body = document.getElementById('action-queue-body');
+      var countEl = document.getElementById('action-queue-count');
+      if (!widget || !body || typeof apiReq !== 'function') return;
+
+      try {
+        var res = await apiReq('GET', '/dashboard/action-queue');
+        if (!res || !res.success || !res.data) { widget.style.display = 'none'; return; }
+        var d = res.data;
+        if (!d.totalActionItems) { widget.style.display = 'none'; return; }
+
+        var rows = [];
+        (d.slaBreached || []).forEach(function(x) {
+          rows.push('<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:rgba(212,43,43,.06);cursor:pointer" onclick="openDetail(\'' + x.loanNumber + '\')">' +
+            '<span>⏰</span><span style="flex:1"><strong>' + x.loanNumber + '</strong> — ' + x.status + ', overdue ' + x.daysOverdue + 'd</span></div>');
+        });
+        (d.missingDocuments || []).forEach(function(x) {
+          rows.push('<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:rgba(230,126,0,.06);cursor:pointer" onclick="openDetail(\'' + x.loanNumber + '\')">' +
+            '<span>📄</span><span style="flex:1"><strong>' + x.loanNumber + '</strong> — missing ' + x.missingTypes.join(', ') + '</span></div>');
+        });
+        (d.staleDrafts || []).forEach(function(x) {
+          rows.push('<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:rgba(26,79,163,.06);cursor:pointer" onclick="showPage(\'applications\',null)">' +
+            '<span>💤</span><span style="flex:1"><strong>' + x.label + '</strong> — draft untouched ' + x.daysSinceUpdate + 'd</span></div>');
+        });
+        (d.pendingPayoutClaims || []).forEach(function(x) {
+          rows.push('<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:rgba(26,115,64,.06);cursor:pointer" onclick="showPage(\'payout\',null)">' +
+            '<span>💰</span><span style="flex:1">Payout claim on <strong>' + x.loanApac + '</strong> — ₹' + Number(x.claimAmount).toLocaleString('en-IN') + ', pending ' + x.submittedDaysAgo + 'd</span></div>');
+        });
+
+        body.innerHTML = rows.slice(0, 8).join('');
+        if (countEl) countEl.textContent = d.totalActionItems + (d.totalActionItems === 1 ? ' item' : ' items');
+        widget.style.display = '';
+      } catch (e) {
+        widget.style.display = 'none';
+      }
+    }
+    window.renderActionQueue = renderActionQueue;
+
+    // 🟡 Global Search (productivity audit, P1) — searches across Loans/
+    // Customers/DSA/Partners via GET /api/search, which reuses each
+    // module's own existing role-based visibility rule (not a new one) —
+    // see SearchController.cs. Debounced to avoid a request per keystroke.
+    let _globalSearchTimer = null;
+    function globalSearchOpen() {
+      const panel = document.getElementById('global-search-panel');
+      if (!panel) return;
+      const opening = panel.style.display === 'none';
+      panel.style.display = opening ? 'block' : 'none';
+      if (opening) {
+        const input = document.getElementById('global-search-input');
+        if (input) { input.value = ''; input.focus(); }
+        var r = document.getElementById('global-search-results');
+        if (r) r.innerHTML = '<div style="color:var(--text3);padding:8px">Type at least 2 characters…</div>';
+      }
+    }
+
+    function globalSearchDebounced(q) {
+      if (_globalSearchTimer) clearTimeout(_globalSearchTimer);
+      _globalSearchTimer = setTimeout(function() { globalSearchRun(q); }, 350);
+    }
+
+    async function globalSearchRun(q) {
+      const results = document.getElementById('global-search-results');
+      if (!results) return;
+      if (!q || q.trim().length < 2) { results.innerHTML = '<div style="color:var(--text3);padding:8px">Type at least 2 characters…</div>'; return; }
+      if (typeof apiReq !== 'function') return;
+      results.innerHTML = '<div style="color:var(--text3);padding:8px">Searching…</div>';
+      try {
+        const res = await apiReq('GET', '/search?q=' + encodeURIComponent(q.trim()));
+        if (!res || !res.success || !res.data) { results.innerHTML = '<div style="color:var(--text3);padding:8px">No results</div>'; return; }
+        const d = res.data;
+        let html = '';
+        (d.loans || []).forEach(function(l) {
+          html += '<div onclick="globalSearchGoTo(\'' + l.loanNumber + '\')" style="padding:7px 8px;border-radius:7px;cursor:pointer" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'\'">' +
+            '📄 <strong>' + l.loanNumber + '</strong> — ' + (l.customerName||'') + ' <span style="color:var(--text3)">(' + l.status + ')</span></div>';
+        });
+        (d.customers || []).forEach(function(c) {
+          html += '<div style="padding:7px 8px;border-radius:7px">👤 <strong>' + (c.fullName||'') + '</strong> — ' + (c.phone||'') + '</div>';
+        });
+        (d.dsaPartners || []).forEach(function(p) {
+          html += '<div style="padding:7px 8px;border-radius:7px">🤝 <strong>' + (p.name||'') + '</strong> (' + (p.partnerType||'') + (p.code?' — '+p.code:'') + ')</div>';
+        });
+        results.innerHTML = html || '<div style="color:var(--text3);padding:8px">No results</div>';
+      } catch (e) {
+        results.innerHTML = '<div style="color:var(--text3);padding:8px">Search failed</div>';
+      }
+    }
+
+    function globalSearchGoTo(loanNumber) {
+      var panel = document.getElementById('global-search-panel');
+      if (panel) panel.style.display = 'none';
+      if (typeof showPage === 'function') showPage('applications', null);
+      if (typeof openDetail === 'function') setTimeout(function() { openDetail(loanNumber); }, 200);
+    }
+
+    // Close the panel on outside click — same convention as other dropdowns.
+    document.addEventListener('click', function(e) {
+      const panel = document.getElementById('global-search-panel');
+      const btn = document.getElementById('global-search-btn');
+      if (!panel || panel.style.display === 'none') return;
+      if (!panel.contains(e.target) && e.target !== btn) panel.style.display = 'none';
+    });
+
     function updateDashboardStats() {
       // Expert Export button visibility — re-checked (cheaply, cached) on every
       // dashboard render; the real gate is always the backend, this only decides
@@ -15201,46 +15556,19 @@ ${printContent}
     //  LOAN ANALYTIC SYSTEM — Step 8
     // ═══════════════════════════════════════════════════════
     window.LA_DB = {
-      banks: [
-        {
-          id: 1, name: 'HDFC Bank', isIncred: true, isElite: false,
-          lines: [
-            { id: 1, companyId: 1, categoryId: 1, pinCode: '400001', pf: true },
-            { id: 2, companyId: 2, categoryId: 2, pinCode: '400002', pf: false },
-          ],
-          // ── Bank-level eligibility rules (Personal Loan) ──
-          rules: { minCibil: 720, acceptNTC: false, maxLoanAmt: 4000000, minTenure: 12, maxTenure: 60, foirLimit: 50, pfRequired: false, minAge: 21, maxAge: 60, minExpMonths: 6, empTypes: ['SALARIED'], compTypes: ['plcc','plc','llp','govt','psu'] },
-        },
-        {
-          id: 2, name: 'ICICI Bank', isIncred: false, isElite: true,
-          lines: [
-            { id: 3, companyId: 3, categoryId: 1, pinCode: '400003', pf: true },
-          ],
-          rules: { minCibil: 700, acceptNTC: false, maxLoanAmt: 5000000, minTenure: 12, maxTenure: 72, foirLimit: 55, pfRequired: false, minAge: 23, maxAge: 58, minExpMonths: 3, empTypes: ['SALARIED','SELFEMP'], compTypes: ['plcc','plc','llp','govt','psu','other'] },
-        },
-        {
-          id: 3, name: 'InCred Finance', isIncred: true, isElite: false,
-          lines: [
-            { id: 4, companyId: 1, categoryId: 3, pinCode: '400004', pf: false },
-            { id: 5, companyId: 4, categoryId: 2, pinCode: '400005', pf: true },
-          ],
-          rules: { minCibil: 650, acceptNTC: true, maxLoanAmt: 3000000, minTenure: 12, maxTenure: 60, foirLimit: 60, pfRequired: false, minAge: 21, maxAge: 62, minExpMonths: 3, empTypes: ['SALARIED','SELFEMP','SENP'], compTypes: ['plcc','plc','llp','govt','psu','other','proprietorship'] },
-        },
-        {
-          id: 4, name: 'Axis Bank', isIncred: false, isElite: false,
-          lines: [
-            { id: 6, companyId: 2, categoryId: 1, pinCode: '400001', pf: true },
-          ],
-          rules: { minCibil: 710, acceptNTC: false, maxLoanAmt: 1500000, minTenure: 12, maxTenure: 60, foirLimit: 50, pfRequired: true, minAge: 21, maxAge: 60, minExpMonths: 12, empTypes: ['SALARIED'], compTypes: ['plcc','plc','govt','psu'] },
-        },
-        {
-          id: 5, name: 'Bajaj Finserv', isIncred: false, isElite: true,
-          lines: [
-            { id: 7, companyId: 1, categoryId: 2, pinCode: '400001', pf: true },
-          ],
-          rules: { minCibil: 685, acceptNTC: false, maxLoanAmt: 3500000, minTenure: 12, maxTenure: 84, foirLimit: 55, pfRequired: false, minAge: 21, maxAge: 67, minExpMonths: 3, empTypes: ['SALARIED','SELFEMP'], compTypes: ['plcc','plc','llp','proprietorship','other'] },
-        },
-      ],
+      // Hardcoded sample banks (HDFC, ICICI, InCred Finance, Axis, Bajaj
+      // Finserv) removed per the business owner — this was demo/sample data
+      // that every user saw identically, not real bank config.
+      // UPDATED: LA_DB.banks/companies/categories (and each bank's lines)
+      // ARE now server-synced — see _syncAnalyticBanks() / _syncAnalyticCompanies()
+      // / _syncAnalyticCategories() in api-bridge.js, which populate these
+      // arrays from the real Banks/AnalyticCompanies/AnalyticCategories/
+      // BankEligibilityLines tables on login/session-restore. Add/Edit/
+      // Delete actions in the Lender Configuration screen are also patched
+      // (see _patchLaConfirmAddBank and friends in api-bridge.js) to push
+      // to the server, not just mutate this array locally. Starts empty
+      // here only as the pre-sync initial state.
+      banks: [],
       companies: [
         { id: 1, name: 'ABC Corporation',  empTypes: ['SALARIED'], compType: 'plcc' },
         { id: 2, name: 'XYZ Limited',      empTypes: ['SALARIED'], compType: 'plc'  },
@@ -15252,7 +15580,7 @@ ${printContent}
         { id: 2, name: 'Silver',   salary: 18000, bankId: null },
         { id: 3, name: 'Platinum', salary: 40000, bankId: null },
       ],
-      nextId: { bank: 6, company: 5, category: 4, line: 8 },
+      nextId: { bank: 1, company: 5, category: 4, line: 1 },
       wizardSelectedBanks: [],
       currentBankId: null,
       importFile: null,
@@ -19199,12 +19527,70 @@ ${printContent}
 
     // Auto-detect company + salary → trigger eligibility check and update InCred flag
     // mirrors loan_application_inherit.py action_create_eligiblity + new_loan.py _compute_bank
+    // 🟠 Live Lender Eligibility Preview (item #5) — debounced backend call,
+    // shows "Potentially eligible lenders: X" during the Employment step,
+    // well before the applicant reaches Step 9. Uses the exact same
+    // POST /api/lenderconfig/match endpoint Step 9's matching is built on —
+    // no second/local matching algorithm. Incomplete info (no salary yet)
+    // never shows a false "not eligible" — the backend itself returns
+    // awaitingDetails:true in that case, and this function stays silent
+    // (hidden box) rather than showing a misleading zero.
+    let _wLiveEligTimer = null;
+    function wLiveEligibilityPreview() {
+      if (_wLiveEligTimer) clearTimeout(_wLiveEligTimer);
+      _wLiveEligTimer = setTimeout(_wLiveEligibilityPreviewNow, 600); // debounce — avoid a request per keystroke
+    }
+    async function _wLiveEligibilityPreviewNow() {
+      const box = document.getElementById('w-live-elig-preview');
+      if (!box) return;
+      const salary = parseFloat(document.getElementById('w-salary')?.value) || 0;
+      if (!salary || typeof apiReq !== 'function') { box.style.display = 'none'; return; }
+
+      const isCustom  = document.getElementById('w-is-custom-company')?.checked || false;
+      const companyId = isCustom ? null : (parseInt(document.getElementById('w-company-name-id')?.value) || null);
+      const payload = {
+        loanType:    document.getElementById('w-loantype')?.value || 'personal_loan',
+        salary:      salary,
+        obligations: parseFloat(document.getElementById('w-obligations')?.value) || 0,
+        empType:     (document.getElementById('w-emptype')?.value || 'SALARIED').toUpperCase(),
+        compType:    (document.getElementById('w-comptype')?.value || document.getElementById('w-comptype-self')?.value || '').toLowerCase(),
+        companyId:   companyId,
+        loanAmount:  parseFloat(document.getElementById('w-loanamt')?.value) || null,
+        tenure:      parseInt(document.getElementById('w-tenure')?.value) || null,
+        pinCode:     (document.getElementById('w-zip')?.value || document.getElementById('w-pzip')?.value || '').trim() || null
+      };
+
+      box.style.display = '';
+      box.innerHTML = '⏳ Checking lender eligibility…';
+      try {
+        const res = await apiReq('POST', '/lenderconfig/match', payload);
+        if (!res || !res.success || !res.data) { box.style.display = 'none'; return; }
+        const d = res.data;
+        if (d.awaitingDetails) { box.style.display = 'none'; return; }
+        if (d.totalBanksConfigured === 0) {
+          box.innerHTML = '🏦 Lender eligibility rules not yet configured — this will be checked at Step 9.';
+          return;
+        }
+        box.innerHTML = d.eligibleCount > 0
+          ? `✅ <strong>Potentially eligible lenders: ${d.eligibleCount}</strong> of ${d.totalBanksConfigured} configured — full check at Step 9.`
+          : `⚠ No lenders currently match with the details entered so far — this may change as you complete more fields.`;
+      } catch (e) {
+        box.style.display = 'none';
+      }
+    }
+
     function laAutoDetectFromWizard() {
       const isCustom    = document.getElementById('w-is-custom-company')?.checked || false;
       const companyId   = isCustom ? 0 : (parseInt(document.getElementById('w-company-name-id')?.value) || 0);
       const salaryEl    = document.getElementById('la-elig-salary');
       const salaryWizEl = document.getElementById('w-salary');
       const wizSalary   = parseFloat(salaryWizEl?.value) || 0;
+
+      // 🟠 Live Lender Eligibility Preview (item #5) — debounced call to the
+      // SAME backend matching engine Step 9 uses (POST /api/lenderconfig/match).
+      // Never computed locally — this function only gathers the currently-
+      // available wizard fields and asks the backend, same as Step 9 will.
+      if (typeof wLiveEligibilityPreview === 'function') wLiveEligibilityPreview();
 
       // Mirror salary into the Eligibility tab
       if (salaryEl && wizSalary) salaryEl.value = wizSalary;
@@ -20222,6 +20608,18 @@ ${printContent}
     window.calcAmortView = calcAmortView;
     window.renderAmortTable = renderAmortTable;
     window.calcEmi = calcEmi;
+    window.calcPopulateSaveToApp = calcPopulateSaveToApp;
+    window.calcSaveToApplication = calcSaveToApplication;
+    window.calcLoadFromApplication = calcLoadFromApplication;
+    window.wLiveEligibilityPreview = wLiveEligibilityPreview;
+    window.toggleBulkSelect = toggleBulkSelect;
+    window.toggleBulkSelectAll = toggleBulkSelectAll;
+    window.bulkApplyStatus = bulkApplyStatus;
+    window.renderBulkActionsBar = renderBulkActionsBar;
+    window.globalSearchOpen = globalSearchOpen;
+    window.globalSearchDebounced = globalSearchDebounced;
+    window.globalSearchRun = globalSearchRun;
+    window.globalSearchGoTo = globalSearchGoTo;
     window.calcCompare = calcCompare;
     window.calcPrepay = calcPrepay;
     window.renderPipeline = renderPipeline;
@@ -20380,16 +20778,28 @@ ${printContent}
 
     // Fire-and-forget push of a single branding field to the server. Called
     // right alongside every localStorage.setItem/removeItem for these six
-    // keys so the DB and the local cache always move together. If the
-    // network call fails, the change still stands locally (localStorage) —
-    // exactly like the existing signin-logo and permissions sync fallbacks.
+    // keys so the DB and the local cache always move together.
+    // BUGFIX (Settings audit): this used to swallow every failure completely
+    // (`.catch(function(){})`) — a failed save appeared to work (the local
+    // cache updated, so THIS browser showed the new logo), but silently
+    // never reached the server, so every other user/device kept seeing the
+    // old branding indefinitely with no error ever shown to the admin who
+    // made the change.
     function brandingPushSetting(key, value) {
       try {
         fetch('/api/settings', {
           method: 'POST',
           headers: brandingAuthHeaders(true),
           body: JSON.stringify({ key: key, value: value || '', category: 'branding' })
-        }).catch(function(){});
+        }).then(function(res) {
+          if (!res.ok && typeof showToast === 'function') {
+            showToast('⚠ Branding change saved on this device only — could not reach the server. Other users won\'t see it yet.', 'error');
+          }
+        }).catch(function() {
+          if (typeof showToast === 'function') {
+            showToast('⚠ Branding change saved on this device only — could not reach the server. Other users won\'t see it yet.', 'error');
+          }
+        });
       } catch (e) {}
     }
 
@@ -20544,11 +20954,23 @@ ${printContent}
         // ('loanms_token') — this previously read a non-existent
         // 'efin_auth_token' key, so the Authorization header was always
         // empty/invalid and this Admin-only save silently 401'd.
+        // BUGFIX (forensic audit): the success toast below used to fire
+        // unconditionally, immediately, without even waiting for this fetch
+        // to resolve — so a failed/401'd save still told the admin "updated
+        // successfully" while the server never actually got the new logo.
         fetch('/api/settings/signin-logo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '') },
           body: JSON.stringify({ logo: dataUrl })
-        }).catch(function(){});
+        }).then(function(res) {
+          if (!res.ok && typeof showToast === 'function') {
+            showToast('⚠ Sign-in logo saved on this device only — server save failed. Other devices won\'t see it yet.', 'error');
+          }
+        }).catch(function() {
+          if (typeof showToast === 'function') {
+            showToast('⚠ Sign-in logo saved on this device only — server save failed. Other devices won\'t see it yet.', 'error');
+          }
+        });
         // Update panel preview
         const prev = document.getElementById('branding-signin-preview-img');
         const placeholder = document.getElementById('branding-signin-preview-placeholder');
@@ -20578,11 +21000,20 @@ ${printContent}
       document.getElementById('branding-signin-filename').textContent = '';
       try { localStorage.removeItem('efin_signin_logo'); } catch(e) {}
       // Clear from server too (same token-key fix as brandingUpdateSignin above)
+      // BUGFIX: same unconditional-success-toast issue as above.
       fetch('/api/settings/signin-logo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '') },
         body: JSON.stringify({ logo: '' })
-      }).catch(function(){});
+      }).then(function(res) {
+        if (!res.ok && typeof showToast === 'function') {
+          showToast('⚠ Removed on this device only — server update failed. Other devices will still see the old logo.', 'error');
+        }
+      }).catch(function() {
+        if (typeof showToast === 'function') {
+          showToast('⚠ Removed on this device only — server update failed. Other devices will still see the old logo.', 'error');
+        }
+      });
       showToast('Sign-in logo removed', 'success');
     }
 
@@ -23186,47 +23617,23 @@ ${printContent}
     function twInitials(n) { return n.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase(); }
 
     // ── DATA MODELS ─────────────────────────────────────────
-    var twSalesTeams = [
-      { id: 1, name: 'Mumbai West Team',  leader: 'Ravi Sharma',   location: 'Mumbai – Andheri',       members: ['Priya Nair','Amit Kumar'], active: true  },
-      { id: 2, name: 'Pune South Team',   leader: 'Sneha Kulkarni',location: 'Pune – Kothrud',         members: ['Rahul Mehta'],            active: true  },
-      { id: 3, name: 'Delhi North Team',  leader: 'Amit Desai',    location: 'Delhi – CP',             members: [],                         active: false },
-      { id: 4, name: 'Bengaluru East',    leader: 'Kavya Reddy',   location: 'Bengaluru – Indiranagar',members: ['Naveen Rao'],             active: true  },
-    ];
-    var twLoginTeams = [
-      { id: 1, name: 'Operation Team A',  leader: 'Priya Nair',    location: 'Mumbai – Andheri',        members: ['Ravi Sharma','Sneha Kulkarni'], active: true  },
-      { id: 2, name: 'Operation Team B',  leader: 'Kavya Reddy',   location: 'Pune – Kothrud',          members: ['Rahul Mehta'],                 active: true  },
-      { id: 3, name: 'Operation Team C',  leader: 'Naveen Rao',    location: 'Bengaluru – Indiranagar',  members: [],                              active: true  },
-    ];
-    var twLocations = [
-      { id: 1, name: 'Mumbai – Andheri' }, { id: 2, name: 'Pune – Kothrud' },
-      { id: 3, name: 'Delhi – CP' }, { id: 4, name: 'Bengaluru – Indiranagar' },
-      { id: 5, name: 'Hyderabad – Banjara Hills' },
-    ];
+    // Hardcoded sample data (fake teams/users/locations: "Ravi Sharma",
+    // "Mumbai West Team", etc.) removed per the business owner — same
+    // reasoning as LA_DB.banks. These are backed by real tables now
+    // (Teams, Users, Locations) via _syncTeams()/_syncUsers()/
+    // _syncLocations() in api-bridge.js, but that sync only ever
+    // adds/updates rows carrying a server _apiId — a seeded row with no
+    // _apiId is deliberately left alone (see the sync functions' own
+    // comments), meaning any hardcoded starting data here would persist
+    // forever alongside real synced rows instead of ever being replaced.
+    var twSalesTeams = [];
+    var twLoginTeams = [];
+    var twLocations = [];
     // res.users: location_id (Many2many), team_sales_ids (Many2many), operation_team_ids (Many2many)
-    let twUsers = [
-      { uid:'USR-0001', name: 'Admin User',     email: 'admin@efin.com',   role: 'Admin',            locs: ['Mumbai – Andheri','Delhi – CP','Pune – Kothrud','Bengaluru – Indiranagar'], salesTeams: [],                    opTeams: [],                   loc: 'Mumbai – Andheri',         st: '',                  ot: '' },
-      { uid:'USR-0002', name: 'Ravi Sharma',    email: 'ravi@efin.com',    role: 'Sales Person',     locs: ['Mumbai – Andheri'],         salesTeams: ['Mumbai West Team'],  opTeams: ['Operation Team A'], loc: 'Mumbai – Andheri',         st: 'Mumbai West Team',  ot: 'Operation Team A' },
-      { uid:'USR-0003', name: 'Priya Nair',     email: 'priya@efin.com',   role: 'Team Leader',      locs: ['Mumbai – Andheri'],         salesTeams: ['Mumbai West Team'],  opTeams: ['Operation Team A'], loc: 'Mumbai – Andheri',         st: 'Mumbai West Team',  ot: 'Operation Team A' },
-      { uid:'USR-0004', name: 'Amit Desai',     email: 'amit@efin.com',    role: 'Location Head',    locs: ['Delhi – CP'],               salesTeams: ['Delhi North Team'],  opTeams: [],                   loc: 'Delhi – CP',               st: 'Delhi North Team',  ot: '' },
-      { uid:'USR-0005', name: 'Sneha Kulkarni', email: 'sneha@efin.com',   role: 'Partner',          locs: ['Pune – Kothrud'],           salesTeams: ['Pune South Team'],   opTeams: ['Operation Team B'], loc: 'Pune – Kothrud',           st: 'Pune South Team',   ot: 'Operation Team B' },
-      { uid:'USR-0006', name: 'Kavya Reddy',    email: 'kavya@efin.com',   role: 'Operation Manager',locs: ['Bengaluru – Indiranagar'],  salesTeams: [],                    opTeams: ['Operation Team B','Operation Team C'], loc: 'Bengaluru – Indiranagar', st: '', ot: 'Operation Team B' },
-      { uid:'USR-0007', name: 'Rahul Mehta',    email: 'rahul@efin.com',   role: 'Login Team',       locs: ['Pune – Kothrud'],           salesTeams: [],                    opTeams: ['Operation Team B'], loc: 'Pune – Kothrud',           st: '',                  ot: 'Operation Team B' },
-      { uid:'USR-0008', name: 'Amit Kumar',     email: 'akumar@efin.com',  role: 'Sales Person',     locs: ['Mumbai – Andheri'],         salesTeams: ['Mumbai West Team'],  opTeams: [],                   loc: 'Mumbai – Andheri',         st: 'Mumbai West Team',  ot: '' },
-      { uid:'USR-0009', name: 'Naveen Rao',     email: 'naveen@efin.com',  role: 'Team Leader',      locs: ['Bengaluru – Indiranagar'],  salesTeams: ['Bengaluru East'],    opTeams: ['Operation Team C'], loc: 'Bengaluru – Indiranagar',  st: 'Bengaluru East',    ot: 'Operation Team C' },
-      { uid:'USR-0010', name: 'Login Officer',  email: 'login@efin.com',   role: 'Login Team',       locs: ['Mumbai – Andheri'],         salesTeams: [],                    opTeams: ['Operation Team A'], loc: 'Mumbai – Andheri',         st: '',                  ot: 'Operation Team A' },
-      { uid:'USR-0011', name: 'Team Lead',      email: 'tl@efin.com',      role: 'Team Leader',      locs: ['Delhi – CP'],               salesTeams: ['Delhi North Team'],  opTeams: [],                   loc: 'Delhi – CP',               st: 'Delhi North Team',  ot: '' },
-      { uid:'USR-0012', name: 'Sales Exec',     email: 'sales@efin.com',   role: 'Sales Person',     locs: ['Pune – Kothrud'],           salesTeams: ['Pune South Team'],   opTeams: [],                   loc: 'Pune – Kothrud',           st: 'Pune South Team',   ot: '' },
-      { uid:'USR-0013', name: 'Partner User',   email: 'partner@efin.com', role: 'Partner',          locs: [],                           salesTeams: [],                    opTeams: [],                   loc: '',                         st: '',                  ot: '' },
-      { uid:'USR-0014', name: 'Accounts Team',  email: 'accounts@efin.com',role: 'Accounts',         locs: ['Mumbai – Andheri'],         salesTeams: [],                    opTeams: [],                   loc: 'Mumbai – Andheri',         st: '',                  ot: '' },
-      { uid:'USR-0015', name: 'Product Team',   email: 'product@efin.com', role: 'Product Team',     locs: [],                           salesTeams: [],                    opTeams: [],                   loc: '',                         st: '',                  ot: '' },
-    ];
+    let twUsers = [];
     let twTickets = [
     ];
-    let twWebhookLogs = [
-      { appId: 'INC-2024-101', ref: '45', event: 'LOAN_APPROVED',  status: 'SUCCESS', time: '2026-03-05 10:32', ok: true,  matched: null },
-      { appId: 'INC-2024-099', ref: '43', event: 'LOAN_DISBURSED', status: 'SUCCESS', time: '2026-03-04 16:15', ok: true,  matched: null },
-      { appId: 'INC-2024-088', ref: '99', event: 'LOAN_APPLIED',   status: 'FAILED',  time: '2026-03-03 09:00', ok: false, matched: null },
-    ];
+    let twWebhookLogs = [];
     // security.xml — 3 module categories, 8 groups with implied_ids hierarchy
     const twSecGroups = [
       { id: 'group_location_user',          name: 'Location Head',    cat: 'Location Team',   color: '#1a4fa3', implied: ['base.group_user'],                      desc: 'Sees apps in own locations: location_id in user.location_id.ids' },
@@ -23452,12 +23859,36 @@ ${printContent}
       const arr = type === 'sales' ? twSalesTeams : twLoginTeams;
       const t = arr.find(x => x.id === id); if (!t) return;
       if (!confirm('Delete team "' + t.name + '"? This cannot be undone.')) return;
-      const idx = arr.indexOf(t);
-      if (idx >= 0) arr.splice(idx, 1);
-      if (type === 'sales') twRenderSalesTeams(); else twRenderLoginTeams();
-      twUpdateCounts();
-      showToast('Team "' + t.name + '" deleted', 'success');
-      if (typeof persistSave === 'function') { try { persistSave(); } catch (_) {} }
+
+      const finishLocalRemoval = () => {
+        const idx = arr.indexOf(t);
+        if (idx >= 0) arr.splice(idx, 1);
+        if (type === 'sales') twRenderSalesTeams(); else twRenderLoginTeams();
+        twUpdateCounts();
+        showToast('Team "' + t.name + '" deleted', 'success');
+        if (typeof persistSave === 'function') { try { persistSave(); } catch (_) {} }
+      };
+
+      // BUGFIX (live-server data sweep): this previously only ever spliced
+      // the team out of local state — nothing was deleted server-side, so
+      // it reappeared on the next sync/refresh/device. TeamsController had
+      // no team-delete endpoint at all (only member-removal existed) —
+      // added DELETE /api/teams/{id} to close that gap.
+      if (t._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('DELETE', '/teams/' + t._apiId).then(function (res) {
+          if (res && res.success) {
+            finishLocalRemoval();
+          } else {
+            const errMsg = (res && ((res.errors && res.errors[0]) || res.message)) || 'Failed to delete team from database';
+            showToast(errMsg, 'error');
+          }
+        }).catch(function () {
+          showToast('Failed to delete team — check connection and try again', 'error');
+        });
+      } else {
+        // Locally-added team with no DB record yet — safe to just remove.
+        finishLocalRemoval();
+      }
     }
 
     function twLocMenu(btn, id) {
@@ -24181,28 +24612,25 @@ ${printContent}
         icon: '📍',
         wizardId: 'w-location',
         desc: 'Step 1 — branch / city locations for assignment',
-        items: [
-          { value: 'Mumbai – Andheri',         label: 'Mumbai – Andheri' },
-          { value: 'Pune – Kothrud',            label: 'Pune – Kothrud' },
-          { value: 'Delhi – CP',                label: 'Delhi – CP' },
-          { value: 'Bengaluru – Indiranagar',   label: 'Bengaluru – Indiranagar' },
-          { value: 'Hyderabad – Banjara Hills', label: 'Hyderabad – Banjara Hills' },
-          { value: 'Chennai – T. Nagar',        label: 'Chennai – T. Nagar' },
-          { value: 'Ahmedabad – SG Highway',    label: 'Ahmedabad – SG Highway' },
-        ],
+        // Hardcoded sample locations removed per the business owner (same
+        // sweep as twLocations/twUsers/LA_DB.banks) — this list actively
+        // re-seeded twLocations via mlSyncLocationsToTw() below, so leaving
+        // it non-empty would have silently undone that cleanup. Add real
+        // locations via the Locations admin screen (backed by
+        // LocationsController / _syncLocations in api-bridge.js).
+        items: [],
       },
       sales_person: {
         label: 'Sales Person',
         icon: '👤',
         wizardId: 'w-sales',
         desc: 'Step 1 — sales executives available for assignment',
-        items: [
-          { value: 'Amit Verma',    label: 'Amit Verma' },
-          { value: 'Priya Singh',   label: 'Priya Singh' },
-          { value: 'Ravi Kumar',    label: 'Ravi Kumar' },
-          { value: 'Sneha Joshi',   label: 'Sneha Joshi' },
-          { value: 'Naveen Rao',    label: 'Naveen Rao' },
-        ],
+        // Hardcoded sample names removed — not actually used to populate the
+        // live wizard's Sales Person select (that comes from twUsers via
+        // wLocationChange(), see comment on mlPopulateWizardSelects below),
+        // but this list is still shown as real config data on the "Loan
+        // Form Dropdowns" admin screen, so it needed cleaning up too.
+        items: [],
       },
       home_type: {
         label: 'Home Type',
@@ -26705,6 +27133,13 @@ ${printContent}
           _skipAttachToExistingDraft = false;
           _snapshotIntoDraft(draft);
           if (typeof persistSave === 'function') persistSave();
+          // DB-backed push (debounced) — see api-bridge.js. Draft object
+          // already carries the raw w-* field snapshot from
+          // _snapshotIntoDraft() above; window._pushWizardDraft() reads
+          // that directly, POSTs to /api/wizard/draft, and stores the
+          // returned loanId back onto draft._apiId so the next autosave
+          // updates the same DB record instead of creating a new one.
+          if (typeof window._pushWizardDraft === 'function') window._pushWizardDraft(draft);
         } catch (e) { /* autosave must never break the wizard */ }
       }
 
@@ -26751,6 +27186,20 @@ ${printContent}
             if (draft._kycAadharData && typeof kycRenderAadharExtracted === 'function') kycRenderAadharExtracted(draft._kycAadharData);
           }
           if (window.PSE && draft._pseAnalysis) PSE.analysisResult = draft._pseAnalysis;
+          // Restore Step 9's previously-selected bank(s), if the resumed
+          // draft has any (see Loan.SelectedLenderNames / GetDraft's
+          // lenderName field). Matches by bank NAME against the currently-
+          // synced LA_DB.banks (server-backed — see _syncAnalyticBanks) —
+          // if a bank was renamed/deleted since the draft was saved, that
+          // one name simply won't match and is silently skipped, same as
+          // any other "data referenced something that no longer exists"
+          // case elsewhere in this app.
+          if (draft._selectedLenderNames && window.LA_DB && Array.isArray(LA_DB.banks)) {
+            var wantedNames = draft._selectedLenderNames.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+            LA_DB.wizardSelectedBanks = LA_DB.banks
+              .filter(function(b) { return wantedNames.indexOf(b.name) !== -1; })
+              .map(function(b) { return b.id; });
+          }
           if (typeof showPage === 'function') showPage('new-application', null);
           if (typeof currentStep !== 'undefined') currentStep = draft.wizardStep || 1;
           if (typeof renderWizard === 'function') renderWizard();
@@ -26794,10 +27243,33 @@ ${printContent}
       // button.
 
       // ── Resume a draft directly from the Applications list ──
+      // A draft pulled from another device (see api-bridge.js's
+      // _syncWizardDrafts) only carries the summary fields ListDrafts
+      // returns (step/loanType/label/timestamps) — it is flagged
+      // _serverOnly and has none of the w-* field snapshot
+      // _restoreDraftIntoWizard() needs. Fetch the full draft (GetDraft)
+      // first in that case; a draft that was already created/loaded in
+      // THIS browser session (has its w-* fields) restores immediately,
+      // same as before.
       window.resumeDraftFromList = function(id) {
         if (!window.APPLICATIONS) return;
         var draft = APPLICATIONS.find(function(a){ return a.id === id && a.is_draft; });
-        if (draft) _restoreDraftIntoWizard(draft);
+        if (!draft) return;
+        if (draft._serverOnly && typeof window._fetchWizardDraftFields === 'function') {
+          if (typeof showToast === 'function') showToast('Loading draft…', 'info');
+          window._fetchWizardDraftFields(draft._apiId).then(function(fields) {
+            if (fields) {
+              for (var k in fields) { if (Object.prototype.hasOwnProperty.call(fields, k)) draft[k] = fields[k]; }
+              draft._serverOnly = false;
+              if (typeof persistSave === 'function') persistSave();
+            } else if (typeof showToast === 'function') {
+              showToast('Could not load draft — please try again.', 'error');
+            }
+            _restoreDraftIntoWizard(draft);
+          });
+          return;
+        }
+        _restoreDraftIntoWizard(draft);
       };
 
       // ── The ONE genuine "start new application" entry point ──
@@ -26828,6 +27300,18 @@ ${printContent}
       if (typeof _origSubmitForDraft === 'function') {
         window.submitWizard = function() {
           var draftIdBefore = _activeDraftId;
+          // Capture the tracked draft's own backend Draft-Loan id (if any
+          // autosave already reached the database) BEFORE it's deleted
+          // below — so it can be carried onto the newly-created
+          // application. Without this, api-bridge.js's Submit call has no
+          // way to know this application started life as an autosaved
+          // Draft row, and would create a brand-new Loan while the old
+          // Draft-status one is left behind, orphaned, in the database.
+          var draftApiIdBefore = null;
+          if (draftIdBefore && window.APPLICATIONS) {
+            var _draftRow = APPLICATIONS.find(function(a){ return a.id === draftIdBefore; });
+            if (_draftRow && _draftRow._apiId) draftApiIdBefore = _draftRow._apiId;
+          }
           var countBefore = window.APPLICATIONS ? APPLICATIONS.length : 0;
           var result = _origSubmitForDraft.apply(this, arguments);
           var countAfter = window.APPLICATIONS ? APPLICATIONS.length : 0;
@@ -26835,6 +27319,14 @@ ${printContent}
           // (countAfter > countBefore) — never delete the draft on a
           // validation failure that aborted submission early.
           var _submitSucceeded = countAfter > countBefore;
+          // Tag the just-created application with the draft's backend id
+          // (a separate field from _apiId — see _buildWizardPayload in
+          // api-bridge.js — so the "already persisted, skip" guard there
+          // doesn't mistake this brand-new local app for one that's
+          // already been submitted).
+          if (_submitSucceeded && draftApiIdBefore && window.APPLICATIONS && window.APPLICATIONS[0]) {
+            window.APPLICATIONS[0]._draftLoanId = draftApiIdBefore;
+          }
           if (draftIdBefore && _submitSucceeded) deleteDraftById(draftIdBefore);
           // Record success so the wizardNav wrapper (which always runs right
           // after this) knows not to immediately auto-save a fresh Draft.
@@ -27162,6 +27654,14 @@ ${printContent}
       showToast(_crEditKey ? 'Role updated: ' + label : 'Role created: ' + label, 'success');
       pushActivity('var(--accent)', '<strong>' + (_crEditKey ? 'Updated' : 'Created') + ' role</strong>: ' + label + ' (' + key + ')');
       renderAccessRights(); // Re-render cards with new role
+      // BUGFIX (live-server data sweep): this custom role never reached the
+      // server before — ROLES was only ever updated in-memory, so a custom
+      // role vanished for every other admin/device and reappeared as
+      // "missing" on the next refresh (only the built-in roles synced back
+      // down via stgSyncPermissionsFromServer). Push the whole ROLES object
+      // the same way every other Roles & Permissions change already does
+      // (see the toggle-permission call sites earlier in this file).
+      if (typeof stgPushPermissionsToServer === 'function') stgPushPermissionsToServer();
       _crEditKey = null;
     }
 
@@ -27178,6 +27678,11 @@ ${printContent}
       showToast('Role deleted: ' + rd.label, 'info');
       pushActivity('var(--danger)', '<strong>Deleted role</strong>: ' + rd.label);
       renderAccessRights();
+      // BUGFIX (live-server data sweep): same gap as saveRoleConfig() above
+      // — a deleted custom role reverted to "still there" for every other
+      // admin/device the moment they synced, since nothing was ever pushed
+      // server-side to reflect the deletion.
+      if (typeof stgPushPermissionsToServer === 'function') stgPushPermissionsToServer();
     }
 
     function renderRoleConfigList() {
@@ -34145,6 +34650,7 @@ function renderTableWithAdvFilter() {
   const pageApps = (typeof _appsPaginate === 'function') ? _appsPaginate(apps) : apps;
   body.innerHTML = pageApps.map(function(a) {
     return '<tr onclick="openDetail(\'' + a.id + '\')">' +
+      '<td onclick="event.stopPropagation()"><input type="checkbox" class="bulk-select-row" data-app-id="' + a.id + '" onchange="toggleBulkSelect(\'' + a.id + '\', this.checked)"></td>' +
       '<td><span class="app-id">' + a.id + '</span></td>' +
       '<td><strong>' + a.name + '</strong></td>' +
       '<td>' + (typeof loanTypeLabel === 'function' ? loanTypeLabel(a.loanType) : a.loanType) + '</td>' +
@@ -34156,7 +34662,16 @@ function renderTableWithAdvFilter() {
         (isAdmin ? '<button class="btn btn-sm" onclick="deleteApplication(\'' + a.id + '\',event)" style="background:rgba(192,57,43,.08);border:1px solid rgba(192,57,43,.25);color:var(--danger);border-radius:8px">🗑</button>' : '') +
       '</td>' +
     '</tr>';
-  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">No applications match your filters</td></tr>';
+  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:40px">No applications match your filters</td></tr>';
+  // 🔴 Bulk Actions (item #3, follow-up fix) — this alternate renderer
+  // (used whenever advanced filters are active — see the hasAdv branch
+  // below) writes into the SAME #app-table-body as renderTable(), which
+  // already got the checkbox column/bulk toolbar wiring. It was missed in
+  // that earlier pass, so bulk-select silently stopped working (and the
+  // table was misaligned against its 9-column header) whenever advanced
+  // filters were applied. Re-sync the header checkbox / bulk bar state
+  // since this renderer doesn't preserve selection across a fresh re-render.
+  if (typeof window.renderBulkActionsBar === 'function') window.renderBulkActionsBar();
 }
 
 // Override renderTable to respect adv filters
@@ -34302,11 +34817,12 @@ async function stgSyncExportPresetsFromServer() {
 async function stgPushExportPresetsToServer() {
   try {
     const presets = _loadExportPresets();
-    await fetch('/api/user-settings', {
+    const res = await fetch('/api/user-settings', {
       method: 'POST', headers: _epAuthHeaders(true),
       body: JSON.stringify({ key: STG_EXPORT_PRESETS_KEY, value: JSON.stringify(presets), category: 'export' })
     });
-  } catch (e) { console.warn('[export presets] failed to sync to server (saved locally only)', e); }
+    return res.ok;
+  } catch (e) { console.warn('[export presets] failed to sync to server (saved locally only)', e); return false; }
 }
 
 // ── Label helpers shared by export ──────────────────────────
@@ -34353,10 +34869,19 @@ function exportSavePreset() {
   presets[name.trim()] = keys;
   // Instant-render cache only — kept exactly as before.
   try { localStorage.setItem(EXPORT_PRESET_KEY, JSON.stringify(presets)); } catch(e) {}
-  // Database-backed save — same generic AppSettings pattern as Filter Presets.
-  stgPushExportPresetsToServer();
-  _renderPresetSelect();
-  showToast('Preset "' + name.trim() + '" saved ✓', 'success');
+  // BUGFIX (persistence audit): stgPushExportPresetsToServer() used to be
+  // called without awaiting it, and the success toast below fired
+  // immediately/unconditionally regardless of whether the server save
+  // actually succeeded — same "false success" pattern already fixed
+  // elsewhere in Settings (branding, sign-in logo). Now awaited and checked.
+  stgPushExportPresetsToServer().then(function(ok) {
+    if (!ok && typeof showToast === 'function') {
+      showToast('⚠ Preset saved on this device only — server save failed. It won\'t appear on other devices yet.', 'error');
+      return;
+    }
+    _renderPresetSelect();
+    showToast('Preset "' + name.trim() + '" saved ✓', 'success');
+  });
 }
 
 function exportLoadPreset(name) {
@@ -35196,6 +35721,7 @@ function settingsSwitchTab(tab, el) {
   }
   if (tab === 'system') {
     stgMirrorCam(); stgRenderWebhookLogs(); stgMirrorDropdowns();
+    if (typeof stgMlSyncFromServer === 'function') stgMlSyncFromServer();
     if (typeof renderAccessRights === 'function') { try { renderAccessRights(); } catch(e) { console.warn('[sys-tab]',e); } }
   }
   if (tab === 'mail') { stgRenderAllTemplates(); if (typeof sysmailRenderPending === 'function') sysmailRenderPending(); }
@@ -35511,6 +36037,55 @@ function stgMlSelectList(key) {
     </div>`).join('');
 }
 
+// BUGFIX (Settings audit): stgMlAddItem/stgMlDeleteItem used to mutate
+// MASTER_LISTS purely in memory — no localStorage write even, let alone a
+// server save — while showing a confident "✓ added"/"removed" success
+// toast that implied the change was actually saved. It was gone on the
+// very next page refresh with zero warning. Reuses the exact same generic
+// Settings API (POST/GET /api/settings) pattern already used for Roles &
+// Permissions / Menu Visibility just above in this file — no new backend
+// table, no new architecture, same "value is JSON, keyed string" store.
+const STG_MASTER_LISTS_KEY = 'efin_master_lists';
+
+async function stgMlPushToServer() {
+  if (typeof MASTER_LISTS === 'undefined') return true;
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST', headers: _stgAuthHeaders(true),
+      body: JSON.stringify({ key: STG_MASTER_LISTS_KEY, value: JSON.stringify(MASTER_LISTS), category: 'MasterLists' })
+    });
+    if (!res.ok && typeof showToast === 'function') {
+      showToast('⚠ Could not save to the server — this change will be lost on refresh.', 'error');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn('[master-lists] failed to sync to server', e);
+    if (typeof showToast === 'function') showToast('⚠ Could not save to the server — this change will be lost on refresh.', 'error');
+    return false;
+  }
+}
+
+async function stgMlSyncFromServer() {
+  if (typeof MASTER_LISTS === 'undefined') return;
+  try {
+    const res = await fetch('/api/settings/' + STG_MASTER_LISTS_KEY, { headers: _stgAuthHeaders(false) });
+    if (!res.ok) return;
+    const body = await res.json();
+    const raw = body && body.data ? body.data.value : null;
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    Object.keys(saved).forEach(key => {
+      if (MASTER_LISTS[key] && saved[key] && Array.isArray(saved[key].items)) {
+        MASTER_LISTS[key].items = saved[key].items;
+      }
+    });
+    if (typeof stgMirrorDropdowns === 'function') stgMirrorDropdowns();
+  } catch (e) { console.warn('[master-lists] could not reach server, using local copy', e); }
+}
+window.stgMlPushToServer = stgMlPushToServer;
+window.stgMlSyncFromServer = stgMlSyncFromServer;
+
 function stgMlAddItem() {
   if (typeof MASTER_LISTS === 'undefined') return;
   const _r = (window.currentUser && window.currentUser.role) || '';
@@ -35526,7 +36101,7 @@ function stgMlAddItem() {
   stgMlSelectList(_stgMlActiveKey);
   // Sync to original ml editor if visible
   if (typeof mlRenderTabs === 'function') try { mlRenderTabs(); } catch(e) {}
-  showToast(`"${val}" added to ${list.label}`, 'success');
+  stgMlPushToServer().then(ok => { if (ok && typeof showToast === 'function') showToast(`"${val}" added to ${list.label} ✓`, 'success'); });
 }
 
 function stgMlDeleteItem(key, idx) {
@@ -35540,7 +36115,7 @@ function stgMlDeleteItem(key, idx) {
   list.items.splice(idx, 1);
   stgMlSelectList(key);
   if (typeof mlRenderTabs === 'function') try { mlRenderTabs(); } catch(e) {}
-  showToast(`"${removed.label || removed}" removed`, 'info');
+  stgMlPushToServer().then(ok => { if (ok && typeof showToast === 'function') showToast(`"${removed.label || removed}" removed`, 'info'); });
 }
 
 // ── Webhook Logs (backed by GET /api/settings/webhook-logs — Admin only; real InCred callbacks) ──
@@ -36942,6 +37517,14 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
      1. LOCALSTORAGE PERSISTENCE LAYER
   ─────────────────────────────────────────────────────────────────── */
 
+  // STORE_KEYS is kept (not removed) — window.efinClearStorage() below still
+  // needs every key here to wipe leftover values from a user's browser left
+  // over from before this cleanup. Of these, only `assignmentLog` is still
+  // actively written by persistSave() below; apps/tasks/users/locations/
+  // salesTeams/loginTeams/payoutClaims/partners/dsaList/obligations/roles
+  // (and tickets/banks/rptTargets/ticketStore, from earlier fixes) are dead
+  // keys as far as writes go — API sync via api-bridge.js is the sole source
+  // of truth for all of them.
   var STORE_KEYS = {
     apps:         'efin_v22_applications',
     tasks:        'efin_v22_tasks',
@@ -37028,11 +37611,26 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   // network call fails, the change still stands locally via persistSave().
   async function stgPushPermissionsToServer() {
     try {
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'POST', headers: _stgAuthHeaders(true),
         body: JSON.stringify({ key: STG_PERM_SETTINGS_KEY, value: JSON.stringify(ROLES), category: 'Permissions' })
       });
-    } catch (e) { console.warn('[perms] failed to sync role permissions to server (saved locally only)', e); }
+      // BUGFIX: this used to be truly fire-and-forget — a failed save (network
+      // error, expired session, server error) gave the admin zero indication
+      // anything went wrong. The change stayed correct for the REST of their
+      // current session (ROLES is updated in-memory regardless), but was
+      // never actually persisted anywhere — not the server, and (per the
+      // dead-write cleanup above) not even localStorage anymore — so it
+      // silently vanished on the next page refresh with no error ever shown.
+      if (!res.ok && typeof showToast === 'function') {
+        showToast('⚠ Permission change could not be saved to the server — it will be lost on refresh. Check your connection and try again.', 'error');
+      }
+    } catch (e) {
+      console.warn('[perms] failed to sync role permissions to server (saved locally only)', e);
+      if (typeof showToast === 'function') {
+        showToast('⚠ Permission change could not be saved to the server — it will be lost on refresh. Check your connection and try again.', 'error');
+      }
+    }
   }
 
   // Push the current in-memory roleMenuVisibility (Sets) to the server as
@@ -37043,11 +37641,20 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       Object.keys(roleMenuVisibility).forEach(itemId => {
         plain[itemId] = Array.from(roleMenuVisibility[itemId]);
       });
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'POST', headers: _stgAuthHeaders(true),
         body: JSON.stringify({ key: STG_MENU_VIS_SETTINGS_KEY, value: JSON.stringify(plain), category: 'Permissions' })
       });
-    } catch (e) { console.warn('[perms] failed to sync menu visibility to server (saved locally only)', e); }
+      // Same reasoning as stgPushPermissionsToServer above.
+      if (!res.ok && typeof showToast === 'function') {
+        showToast('⚠ Menu visibility change could not be saved to the server — it will be lost on refresh. Check your connection and try again.', 'error');
+      }
+    } catch (e) {
+      console.warn('[perms] failed to sync menu visibility to server (saved locally only)', e);
+      if (typeof showToast === 'function') {
+        showToast('⚠ Menu visibility change could not be saved to the server — it will be lost on refresh. Check your connection and try again.', 'error');
+      }
+    }
   }
 
   window.stgSyncPermissionsFromServer = stgSyncPermissionsFromServer;
@@ -37055,24 +37662,24 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   window.stgPushMenuVisibilityToServer = stgPushMenuVisibilityToServer;
 
   function persistSave() {
+    // Write-side cleanup: apps/tasks/users/locations/salesTeams/loginTeams/
+    // payoutClaims/partners/dsaList/OBLIGATIONS/ROLES are no longer written
+    // to localStorage here. Confirmed (read-only audit) that no code path
+    // in the project reads any of these keys back — persistLoad() below
+    // never restores them (see its comments), and no getItem() for
+    // STORE_KEYS.apps/tasks/users/locations/salesTeams/loginTeams/
+    // payoutClaims/partners/dsaList/obligations/roles exists anywhere else
+    // either. These were pure dead writes: JSON.stringify work and storage
+    // quota burned on every task-done/status-change/edit-save/obligation-
+    // add/role-change for data nobody ever reads back. Same fix already
+    // applied to the *other* persistSave() in efin-improvements.js.
     try {
-      if (window.APPLICATIONS)  localStorage.setItem(STORE_KEYS.apps,         JSON.stringify(APPLICATIONS));
-      if (window.TASK_STORE)    localStorage.setItem(STORE_KEYS.tasks,        JSON.stringify(TASK_STORE));
-      if (window.twUsers)       localStorage.setItem(STORE_KEYS.users,        JSON.stringify(twUsers));
-      if (window.twLocations)   localStorage.setItem(STORE_KEYS.locations,    JSON.stringify(twLocations));
-      if (window.twSalesTeams)  localStorage.setItem(STORE_KEYS.salesTeams,   JSON.stringify(twSalesTeams));
-      if (window.twLoginTeams)  localStorage.setItem(STORE_KEYS.loginTeams,   JSON.stringify(twLoginTeams));
-      if (window.PAYOUT_CLAIMS) localStorage.setItem(STORE_KEYS.payoutClaims, JSON.stringify(PAYOUT_CLAIMS));
-      if (window.twPartnerList) localStorage.setItem(STORE_KEYS.partners,     JSON.stringify(twPartnerList));
-      if (window.twDSAList)     localStorage.setItem(STORE_KEYS.dsaList,      JSON.stringify(twDSAList));
       // Phase 4B: tickets (twTickets / TK_STORE) are intentionally NOT written
       // to localStorage anymore. PostgreSQL/RDS via /api/tickets is now the
       // sole source of truth — see _syncTickets() in api-bridge.js, which
       // reloads TK_STORE from the API on boot and after every mutation.
       // Persisting them here would let a stale local copy silently win over
       // the server on the next load, which is exactly what Phase 4B removes.
-    if (window.OBLIGATIONS)   localStorage.setItem(STORE_KEYS.obligations,  JSON.stringify(OBLIGATIONS));
-      if (window.ROLES)         localStorage.setItem(STORE_KEYS.roles,        JSON.stringify(ROLES));
       // BANKS_STORE is intentionally NOT written to localStorage anymore —
       // same reasoning as tickets above. PostgreSQL via /api/banks is now
       // the sole source of truth (see _syncBanks() in api-bridge.js, which
@@ -37086,16 +37693,19 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       // from the API on login/session-restore/refresh, and after every
       // create/edit/delete). Persisting it here would let a stale local
       // copy silently win over the server on the next load.
-      if (window.ASSIGNMENT_AUDIT_LOG) localStorage.setItem(STORE_KEYS.assignmentLog, JSON.stringify(ASSIGNMENT_AUDIT_LOG));
+      // ASSIGNMENT_AUDIT_LOG is intentionally NOT written to localStorage
+      // anymore — same reasoning as Banks/Tickets/RPT_TARGETS above.
+      // PostgreSQL via /api/assignment-audit is now the sole source of truth
+      // (see _syncAssignmentAuditLog() in api-bridge.js, which wholesale-
+      // replaces ASSIGNMENT_AUDIT_LOG from the API — target.length = 0 then
+      // re-populated — on every full sync). Nothing anywhere in the project
+      // ever reads STORE_KEYS.assignmentLog back from localStorage either
+      // (confirmed — no getItem() call exists), so this was the same dead-
+      // write pattern as the others: JSON.stringify work and storage quota
+      // burned on every auto-assignment for data nobody ever reads back.
     } catch (e) {
-      // Storage quota exceeded — attempt to save only critical data
-      try {
-        if (window.APPLICATIONS) localStorage.setItem(STORE_KEYS.apps, JSON.stringify(APPLICATIONS));
-        if (window.PAYOUT_CLAIMS) localStorage.setItem(STORE_KEYS.payoutClaims, JSON.stringify(PAYOUT_CLAIMS));
-      } catch(e2) {
-        if (typeof showToast === 'function') {
-          showToast('⚠ Storage quota full. Export your data and clear saved data in Settings.', 'warn');
-        }
+      if (typeof showToast === 'function') {
+        showToast('⚠ Storage quota full. Export your data and clear saved data in Settings.', 'warn');
       }
     }
     // Warn when approaching 80% of 5MB limit
@@ -37109,6 +37719,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       }
     } catch(_) {}
   }
+
 
   function persistLoad() {
     var loaded = false;
@@ -37633,12 +38244,47 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     if (typeof showToast === 'function') showToast('Task marked as done ✓', 'success');
   };
 
+  // Set once per login session so the overdue-tasks toast (below) only ever
+  // interrupts the user once, not on every badge refresh (task actions, page
+  // navigation, periodic sync all call _refreshTaskNavBadge()).
+  var _overdueTasksNotifiedThisSession = false;
+
   function _refreshTaskNavBadge() {
     var badge = document.getElementById('tasks-nav-badge');
     if (!badge || !window.TASK_STORE) return;
-    var pending = TASK_STORE.filter(function (t) { return t.status !== 'done' && t.status !== 'cancelled'; }).length;
-    badge.textContent = pending || '';
-    badge.style.display = pending ? '' : 'none';
+    var pending = TASK_STORE.filter(function (t) { return t.status !== 'done' && t.status !== 'cancelled'; });
+    // Due-date reminders: a task counts as overdue only when it has a real
+    // due date (due_date_raw — the raw ISO value synced alongside the
+    // display-formatted due_date, see api-bridge.js _syncTasks) that has
+    // already passed, and isn't done/cancelled.
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var overdue = pending.filter(function (t) {
+      if (!t.due_date_raw) return false;
+      var d = new Date(t.due_date_raw);
+      return !isNaN(d) && d < today;
+    });
+
+    var count = pending.length;
+    badge.textContent = count || '';
+    badge.style.display = count ? '' : 'none';
+    // Overdue tasks get a visibly different (danger) badge color instead of
+    // the normal accent color, so the sidebar nav itself signals urgency —
+    // not just the per-task card styling already present on the Tasks page.
+    if (overdue.length) {
+      badge.style.background = 'var(--danger, #d42b2b)';
+      badge.title = overdue.length + ' overdue task' + (overdue.length !== 1 ? 's' : '');
+    } else {
+      badge.style.background = '';
+      badge.title = '';
+    }
+
+    if (overdue.length && !_overdueTasksNotifiedThisSession && typeof window.showToast === 'function') {
+      _overdueTasksNotifiedThisSession = true;
+      window.showToast(
+        '⚠ ' + overdue.length + ' overdue task' + (overdue.length !== 1 ? 's' : '') + ' — tap Tasks to review',
+        'warn'
+      );
+    }
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -37980,6 +38626,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
               if (!validateStep(cs)) {
                 if (typeof showToast === 'function')
                   showToast('Please complete all required fields before proceeding.', 'warn');
+                // BUGFIX (Wizard draft not saving on live server): this early
+                // return used to skip _wnOrig entirely, which meant the
+                // autosave hook wrapped around wizardNav (see the
+                // "AUTO-SAVE WIZARD DRAFT" block above, where window.wizardNav
+                // is wrapped to call wizardAutoSaveDraft() after every Next/
+                // Previous) never ran whenever the current step had an
+                // incomplete/invalid required field — i.e. exactly the
+                // moment a partial draft is most worth saving, since the
+                // user is stuck and may abandon the session here. Whatever
+                // progress they've made so far must still autosave even
+                // though forward navigation itself stays blocked.
+                if (typeof window.wizardAutoSaveDraft === 'function') window.wizardAutoSaveDraft();
                 return;
               }
             }

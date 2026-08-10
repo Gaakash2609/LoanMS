@@ -8,38 +8,64 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LoanMS.API.Controllers;
 
-// ── RBAC note (Phase 2) ──────────────────────────────────────────────────────
-// Frontend dsaCanCreate()/dsaCanEdit() (efin-app.js) allow-list:
-//   ['admin','team_leader','login_team','sales_executive','product_team']
-// But api-bridge.js's ROLE_MAP — the ONLY place a backend UserRole becomes a
-// frontend role string — only ever produces: admin, manager, sales_executive,
-// login_team (mapped from 'Operations', which does not exist in the backend
-// UserRole enum, so dead), partner. 'team_leader' and 'product_team' are never
-// produced by any real login. Backend UserRole enum = Admin, Manager, Sales,
-// Dsa, Partner. Intersecting the frontend allow-list with roles a real login
-// can actually produce gives exactly: Admin, Sales ('sales_executive').
-// Manager and Partner are deliberately excluded — Manager is absent from the
-// frontend allow-list, and Partner is a view-only role per the comment in
-// efin-app.js ("partner → view only"). Create/Update therefore authorize
-// "Admin,Sales". Delete (hard/soft-delete of a DSA/Partner record) is not
-// exercised by the frontend at all (status toggle goes through Update, not
-// Delete) and remains Admin-only, matching the destructive-action convention
-// used elsewhere in this codebase (TeamsController, LocationsController, etc).
+// ── RBAC note (Phase 2, updated) ─────────────────────────────────────────────
+// api-bridge.js's ROLE_MAP now maps backend UserRole.ProductTeam →
+// 'product_team' (and Accounts → 'accounts'), so a real ProductTeam login
+// does reach the frontend correctly.
+// Create/Update/Upload: Admin, Sales, ProductTeam.
+// Delete (hard/soft-delete of a DSA/Partner record): Admin, ProductTeam.
+// ProductTeam added per the business owner's explicit instruction: Product
+// Team gets full rights (Create/Edit/Delete — everything, not view-only) over
+// the DSA Management and Partner Management config modules (both live on
+// this same DsaPartner entity/controller). This is a configuration-module
+// right, unrelated to Loan-application visibility, which ProductTeam does
+// NOT get (see LoanRepository.ApplyVisibilityScope — ProductTeam still sees
+// zero loans, unchanged).
+// Manager and Partner remain deliberately excluded from Create/Update/Delete —
+// Manager is absent from the frontend allow-list, and Partner is a view-only
+// role per the comment in efin-app.js ("partner → view only").
 [Authorize]
 public class DsaController : BaseController
 {
     private readonly AppDbContext _db;
-    // Documents stored OUTSIDE wwwroot — never served as static files — same
-    // convention as LoansController's secure_uploads.
-    private static readonly string _uploadRoot =
-        Path.Combine(AppContext.BaseDirectory, "secure_uploads", "dsa");
+    private readonly LoanMS.Application.Interfaces.IFileStorageService _fileStorage;
 
-    public DsaController(AppDbContext db) => _db = db;
+    public DsaController(AppDbContext db, LoanMS.Application.Interfaces.IFileStorageService fileStorage)
+    {
+        _db = db;
+        _fileStorage = fileStorage;
+    }
 
+    /// <summary>
+    /// Phase 4 — role-scoped: Admin/Manager/Sales keep the existing full-list
+    /// behavior (unchanged). Partner now only sees their OWN Partner record
+    /// (LinkedUserId == CurrentUserId) — a Partner login must never be able
+    /// to browse other DSAs'/Partners' contact details, PAN, office address,
+    /// etc.
+    ///
+    /// Dsa is broader (added per business owner, DSA ↔ Partner linkage):
+    /// sees their own DSA record PLUS every Partner record mapped under
+    /// them (DsaPartner.MappedDsaId — same field the Partner Management
+    /// screen already uses). A Partner with no mapped DSA is unaffected —
+    /// only the linkage matters, no location or other condition.
+    /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var dsa = await _db.DsaPartners
+        var query = _db.DsaPartners.AsQueryable();
+
+        if (string.Equals(CurrentUserRole, "Partner", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(d => d.LinkedUserId == CurrentUserId);
+        }
+        else if (string.Equals(CurrentUserRole, "Dsa", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(d =>
+                d.LinkedUserId == CurrentUserId ||
+                (d.MappedDsa != null && d.MappedDsa.LinkedUserId == CurrentUserId));
+        }
+
+        var dsa = await query
             .Include(d => d.MappedSalesUser)
             .Include(d => d.LinkedUser)
             .Include(d => d.MappedDsa)
@@ -65,8 +91,63 @@ public class DsaController : BaseController
         return Ok(ApiResponseDto<object>.Ok(dsa));
     }
 
+    /// <summary>
+    /// 🟡 DSA/Partner Export (item #11) — same role-based visibility scoping
+    /// as GetAll above (Partner sees only their own record, Dsa sees own +
+    /// linked partners, everyone else sees all), reused verbatim rather than
+    /// a second/looser rule, so export can never expose a record the same
+    /// caller couldn't already see in the list view.
+    /// </summary>
+    [HttpGet("export")]
+    public async Task<IActionResult> Export()
+    {
+        var query = _db.DsaPartners.AsQueryable();
+
+        if (string.Equals(CurrentUserRole, "Partner", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(d => d.LinkedUserId == CurrentUserId);
+        }
+        else if (string.Equals(CurrentUserRole, "Dsa", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(d =>
+                d.LinkedUserId == CurrentUserId ||
+                (d.MappedDsa != null && d.MappedDsa.LinkedUserId == CurrentUserId));
+        }
+
+        var rows = await query
+            .Include(d => d.MappedDsa)
+            .OrderBy(d => d.Name)
+            .Select(d => new
+            {
+                d.Name, d.Code, PartnerType = d.PartnerType.ToString(), d.Email, d.Phone,
+                d.City, d.IsActive, d.Pan, d.OfficeAddress, d.OfficeState, d.OfficePin,
+                MappedDsaName = d.MappedDsa != null ? d.MappedDsa.Name : null, d.CreatedAt
+            })
+            .ToListAsync();
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Name,Code,Type,Email,Phone,City,Active,PAN,Office Address,State,PIN,Mapped DSA,Created At");
+        foreach (var r in rows)
+        {
+            sb.AppendLine(string.Join(",",
+                DsaCsvField(r.Name), DsaCsvField(r.Code), DsaCsvField(r.PartnerType), DsaCsvField(r.Email), DsaCsvField(r.Phone),
+                DsaCsvField(r.City), DsaCsvField(r.IsActive), DsaCsvField(r.Pan), DsaCsvField(r.OfficeAddress),
+                DsaCsvField(r.OfficeState), DsaCsvField(r.OfficePin), DsaCsvField(r.MappedDsaName),
+                DsaCsvField(r.CreatedAt.ToString("yyyy-MM-dd"))));
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        return File(bytes, "text/csv", $"dsa_partners_export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv");
+    }
+
+    private static string DsaCsvField(object? value)
+    {
+        var s = value?.ToString() ?? "";
+        return s.Contains(',') || s.Contains('"') || s.Contains('\n') ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+    }
+
     [HttpPost]
-    [Authorize(Roles = "Admin,Sales")]
+    [Authorize(Roles = "Admin,Sales,ProductTeam")]
     public async Task<IActionResult> Create([FromBody] DsaDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
@@ -99,7 +180,7 @@ public class DsaController : BaseController
     }
 
     [HttpPut("{id:int}")]
-    [Authorize(Roles = "Admin,Sales")]
+    [Authorize(Roles = "Admin,Sales,ProductTeam")]
     public async Task<IActionResult> Update(int id, [FromBody] DsaDto dto)
     {
         var dsa = await _db.DsaPartners.FindAsync(id);
@@ -131,7 +212,7 @@ public class DsaController : BaseController
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Delete(int id)
     {
         var dsa = await _db.DsaPartners.FindAsync(id);
@@ -147,7 +228,7 @@ public class DsaController : BaseController
     // endpoint, magic-byte validated, whitelisted document types.
 
     [HttpPost("{id:int}/documents")]
-    [Authorize(Roles = "Admin,Sales")]
+    [Authorize(Roles = "Admin,Sales,ProductTeam")]
     [RequestSizeLimit(20 * 1024 * 1024)]
     public async Task<IActionResult> UploadDocument(int id, IFormFile file, [FromForm] string? documentType)
     {
@@ -177,13 +258,11 @@ public class DsaController : BaseController
         if (!allowedDocTypes.Contains(docType))
             return BadRequest(ApiResponseDto<object>.Fail("Invalid document type."));
 
-        var uploadDir = Path.Combine(_uploadRoot, id.ToString());
-        Directory.CreateDirectory(uploadDir);
         var fileName = $"{Guid.NewGuid()}{ext}";
-        var filePath = Path.Combine(uploadDir, fileName);
+        var storageKey = $"dsa/{id}/{fileName}";
 
-        await using (var stream = new FileStream(filePath, FileMode.Create))
-            await file.CopyToAsync(stream);
+        await using (var stream = file.OpenReadStream())
+            await _fileStorage.SaveAsync(storageKey, stream, file.ContentType);
 
         var docRecord = new DsaDocument {
             DsaPartnerId     = id,
@@ -216,16 +295,24 @@ public class DsaController : BaseController
         var dsa = await _db.DsaPartners.FindAsync(id);
         if (dsa == null) return NotFound(ApiResponseDto<object>.Fail("DSA/Partner not found."));
 
-        var filePath = Path.Combine(_uploadRoot, id.ToString(), fileName);
-        if (!System.IO.File.Exists(filePath))
+        var storageKey = $"dsa/{id}/{fileName}";
+        var result = await _fileStorage.GetAsync(storageKey);
+        if (result == null)
             return NotFound(ApiResponseDto<object>.Fail("Document not found."));
 
-        var provider = new FileExtensionContentTypeProvider();
-        if (!provider.TryGetContentType(fileName, out var contentType))
-            contentType = "application/octet-stream";
+        var (content, storedContentType) = result.Value;
+        var contentType = storedContentType;
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            var provider = new FileExtensionContentTypeProvider();
+            if (!provider.TryGetContentType(fileName, out contentType!))
+                contentType = "application/octet-stream";
+        }
 
-        var bytes = await System.IO.File.ReadAllBytesAsync(filePath);
-        return File(bytes, contentType, fileName);
+        using var ms = new MemoryStream();
+        await content.CopyToAsync(ms);
+        content.Dispose();
+        return File(ms.ToArray(), contentType, fileName);
     }
 
     [HttpGet("{id:int}/documents")]

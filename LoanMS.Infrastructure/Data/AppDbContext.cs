@@ -32,6 +32,9 @@ public class AppDbContext : DbContext
     public DbSet<LoanReference>     LoanReferences      => Set<LoanReference>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<BankMaster>        Banks               => Set<BankMaster>();
+    public DbSet<AnalyticCompany>       AnalyticCompanies      => Set<AnalyticCompany>();
+    public DbSet<AnalyticCategory>      AnalyticCategories     => Set<AnalyticCategory>();
+    public DbSet<BankEligibilityLine>   BankEligibilityLines   => Set<BankEligibilityLine>();
     public DbSet<IncredRmEmail>     IncredRmEmails      => Set<IncredRmEmail>();
     public DbSet<ReportTarget>      ReportTargets       => Set<ReportTarget>();
     public DbSet<AssignmentAuditLog> AssignmentAuditLogs => Set<AssignmentAuditLog>();
@@ -61,6 +64,7 @@ public class AppDbContext : DbContext
         mb.Entity<User>(e => {
             e.HasKey(u => u.Id);
             e.HasIndex(u => u.Email).IsUnique();
+            e.HasIndex(u => u.LocationId);
             e.Property(u => u.FullName).HasMaxLength(150).IsRequired();
             e.Property(u => u.Email).HasMaxLength(200).IsRequired();
             e.Property(u => u.PasswordHash).IsRequired();
@@ -70,6 +74,7 @@ public class AppDbContext : DbContext
             e.Property(u => u.SalesTeam).HasMaxLength(150);
             e.Property(u => u.OpTeam).HasMaxLength(150);
             e.HasQueryFilter(u => !u.IsDeleted);
+            e.HasOne(u => u.Location).WithMany(loc => loc.Users).HasForeignKey(u => u.LocationId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
         });
 
         mb.Entity<Customer>(e => {
@@ -100,6 +105,7 @@ public class AppDbContext : DbContext
             e.HasIndex(l => l.DsaId);
             e.HasIndex(l => l.PartnerId);
             e.HasIndex(l => l.LocationId);
+            e.HasIndex(l => l.LoginUserId);
             e.Property(l => l.LoanNumber).HasMaxLength(20).IsRequired();
             e.Property(l => l.LoanType).HasConversion<string>();
             e.Property(l => l.Status).HasConversion<string>();
@@ -120,6 +126,7 @@ public class AppDbContext : DbContext
             e.HasOne(l => l.Dsa).WithMany().HasForeignKey(l => l.DsaId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
             e.HasOne(l => l.Partner).WithMany().HasForeignKey(l => l.PartnerId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
             e.HasOne(l => l.Location).WithMany().HasForeignKey(l => l.LocationId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(l => l.LoginUser).WithMany().HasForeignKey(l => l.LoginUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
         });
 
         mb.Entity<LoanOffer>(e => {
@@ -236,6 +243,35 @@ public class AppDbContext : DbContext
                 .IsUnique()
                 .HasFilter("\"IsDeleted\" = false")
                 .HasDatabaseName("IX_Banks_BankName_Unique_Active");
+            e.Property(b => b.EmpTypesJson).HasColumnType("text");
+            e.Property(b => b.CompTypesJson).HasColumnType("text");
+        });
+
+        // ── Lender Configuration — eligibility engine ────────────────────────────
+        mb.Entity<AnalyticCompany>(e => {
+            e.HasKey(c => c.Id);
+            e.Property(c => c.Name).HasMaxLength(200).IsRequired();
+            e.Property(c => c.EmpTypesJson).HasColumnType("text");
+            e.Property(c => c.CompType).HasMaxLength(50);
+            e.HasQueryFilter(c => !c.IsDeleted);
+        });
+
+        mb.Entity<AnalyticCategory>(e => {
+            e.HasKey(c => c.Id);
+            e.Property(c => c.Name).HasMaxLength(100).IsRequired();
+            e.HasQueryFilter(c => !c.IsDeleted);
+        });
+
+        mb.Entity<BankEligibilityLine>(e => {
+            e.HasKey(l => l.Id);
+            e.Property(l => l.PinCode).HasMaxLength(10);
+            e.HasQueryFilter(l => !l.IsDeleted);
+            e.HasOne(l => l.Bank).WithMany(b => b.Lines).HasForeignKey(l => l.BankId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(l => l.Company).WithMany().HasForeignKey(l => l.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(l => l.Category).WithMany().HasForeignKey(l => l.CategoryId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(l => l.BankId);
+            e.HasIndex(l => l.CompanyId);
+            e.HasIndex(l => l.CategoryId);
         });
 
         mb.Entity<ReportTarget>(e => {
@@ -441,7 +477,10 @@ public class AppDbContext : DbContext
             e.Property(n => n.Partner).HasMaxLength(200);
             e.Property(n => n.TargetRole).HasMaxLength(40);
             e.Property(n => n.Amount).HasColumnType("decimal(18,2)");
+            e.Property(n => n.Icon).HasMaxLength(10);
+            e.Property(n => n.Message).HasMaxLength(500);
             e.HasIndex(n => new { n.TargetRole, n.IsRead, n.CreatedAt });
+            e.HasIndex(n => new { n.TargetUserId, n.IsRead, n.CreatedAt });
         });
 
         mb.Entity<PayoutRule>(e => {

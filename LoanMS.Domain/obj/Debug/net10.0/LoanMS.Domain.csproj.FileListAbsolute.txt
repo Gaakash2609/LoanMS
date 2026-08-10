@@ -1,0 +1,11 @@
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\bin\Debug\net10.0\LoanMS.Domain.deps.json
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\bin\Debug\net10.0\LoanMS.Domain.dll
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\bin\Debug\net10.0\LoanMS.Domain.pdb
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\obj\Debug\net10.0\LoanMS.Domain.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\obj\Debug\net10.0\LoanMS.Domain.AssemblyInfoInputs.cache
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\obj\Debug\net10.0\LoanMS.Domain.AssemblyInfo.cs
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\obj\Debug\net10.0\LoanMS.Domain.csproj.CoreCompileInputs.cache
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\obj\Debug\net10.0\LoanMS.Domain.dll
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\obj\Debug\net10.0\refint\LoanMS.Domain.dll
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\obj\Debug\net10.0\LoanMS.Domain.pdb
+C:\Users\Aakash Gupta\Downloads\LoanMS-Final-Updated\LoanMS.Domain\obj\Debug\net10.0\ref\LoanMS.Domain.dll

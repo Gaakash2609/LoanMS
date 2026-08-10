@@ -1476,7 +1476,29 @@ function kycSyncAddr(p,v){ var m={street1:['w-street1','w-pstreet1'],street2:['w
 function kycSyncDob(val){ var el=document.getElementById('w-dob'); if(!el||!val)return; var p=val.split(/[\/\-]/); if(p.length===3){var dd,mm,yyyy; if(p[2].length===4){dd=p[0];mm=p[1];yyyy=p[2];}else if(p[0].length===4){yyyy=p[0];mm=p[1];dd=p[2];}else return; el.value=yyyy+'-'+mm.padStart(2,'0')+'-'+dd.padStart(2,'0'); el.classList.add('kyc-field-autofilled'); var d2=document.getElementById('kyc-out-dob'); if(d2)d2.value=val; } else if(p.length===1 && /^\d{4}$/.test(val.trim())){ /* year-only from physical Aadhaar */ var d2=document.getElementById('kyc-out-dob'); if(d2){d2.value=val;d2.classList.add('kyc-field-autofilled');} } }
 function kycSyncGender(v){ var el=document.getElementById('w-gender'); if(!el)return; var u=v.toUpperCase(); el.value=u.charAt(0)==='M'?'M':u.charAt(0)==='F'?'F':'other'; el.classList.add('kyc-field-autofilled'); }
 function kycFillState(sid,sn){ var el=document.getElementById(sid); if(!el||!sn)return; var m=null; for(var i=0;i<el.options.length;i++){if(el.options[i].text.toLowerCase()===sn.toLowerCase()){m=el.options[i];break;}} if(m){el.value=m.value;}else{var o=document.createElement('option');o.value=sn;o.text=sn;el.appendChild(o);el.value=sn;} el.classList.add('kyc-field-autofilled'); if(sid==='w-state'){var wv=document.getElementById('wsdd-state-val');if(wv){wv.textContent=(el.options[el.selectedIndex]?el.options[el.selectedIndex].text:sn);wv.classList.remove('placeholder');}}else if(typeof wsddSetValue==='function'){wsddSetValue(sid.replace('w-','wsdd-'),el.value);} }
-function kycAutoFill(id,v){ var el=document.getElementById(id); if(el&&v){el.value=v;el.classList.add('kyc-field-autofilled','kyc-autofill-pulse');setTimeout(function(){el.classList.remove('kyc-autofill-pulse');},1200); setTimeout(kycUpdateReadinessChecklist, 150);} }
+// 🟠 KYC Auto-fill improvement (item #6): kycAutoFill() used to
+// unconditionally overwrite whatever was already in the wizard field
+// (w-fname/w-lname/w-pan/w-father/etc), even a value the user had
+// deliberately typed themselves — violating "do not overwrite
+// user-edited values unexpectedly". Reuses the SAME _kycFieldSources
+// tracking object already built for the kyc-out-* review fields
+// (see _kycMarkAuto/kycMarkFixed above), just applied here too: a
+// genuine user keystroke on one of these fields (a real 'input' event —
+// kycAutoFill's own `el.value = v` assignment does NOT fire one, so
+// this cleanly distinguishes "the user typed this" from "extraction
+// set this") marks the field 'manual', and a subsequent kycAutoFill()
+// call then leaves that field alone instead of silently overwriting it.
+// An untouched (never-manually-edited) field can still be freely
+// filled/refreshed by a later extraction, same as before.
+(function () {
+  ['w-fname', 'w-mname', 'w-lname', 'w-pan', 'w-father'].forEach(function (id) {
+    document.addEventListener('input', function (e) {
+      if (e.target && e.target.id === id) window._kycFieldSources[id] = 'manual';
+    });
+  });
+})();
+
+function kycAutoFill(id,v){ var el=document.getElementById(id); if(el&&v&&window._kycFieldSources[id]!=='manual'){el.value=v;el.classList.add('kyc-field-autofilled','kyc-autofill-pulse');setTimeout(function(){el.classList.remove('kyc-autofill-pulse');},1200); setTimeout(kycUpdateReadinessChecklist, 150); window._kycFieldSources[id]='auto';} }
 function kycSetField(id,v){ var el=document.getElementById(id); if(!el)return; el.value=v; if(v) _kycMarkAuto(el); }
 
 // ── Inline correction helpers ──

@@ -14,6 +14,11 @@ namespace LoanMS.API.Controllers;
 // read-only access, matching how Locations is already enforced). This keeps
 // RBAC consistent across the two simple "master data" screens rather than
 // introducing a new pattern for Banks specifically.
+// ProductTeam added to all three mutation endpoints (Create/Update/Delete) —
+// per the business owner, Product Team gets full rights over Lender
+// Configuration (this module), same as DSA/Partner Management and the Wizard
+// Offers matrix. This is a configuration-module right, unrelated to Loan
+// visibility, which ProductTeam still does not get.
 [Authorize]
 public class BanksController : BaseController
 {
@@ -24,6 +29,7 @@ public class BanksController : BaseController
     public async Task<IActionResult> GetAll()
     {
         var banks = await _db.Banks
+            .Include(b => b.Lines)
             .OrderBy(b => b.BankName)
             .Select(b => new
             {
@@ -38,7 +44,23 @@ public class BanksController : BaseController
                 b.Remarks,
                 b.IsActive,
                 b.CreatedAt,
-                b.UpdatedAt
+                b.UpdatedAt,
+                // ── Lender Configuration eligibility fields ──
+                b.IsIncred,
+                b.IsElite,
+                b.MinCibil,
+                b.AcceptNtc,
+                b.MaxLoanAmt,
+                b.MinTenure,
+                b.MaxTenure,
+                b.FoirLimit,
+                b.PfRequired,
+                b.MinAge,
+                b.MaxAge,
+                b.MinExpMonths,
+                b.EmpTypesJson,
+                b.CompTypesJson,
+                Lines = b.Lines.Select(l => new { l.Id, l.CompanyId, l.CategoryId, l.PinCode, l.Pf })
             })
             .ToListAsync();
         return Ok(ApiResponseDto<object>.Ok(banks));
@@ -53,7 +75,7 @@ public class BanksController : BaseController
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Create([FromBody] BankDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.BankName))
@@ -82,7 +104,24 @@ public class BanksController : BaseController
             // Owner/creator is always taken from the authenticated JWT claim,
             // never from client-supplied input, per server-side identity rule.
             CreatedByUserId = CurrentUserId,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            // ── Lender Configuration eligibility fields (all optional —
+            // defaults on BankMaster kick in if the caller doesn't send them,
+            // matching the frontend's laConfirmAddBank() quick-add flow) ──
+            IsIncred      = dto.IsIncred ?? false,
+            IsElite       = dto.IsElite ?? false,
+            MinCibil      = dto.MinCibil ?? 700,
+            AcceptNtc     = dto.AcceptNtc ?? false,
+            MaxLoanAmt    = dto.MaxLoanAmt ?? 5000000,
+            MinTenure     = dto.MinTenure ?? 12,
+            MaxTenure     = dto.MaxTenure ?? 60,
+            FoirLimit     = dto.FoirLimit ?? 50,
+            PfRequired    = dto.PfRequired ?? false,
+            MinAge        = dto.MinAge ?? 21,
+            MaxAge        = dto.MaxAge ?? 60,
+            MinExpMonths  = dto.MinExpMonths ?? 6,
+            EmpTypesJson  = dto.EmpTypes  != null ? System.Text.Json.JsonSerializer.Serialize(dto.EmpTypes)  : "[]",
+            CompTypesJson = dto.CompTypes != null ? System.Text.Json.JsonSerializer.Serialize(dto.CompTypes) : "[]"
         };
 
         try
@@ -101,7 +140,7 @@ public class BanksController : BaseController
     }
 
     [HttpPut("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Update(int id, [FromBody] BankDto dto)
     {
         var bank = await _db.Banks.FindAsync(id);
@@ -124,6 +163,26 @@ public class BanksController : BaseController
         bank.Email = dto.Email?.Trim();
         bank.Remarks = dto.Remarks?.Trim();
         if (dto.IsActive.HasValue) bank.IsActive = dto.IsActive.Value;
+        // ── Lender Configuration eligibility fields — only overwritten when
+        // the caller actually sent a value, same "partial update" convention
+        // used by WizardController.ApplyMapping, so a plain contact-details
+        // edit (RM name/mobile) from the Banks/NBFC screen can never
+        // accidentally wipe out eligibility rules configured separately from
+        // the Lender Configuration screen. ──
+        if (dto.IsIncred.HasValue)     bank.IsIncred     = dto.IsIncred.Value;
+        if (dto.IsElite.HasValue)      bank.IsElite      = dto.IsElite.Value;
+        if (dto.MinCibil.HasValue)     bank.MinCibil     = dto.MinCibil.Value;
+        if (dto.AcceptNtc.HasValue)    bank.AcceptNtc    = dto.AcceptNtc.Value;
+        if (dto.MaxLoanAmt.HasValue)   bank.MaxLoanAmt   = dto.MaxLoanAmt.Value;
+        if (dto.MinTenure.HasValue)    bank.MinTenure    = dto.MinTenure.Value;
+        if (dto.MaxTenure.HasValue)    bank.MaxTenure    = dto.MaxTenure.Value;
+        if (dto.FoirLimit.HasValue)    bank.FoirLimit    = dto.FoirLimit.Value;
+        if (dto.PfRequired.HasValue)   bank.PfRequired   = dto.PfRequired.Value;
+        if (dto.MinAge.HasValue)       bank.MinAge       = dto.MinAge.Value;
+        if (dto.MaxAge.HasValue)       bank.MaxAge       = dto.MaxAge.Value;
+        if (dto.MinExpMonths.HasValue) bank.MinExpMonths = dto.MinExpMonths.Value;
+        if (dto.EmpTypes  != null) bank.EmpTypesJson  = System.Text.Json.JsonSerializer.Serialize(dto.EmpTypes);
+        if (dto.CompTypes != null) bank.CompTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.CompTypes);
         bank.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -131,7 +190,7 @@ public class BanksController : BaseController
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Delete(int id)
     {
         var bank = await _db.Banks.FindAsync(id);
@@ -159,4 +218,21 @@ public class BankDto
     public string? Email { get; set; }
     public string? Remarks { get; set; }
     public bool? IsActive { get; set; }
+
+    // ── Lender Configuration eligibility fields (all optional — a plain
+    // contact-details save from the Banks/NBFC screen won't send these) ──
+    public bool? IsIncred { get; set; }
+    public bool? IsElite { get; set; }
+    public int? MinCibil { get; set; }
+    public bool? AcceptNtc { get; set; }
+    public decimal? MaxLoanAmt { get; set; }
+    public int? MinTenure { get; set; }
+    public int? MaxTenure { get; set; }
+    public int? FoirLimit { get; set; }
+    public bool? PfRequired { get; set; }
+    public int? MinAge { get; set; }
+    public int? MaxAge { get; set; }
+    public int? MinExpMonths { get; set; }
+    public List<string>? EmpTypes { get; set; }
+    public List<string>? CompTypes { get; set; }
 }

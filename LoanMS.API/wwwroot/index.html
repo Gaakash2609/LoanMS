@@ -593,6 +593,20 @@
           onfocus="this.parentElement.querySelector('select').style.borderColor='var(--accent)'"
           onblur="this.parentElement.querySelector('select').style.borderColor='var(--border)'">
       </div>
+      <!-- 🟡 Global Search (productivity audit, P1) — searches Loans/
+           Customers/DSA/Partners in one call (GET /api/search), instead of
+           the box above which only filters the currently-loaded
+           Applications table. See globalSearchOpen()/globalSearchRun() in
+           efin-app.js. -->
+      <div style="position:relative">
+        <button onclick="globalSearchOpen()" title="Search everything (applications, customers, DSA, partners)"
+          style="height:36px;padding:0 12px;border-radius:9px;border:1.5px solid var(--border2);background:var(--surface);color:var(--text2);cursor:pointer;font-size:15px" id="global-search-btn">🔎</button>
+        <div id="global-search-panel" style="display:none;position:absolute;top:42px;right:0;width:340px;max-height:420px;overflow-y:auto;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.15);z-index:600;padding:10px">
+          <input id="global-search-input" type="text" placeholder="Search applications, customers, DSA, partners…" oninput="globalSearchDebounced(this.value)"
+            style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border2);margin-bottom:8px;font-size:13px">
+          <div id="global-search-results" style="font-size:12.5px"></div>
+        </div>
+      </div>
       <button class="topbar-icon-btn" title="Notifications" onclick="toggleNotifPanel()" style="flex-shrink:0"><span>🔔</span><span
           class="topbar-notif-dot"></span></button>
 
@@ -870,6 +884,20 @@
           </div>
         </div>
       </div>
+      <!-- 🔴 Unified Action Queue (productivity audit, P0) — see
+           DashboardController.GetActionQueue() and renderActionQueue() in
+           efin-app.js. Combines SLA-breach/stale-draft/missing-document/
+           pending-payout-claim data (all already tracked server-side)
+           into one prioritized "what needs my attention" list, hidden
+           entirely when there's nothing to show. -->
+      <div id="action-queue-widget" style="display:none;margin-bottom:24px;padding:18px 20px;background:var(--surface);border:1.5px solid var(--border);border-radius:16px;box-shadow:0 2px 10px rgba(26,79,163,.07)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:15px;font-weight:800;color:var(--text);display:flex;align-items:center;gap:8px">
+            <span>🎯</span> Needs Your Attention <span id="action-queue-count" style="background:var(--accent2);color:#fff;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px"></span>
+          </div>
+        </div>
+        <div id="action-queue-body" style="display:flex;flex-direction:column;gap:6px;font-size:13px"></div>
+      </div>
       <div class="stats-grid">
         <div class="stat-card blue" onclick="showPage('applications',null);filterByStatus('all',null)">
           <div class="stat-icon blue">📋</div>
@@ -958,6 +986,20 @@
           </button>
         </div>
       </div>
+      <!-- 🔴 Bulk Actions (item #3) toolbar — hidden until 1+ rows selected.
+           See renderBulkActionsBar()/bulkApplyStatus() in efin-app.js. -->
+      <div id="bulk-actions-bar" style="display:none;align-items:center;gap:12px;padding:10px 16px;margin-bottom:10px;background:var(--accent-subtle);border:1px solid var(--border);border-radius:10px;font-size:12.5px">
+        <span id="bulk-actions-count" style="font-weight:600;color:var(--text)"></span>
+        <select id="bulk-actions-status" style="padding:6px 10px;border:1px solid var(--border2);border-radius:8px;background:var(--surface);color:var(--text);font-size:12.5px">
+          <option value="">Change status to…</option>
+          <option value="UnderReview">Under Review</option>
+          <option value="Approved">Approved</option>
+          <option value="Rejected">Rejected</option>
+          <option value="Disbursed">Disbursed</option>
+        </select>
+        <button class="btn btn-sm" onclick="bulkApplyStatus()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:600">Apply</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleBulkSelectAll(false)" style="margin-left:auto">Clear selection</button>
+      </div>
       <div class="card" style="border-radius:18px;overflow:hidden">
         <div id="topbar-search-indicator" style="display:none;padding:7px 16px 0;font-size:12px;font-weight:600;color:var(--accent);align-items:center;gap:6px">
           <span style="width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block"></span>
@@ -967,6 +1009,12 @@
           <table id="dsa-table">
             <thead>
               <tr>
+                <!-- 🔴 Bulk Actions (item #3) — select-all checkbox. See
+                     toggleBulkSelectAll()/toggleBulkSelect() in efin-app.js.
+                     Backend authorization (PATCH /api/loans/bulk-status) is
+                     still enforced per-record regardless of what's selected
+                     here — this checkbox only controls the UI selection. -->
+                <th style="width:32px"><input type="checkbox" id="bulk-select-all" onchange="toggleBulkSelectAll(this.checked)" title="Select all on this page"></th>
                 <th>Application ID</th>
                 <th>Applicant</th>
                 <th>Loan Type</th>
@@ -2028,6 +2076,13 @@
                   
                 </div>
               </div>
+
+              <!-- 🟠 Live Lender Eligibility Preview (item #5) — calls the SAME
+                   backend matching engine as Step 9 (POST /api/lenderconfig/match),
+                   never a second/local algorithm. See wLiveEligibilityPreview()
+                   in efin-app.js. -->
+              <div id="w-live-elig-preview" style="display:none;margin:10px 0;padding:10px 14px;border-radius:10px;background:var(--accent-subtle);border:1px solid var(--border);font-size:12.5px;color:var(--text2)"></div>
+
 
               <!-- ── SALARIED fields ── -->
               <div id="w-emp-salaried" style="display:none">
@@ -3989,6 +4044,35 @@
                   </div>
                 </div>
 
+                <!-- Save to Application — pushes this calc's amount/rate/tenure/EMI
+                     onto an existing loan so it doesn't need to be re-typed in the
+                     wizard/detail view. Only loans the current user can edit
+                     (Draft/Submitted, within their visibility scope) are listed —
+                     see calcPopulateSaveToApp() / calcSaveToApplication() in efin-app.js. -->
+                <div class="calc-save-to-app" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+                  <label style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;display:block">Save to Application</label>
+                  <select id="calc-save-app-select" style="width:100%;margin-bottom:8px" onclick="calcPopulateSaveToApp()">
+                    <option value="">— Select an application —</option>
+                  </select>
+                  <button class="btn btn-sm" id="calc-save-app-btn" onclick="calcSaveToApplication()" style="width:100%;background:var(--accent);color:#fff;border:none;font-weight:600;border-radius:10px;padding:9px 14px;cursor:pointer">
+                    💾 Save EMI to Application
+                  </button>
+                </div>
+
+                <!-- 🟡 EMI Calculator two-way sync (item #12) — the reverse
+                     direction: load an existing application's Amount/Rate/
+                     Tenure INTO the calculator, instead of only pushing the
+                     calculator's numbers onto an application. The
+                     application's own persisted values remain authoritative —
+                     this only reads them via GET /api/loans/{id}, never
+                     writes anything. See calcLoadFromApplication() in
+                     efin-app.js. -->
+                <div class="calc-load-from-app" style="margin-top:10px">
+                  <button class="btn btn-ghost btn-sm" id="calc-load-app-btn" onclick="calcLoadFromApplication()" style="width:100%;border-radius:10px;padding:8px 14px;cursor:pointer">
+                    📥 Load Numbers From an Application
+                  </button>
+                </div>
+
                 <!-- Donut chart -->
                 <div class="calc-donut-wrap">
                   <svg id="calc-donut-svg" width="100" height="100" viewBox="0 0 100 100">
@@ -5445,6 +5529,14 @@
           <button onclick="closeClaimModal()" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--text3);line-height:1">✕</button>
         </div>
         <div style="padding:20px 24px">
+          <!-- 🔴 Auto Payout Suggestion (item #2) — read-only display, calls
+               GET /api/payout/suggest/{loanId}, same server-side calculation
+               PayoutController.Submit already uses authoritatively. Does not
+               change any existing form field/submit logic — the server has
+               always ignored the client-submitted amount for non-Admin/
+               Manager roles; this just shows what it will compute, before
+               submit, instead of the person finding out only afterward. -->
+          <div id="cl-suggested-amount-box" style="display:none;margin-bottom:14px;padding:10px 14px;border-radius:10px;background:var(--accent-subtle);border:1px solid var(--border);font-size:12.5px;color:var(--text2)"></div>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:14px">
             <div style="position:relative">
               <label style="position:absolute;top:-8px;left:10px;background:var(--surface);padding:0 4px;font-size:11px;color:var(--text3);font-weight:600">User Type *</label>
@@ -8752,6 +8844,7 @@ Please log in and change your password immediately.
           <div style="font-size:13px;color:var(--text3)">Manage Direct Selling Agents linked to your organisation</div>
         </div>
         <div style="display:flex;gap:10px" id="dsa-action-btns">
+          <button class="btn btn-ghost" onclick="dsaExportCsv()" id="dsa-export-btn">⬇ Export</button>
           <button class="btn btn-primary" onclick="dsaOpenAdd()" id="dsa-add-btn">＋ Add DSA</button>
         </div>
       </div>

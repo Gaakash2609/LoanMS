@@ -89,11 +89,19 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Icon")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsRead")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<string>("Partner")
                         .HasMaxLength(200)
@@ -102,6 +110,9 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<string>("TargetRole")
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
+
+                    b.Property<int?>("TargetUserId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Type")
                         .IsRequired()
@@ -114,6 +125,8 @@ namespace LoanMS.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("TargetRole", "IsRead", "CreatedAt");
+
+                    b.HasIndex("TargetUserId", "IsRead", "CreatedAt");
 
                     b.ToTable("AppNotifications");
                 });
@@ -365,6 +378,12 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
 
+                    b.Property<bool>("AcceptNtc")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("CompTypesJson")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -379,6 +398,12 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<string>("EmpTypesJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("FoirLimit")
+                        .HasColumnType("integer");
+
                     b.Property<string>("IfscPrefix")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
@@ -389,9 +414,39 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsElite")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsIncred")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Location")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("MaxLoanAmt")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("MaxAge")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaxTenure")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MinAge")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MinCibil")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MinExpMonths")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MinTenure")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("PfRequired")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Remarks")
                         .HasMaxLength(500)
@@ -416,6 +471,114 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasFilter("\"IsDeleted\" = false");
 
                     b.ToTable("Banks");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.AnalyticCompany", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CompType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EmpTypesJson")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AnalyticCompanies");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.AnalyticCategory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("Salary")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AnalyticCategories");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.BankEligibilityLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BankId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CategoryId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("PinCode")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<bool>("Pf")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("CompanyId");
+
+                    b.ToTable("BankEligibilityLines");
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.BureauAccount", b =>
@@ -1424,11 +1587,20 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<int?>("LocationId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("LoginUserId")
+                        .HasColumnType("integer");
+
                     b.Property<decimal?>("MonthlyEmi")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int?>("PartnerId")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SlaBreachNotifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SelectedLenderNames")
+                        .HasColumnType("text");
 
                     b.Property<string>("Purpose")
                         .HasColumnType("text");
@@ -1470,6 +1642,8 @@ namespace LoanMS.Infrastructure.Migrations
                         .IsUnique();
 
                     b.HasIndex("LocationId");
+
+                    b.HasIndex("LoginUserId");
 
                     b.HasIndex("PartnerId");
 
@@ -2435,6 +2609,9 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
 
+                    b.Property<string>("PhotoData")
+                        .HasColumnType("text");
+
                     b.Property<string>("RefreshToken")
                         .HasColumnType("text");
 
@@ -2635,6 +2812,11 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("LoanMS.Domain.Entities.User", "LoginUser")
+                        .WithMany()
+                        .HasForeignKey("LoginUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("LoanMS.Domain.Entities.DsaPartner", "Partner")
                         .WithMany()
                         .HasForeignKey("PartnerId")
@@ -2649,6 +2831,8 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Navigation("Dsa");
 
                     b.Navigation("Location");
+
+                    b.Navigation("LoginUser");
 
                     b.Navigation("Partner");
                 });
@@ -2826,6 +3010,33 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.BankEligibilityLine", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.BankMaster", "Bank")
+                        .WithMany("Lines")
+                        .HasForeignKey("BankId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.AnalyticCompany", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.AnalyticCategory", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Bank");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Category");
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.Ticket", b =>
                 {
                     b.HasOne("LoanMS.Domain.Entities.User", "AssignedTo")
@@ -2891,9 +3102,11 @@ namespace LoanMS.Infrastructure.Migrations
 
             modelBuilder.Entity("LoanMS.Domain.Entities.User", b =>
                 {
-                    b.HasOne("LoanMS.Domain.Entities.Location", null)
+                    b.HasOne("LoanMS.Domain.Entities.Location", "Location")
                         .WithMany("Users")
                         .HasForeignKey("LocationId");
+
+                    b.Navigation("Location");
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.BureauAccount", b =>
@@ -2945,6 +3158,11 @@ namespace LoanMS.Infrastructure.Migrations
             modelBuilder.Entity("LoanMS.Domain.Entities.Team", b =>
                 {
                     b.Navigation("Members");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.BankMaster", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.User", b =>

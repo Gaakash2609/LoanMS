@@ -21,6 +21,9 @@ public class LoanDto
     public CustomerDto Customer { get; set; } = null!;
     public UserDto CreatedBy { get; set; } = null!;
     public UserDto? AssignedTo { get; set; }
+    public UserDto? LoginUser { get; set; }
+    // Same field/source as LoanListDto.RiskGrade — see that DTO's comment.
+    public string? RiskGrade { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<LoanStatusHistoryDto> StatusHistory { get; set; } = new();
 }

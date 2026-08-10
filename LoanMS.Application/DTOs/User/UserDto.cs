@@ -15,4 +15,5 @@ public class UserDto
     public string? LocationName { get; set; }
     public string? SalesTeam { get; set; }
     public string? OpTeam { get; set; }
+    public string? PhotoData { get; set; }
 }

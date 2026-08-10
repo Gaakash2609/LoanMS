@@ -51,6 +51,32 @@ public class PayoutController : BaseController
     }
 
     /// <summary>
+    /// 🔴 CRITICAL — Auto Payout Suggestion (preview). Read-only: computes and
+    /// returns the SAME server-side amount Submit() would compute — reuses
+    /// CalculatePayoutAmountAsync so there is exactly one calculation, not a
+    /// duplicated one for "preview" vs "actual submit". No claim is created.
+    /// </summary>
+    [HttpGet("suggest/{loanId:int}")]
+    public async Task<IActionResult> Suggest(int loanId)
+    {
+        var loan = await _db.Loans.FindAsync(loanId);
+        if (loan == null) return NotFound(ApiResponseDto<object>.Fail("Loan not found."));
+
+        var (amount, rule, ruleConfigured) = await CalculatePayoutAmountAsync(loan);
+        return Ok(ApiResponseDto<object>.Ok(new
+        {
+            loanId = loan.Id,
+            suggestedAmount = amount,
+            ruleConfigured,
+            // Rate/percentage deliberately not returned — same non-disclosure
+            // convention already used in GetAll() above.
+            canOverride = CurrentUserRole is "Admin" or "Manager",
+            minPayout = rule?.MinPayout,
+            maxPayout = rule?.MaxPayout
+        }));
+    }
+
+    /// <summary>
     /// Submit a payout claim.
     /// The claim amount is calculated server-side from the configured PayoutRule
     /// and must fall within the allowed band — it is NOT taken from the request body.
@@ -61,35 +87,11 @@ public class PayoutController : BaseController
         var loan = await _db.Loans.FindAsync(dto.LoanId);
         if (loan == null) return BadRequest(ApiResponseDto<bool>.Fail("Loan not found."));
 
-        // Convert the LoanType enum to the payout rule key format (e.g. Personal → personal_loan)
-        var loanTypeKey = loan.LoanType.ToString().ToLowerInvariant() switch
-        {
-            "personal"  => "personal_loan",
-            "business"  => "business_loan",
-            "home"      => "home_loan",
-            "car"       => "new_car_loan",
-            "education" => "education_loan",
-            _           => loan.LoanType.ToString().ToLowerInvariant()
-        };
-
         // Server-side amount calculation — ignore user-submitted amount entirely
-        var rule = await _db.Set<PayoutRule>()
-            .FirstOrDefaultAsync(r => r.LoanType == loanTypeKey && r.IsActive && !r.IsDeleted);
-
-        decimal serverAmount;
-        if (rule != null)
-        {
-            serverAmount = Math.Round(loan.RequestedAmount * rule.Percentage / 100, 2);
-            if (rule.MinPayout.HasValue) serverAmount = Math.Max(serverAmount, rule.MinPayout.Value);
-            if (rule.MaxPayout.HasValue) serverAmount = Math.Min(serverAmount, rule.MaxPayout.Value);
-        }
-        else
-        {
-            // No rule configured — allow claim only if Admin/Manager
-            if (CurrentUserRole is not ("Admin" or "Manager"))
-                return BadRequest(ApiResponseDto<bool>.Fail("No payout rule configured for this loan type."));
-            serverAmount = dto.ClaimAmount;
-        }
+        var (serverAmount, rule, _) = await CalculatePayoutAmountAsync(loan);
+        if (rule == null && CurrentUserRole is not ("Admin" or "Manager"))
+            return BadRequest(ApiResponseDto<bool>.Fail("No payout rule configured for this loan type."));
+        if (rule == null) serverAmount = dto.ClaimAmount; // Admin/Manager fallback when no rule exists — unchanged from before
 
         // Admin/Manager may adjust within rule bounds
         if (CurrentUserRole is "Admin" or "Manager" && dto.ClaimAmount > 0 && rule != null)
@@ -149,8 +151,17 @@ public class PayoutController : BaseController
         return Ok(ApiResponseDto<object>.Ok(new { claim.Id, claimAmount = serverAmount, claimType }, "Claim submitted."));
     }
 
+    /// <summary>
+    /// Verify/Pay/Reject/Hold a payout claim. Accounts is included here (in
+    /// addition to Admin/Manager) — per the business owner, Accounts gets
+    /// every right within the Payout section except Delete (and there is no
+    /// Delete endpoint on this controller at all, so Accounts effectively
+    /// gets full Payout access: view all claims — see the class-level
+    /// _selfOnlyRoles set above, which deliberately does NOT include
+    /// Accounts — submit claims, and change claim status).
+    /// </summary>
     [HttpPatch("{id:int}/status")]
-    [Authorize(Roles = "Admin,Manager")]
+    [Authorize(Roles = "Admin,Manager,Accounts")]
     public async Task<IActionResult> UpdateStatus(int id, [FromBody] ClaimStatusDto dto)
     {
         var claim = await _db.PayoutClaims.FindAsync(id);
@@ -183,6 +194,38 @@ public class PayoutController : BaseController
             .Select(g => new { Status = g.Key, Total = g.Sum(p => p.ClaimAmount), Count = g.Count() })
             .ToListAsync();
         return Ok(ApiResponseDto<object>.Ok(claims));
+    }
+
+    /// <summary>
+    /// Single source of truth for "what should this loan's payout claim
+    /// amount be" — used by both Submit() (authoritative) and Suggest()
+    /// (read-only preview), so the two can never drift apart. Decimal
+    /// rounding: Math.Round to 2 places, matching the currency's natural
+    /// precision — unchanged from the original inline logic this was
+    /// extracted from.
+    /// </summary>
+    private async Task<(decimal Amount, PayoutRule? Rule, bool RuleConfigured)> CalculatePayoutAmountAsync(Loan loan)
+    {
+        // Convert the LoanType enum to the payout rule key format (e.g. Personal → personal_loan)
+        var loanTypeKey = loan.LoanType.ToString().ToLowerInvariant() switch
+        {
+            "personal"  => "personal_loan",
+            "business"  => "business_loan",
+            "home"      => "home_loan",
+            "car"       => "new_car_loan",
+            "education" => "education_loan",
+            _           => loan.LoanType.ToString().ToLowerInvariant()
+        };
+
+        var rule = await _db.Set<PayoutRule>()
+            .FirstOrDefaultAsync(r => r.LoanType == loanTypeKey && r.IsActive && !r.IsDeleted);
+
+        if (rule == null) return (0, null, false);
+
+        var amount = Math.Round(loan.RequestedAmount * rule.Percentage / 100, 2);
+        if (rule.MinPayout.HasValue) amount = Math.Max(amount, rule.MinPayout.Value);
+        if (rule.MaxPayout.HasValue) amount = Math.Min(amount, rule.MaxPayout.Value);
+        return (amount, rule, true);
     }
 }
 

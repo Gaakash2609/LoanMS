@@ -314,7 +314,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       + '<button class="btn btn-ghost" onclick="ppPmatResetMatrix(\'' + key + '\')">↺ Reset to Defaults</button>'
       + '<span id="pp-pmat-saved-' + key + '" style="display:none;font-size:12px;color:var(--success);font-weight:600">✓ Saved</span>'
       + '</div>'
-      + '<div style="margin-top:10px;font-size:12px;color:var(--text3)">💡 Changes saved to localStorage. Income bands for <strong>' + _e(pInfo ? pInfo.name : key) + '</strong> First Offer calculator.</div>';
+      + '<div style="margin-top:10px;font-size:12px;color:var(--text3)">💡 Saved to the database — Income bands for <strong>' + _e(pInfo ? pInfo.name : key) + '</strong> First Offer calculator apply for every user.</div>';
   };
 
   // ── CRUD helpers ──────────────────────────────────────────────────────

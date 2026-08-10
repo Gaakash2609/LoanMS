@@ -28,9 +28,25 @@ public class UserService : IUserService
         return ApiResponseDto<IEnumerable<UserDto>>.Ok(users.Select(MapToDto));
     }
 
-    public async Task<ApiResponseDto<IEnumerable<UserLookupDto>>> GetLookupAsync()
+    /// <summary>
+    /// Phase 4 (Users Lookup) — backend-enforced role restriction, since the
+    /// frontend cannot be trusted to filter this itself. Assumption (no
+    /// existing rule was documented anywhere in the codebase for this
+    /// endpoint — confirmed as a gap, defaulted per the project owner):
+    ///   Admin/Manager -> full active-user list, unchanged from before.
+    ///   Every other role -> only active Sales-role users (the lookup's
+    ///     original documented use case — e.g. the wizard's Sales Person
+    ///     dropdown — never required seeing Admin/Manager/Dsa/Partner names).
+    /// </summary>
+    private static readonly HashSet<string> _fullLookupRoles =
+        new(StringComparer.OrdinalIgnoreCase) { "Admin", "Manager" };
+
+    public async Task<ApiResponseDto<IEnumerable<UserLookupDto>>> GetLookupAsync(string callerRole)
     {
         var users = await _uow.Users.GetAllActiveUsersAsync();
+        if (!_fullLookupRoles.Contains(callerRole ?? string.Empty))
+            users = users.Where(u => u.Role == LoanMS.Domain.Enums.UserRole.Sales);
+
         return ApiResponseDto<IEnumerable<UserLookupDto>>.Ok(users.Select(u => new UserLookupDto
         {
             Id       = u.Id,
@@ -126,6 +142,29 @@ public class UserService : IUserService
         return ApiResponseDto<bool>.Ok(true, "Password reset.");
     }
 
+    /// <summary>
+    /// Self-service profile update — the caller updates their OWN
+    /// PhoneNumber/PhotoData. No Admin check here (unlike UpdateAsync):
+    /// authorization is that `id` always comes from the caller's own JWT
+    /// (CurrentUserId in the controller), never from the request body, so
+    /// there's no way to target another user's record through this method.
+    /// FullName/Role/IsActive are intentionally untouched — this is not a
+    /// replacement for the Admin-only Update endpoint.
+    /// </summary>
+    public async Task<ApiResponseDto<UserDto>> UpdateProfileAsync(int id, UpdateProfileRequestDto request)
+    {
+        var user = await _uow.Users.GetByIdAsync(id);
+        if (user == null) return ApiResponseDto<UserDto>.Fail("User not found.");
+
+        user.PhoneNumber = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
+        user.PhotoData   = string.IsNullOrWhiteSpace(request.PhotoData) ? null : request.PhotoData;
+        user.UpdatedAt   = DateTime.UtcNow;
+
+        await _uow.Users.UpdateAsync(user);
+        await _uow.SaveChangesAsync();
+        return ApiResponseDto<UserDto>.Ok(MapToDto(user), "Profile updated.");
+    }
+
     private static UserDto MapToDto(User u) => new()
     {
         Id           = u.Id,
@@ -137,6 +176,7 @@ public class UserService : IUserService
         PhoneNumber  = u.PhoneNumber,
         LocationName = u.LocationName,
         SalesTeam    = u.SalesTeam,
-        OpTeam       = u.OpTeam
+        OpTeam       = u.OpTeam,
+        PhotoData    = u.PhotoData
     };
 }

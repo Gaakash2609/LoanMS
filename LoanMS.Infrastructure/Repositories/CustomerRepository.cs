@@ -12,12 +12,39 @@ public class CustomerRepository : GenericRepository<Customer>, ICustomerReposito
 {
     public CustomerRepository(AppDbContext ctx) : base(ctx) { }
 
-    public async Task<Customer?> GetWithLoansAsync(int id) =>
-        await _set.Include(c => c.Loans).FirstOrDefaultAsync(c => c.Id == id);
+    public async Task<Customer?> GetWithLoansAsync(int id, int? currentUserId = null, string? currentUserRole = null)
+    {
+        var query = _set.Include(c => c.Loans).AsQueryable();
+        if (currentUserId.HasValue)
+            query = ApplyCustomerVisibilityScope(query, currentUserId.Value, currentUserRole);
+        return await query.FirstOrDefaultAsync(c => c.Id == id);
+    }
 
-    public async Task<PagedResultDto<CustomerDto>> GetPagedAsync(int page, int pageSize, string? search)
+    /// <summary>
+    /// Phase 4 — role-based Customer visibility. Reuses
+    /// LoanRepository.ApplyVisibilityScope (the same rule set that gates
+    /// Loan reads) instead of a second, separate authorization system.
+    ///   Admin -> all customers (including customers with zero loans).
+    ///   Everyone else -> a customer is visible only if at least one of their
+    ///     loans falls inside the caller's loan visibility scope (EXISTS check
+    ///     via Customer.Loans). A customer with loans split across scopes
+    ///     (e.g. one assigned to this user, one not) is still visible as a
+    ///     whole record, not partially.
+    /// </summary>
+    private IQueryable<Customer> ApplyCustomerVisibilityScope(IQueryable<Customer> query, int currentUserId, string? currentUserRole)
+    {
+        if (string.Equals(currentUserRole, "Admin", StringComparison.OrdinalIgnoreCase))
+            return query;
+
+        var scopedLoans = LoanRepository.ApplyVisibilityScope(_ctx, _ctx.Set<Loan>().AsQueryable(), currentUserId, currentUserRole);
+        return query.Where(c => scopedLoans.Any(l => l.CustomerId == c.Id));
+    }
+
+    public async Task<PagedResultDto<CustomerDto>> GetPagedAsync(int page, int pageSize, string? search, int? currentUserId = null, string? currentUserRole = null)
     {
         var query = _set.AsQueryable();
+        if (currentUserId.HasValue)
+            query = ApplyCustomerVisibilityScope(query, currentUserId.Value, currentUserRole);
 
         if (!string.IsNullOrEmpty(search))
         {

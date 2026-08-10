@@ -11,9 +11,13 @@ namespace LoanMS.API.Controllers;
 // Was frontend-only (localStorage key 'efin_product_cam_v2'). Mirrors
 // EmailTemplatesController: read open to any authenticated user (the offer
 // calculator needs this for every role that can generate a first offer),
-// mutations Admin-only. Matrix shape is product-specific and already fully
-// defined/validated client-side, so it's stored as an opaque JSON blob
+// mutations Admin + ProductTeam. Matrix shape is product-specific and already
+// fully defined/validated client-side, so it's stored as an opaque JSON blob
 // rather than modeled relationally.
+// ProductTeam added per the business owner: Product Team gets full rights
+// over the Wizard Offers config module (this one), same as Lender
+// Configuration and DSA/Partner Management — configuration-module rights,
+// unrelated to Loan-application visibility.
 [Authorize]
 public class ProductOfferMatrixController : BaseController
 {
@@ -32,7 +36,7 @@ public class ProductOfferMatrixController : BaseController
 
     /// <summary>Create or update the matrix for one product key (upsert).</summary>
     [HttpPut("{productKey}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Upsert(string productKey, [FromBody] ProductOfferMatrixDto dto)
     {
         if (string.IsNullOrWhiteSpace(productKey))

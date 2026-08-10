@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "dgSpecHash": "NVk16Ay81ZI=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Application\\LoanMS.Application.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\automapper\\14.0.0\\automapper.14.0.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\bcrypt.net-next\\4.0.3\\bcrypt.net-next.4.0.3.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\fluentvalidation\\11.11.0\\fluentvalidation.11.11.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.bcl.cryptography\\10.0.2\\microsoft.bcl.cryptography.10.0.2.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.extensions.configuration.abstractions\\10.0.0\\microsoft.extensions.configuration.abstractions.10.0.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\10.0.0\\microsoft.extensions.dependencyinjection.abstractions.10.0.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.extensions.logging.abstractions\\10.0.0\\microsoft.extensions.logging.abstractions.10.0.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.extensions.options\\8.0.0\\microsoft.extensions.options.8.0.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.extensions.primitives\\10.0.0\\microsoft.extensions.primitives.10.0.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.identitymodel.abstractions\\8.22.0\\microsoft.identitymodel.abstractions.8.22.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.identitymodel.jsonwebtokens\\8.22.0\\microsoft.identitymodel.jsonwebtokens.8.22.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.identitymodel.logging\\8.22.0\\microsoft.identitymodel.logging.8.22.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.identitymodel.protocols\\8.22.0\\microsoft.identitymodel.protocols.8.22.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.identitymodel.protocols.openidconnect\\8.22.0\\microsoft.identitymodel.protocols.openidconnect.8.22.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\microsoft.identitymodel.tokens\\8.22.0\\microsoft.identitymodel.tokens.8.22.0.nupkg.sha512",
+    "C:\\Users\\Aakash Gupta\\.nuget\\packages\\system.identitymodel.tokens.jwt\\8.22.0\\system.identitymodel.tokens.jwt.8.22.0.nupkg.sha512"
+  ],
+  "logs": []
+}

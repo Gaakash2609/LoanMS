@@ -33,7 +33,9 @@ public class LoanService : ILoanService
         // is leaked between "doesn't exist" and "not yours to see".
         var loan = await _uow.Loans.GetWithDetailsAsync(id, currentUserId, callerRole);
         if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
-        return ApiResponseDto<LoanDto>.Ok(MapToDto(loan, callerRole));
+        var dto = MapToDto(loan, callerRole);
+        dto.RiskGrade = await _uow.Loans.GetLatestRiskGradeAsync(loan.CustomerId);
+        return ApiResponseDto<LoanDto>.Ok(dto);
     }
 
     public async Task<ApiResponseDto<PagedResultDto<LoanListDto>>> GetAllAsync(LoanFilterDto filter, int currentUserId, string currentUserRole)
@@ -52,16 +54,21 @@ public class LoanService : ILoanService
         return ApiResponseDto<PagedResultDto<LoanListDto>>.Ok(result);
     }
 
+    public async Task<List<LoanListDto>> ExportAsync(LoanFilterDto filter, int currentUserId, string currentUserRole)
+        => await _uow.Loans.GetForExportAsync(filter, currentUserId, currentUserRole);
+
     public async Task<ApiResponseDto<LoanDto>> CreateAsync(CreateLoanRequestDto request, int createdByUserId)
     {
         var customer = await _uow.Customers.GetByIdAsync(request.CustomerId);
         if (customer == null) return ApiResponseDto<LoanDto>.Fail("Customer not found.");
 
-        if (request.AssignedToUserId.HasValue)
-        {
-            var assignee = await _uow.Users.GetByIdAsync(request.AssignedToUserId.Value);
-            if (assignee == null) return ApiResponseDto<LoanDto>.Fail("Assigned user not found.");
-        }
+        var assigneeError = await ValidateAssigneeAsync(request.AssignedToUserId);
+        if (assigneeError != null) return ApiResponseDto<LoanDto>.Fail(assigneeError);
+
+        // Login Team assignee — same exists+active validation, reused via
+        // ValidateAssigneeAsync (it's generic: works for any user-id field).
+        var loginUserError = await ValidateAssigneeAsync(request.LoginUserId);
+        if (loginUserError != null) return ApiResponseDto<LoanDto>.Fail(loginUserError);
 
         var loanNumber = await _uow.Loans.GenerateLoanNumberAsync();
         var emi        = CalculateEmi(request.RequestedAmount, request.InterestRate, request.TenureMonths);
@@ -79,7 +86,8 @@ public class LoanService : ILoanService
             Remarks          = request.Remarks,
             CustomerId       = request.CustomerId,
             CreatedByUserId  = createdByUserId,
-            AssignedToUserId = request.AssignedToUserId
+            AssignedToUserId = request.AssignedToUserId,
+            LoginUserId      = request.LoginUserId
         };
 
         await _uow.Loans.AddAsync(loan);
@@ -117,6 +125,15 @@ public class LoanService : ILoanService
         if (loan.Status != LoanStatus.Draft && loan.Status != LoanStatus.Submitted)
             return ApiResponseDto<LoanDto>.Fail("Only Draft or Submitted loans can be updated.");
 
+        // Phase 4 (Loan Assignee Validation) — same check as CreateAsync
+        // (existence + active), reused via ValidateAssigneeAsync so Update
+        // can no longer set AssignedToUserId to a deleted/inactive/nonexistent user.
+        var assigneeError = await ValidateAssigneeAsync(request.AssignedToUserId);
+        if (assigneeError != null) return ApiResponseDto<LoanDto>.Fail(assigneeError);
+
+        var loginUserError = await ValidateAssigneeAsync(request.LoginUserId);
+        if (loginUserError != null) return ApiResponseDto<LoanDto>.Fail(loginUserError);
+
         loan.LoanType         = request.LoanType;
         loan.RequestedAmount  = request.RequestedAmount;
         loan.InterestRate     = request.InterestRate;
@@ -125,6 +142,7 @@ public class LoanService : ILoanService
         loan.Purpose          = request.Purpose;
         loan.Remarks          = request.Remarks;
         loan.AssignedToUserId = request.AssignedToUserId;
+        loan.LoginUserId      = request.LoginUserId;
         loan.UpdatedAt        = DateTime.UtcNow;
 
         await _uow.Loans.UpdateAsync(loan);
@@ -156,6 +174,11 @@ public class LoanService : ILoanService
         var fromStatus = loan.Status;
         loan.Status    = request.NewStatus;
         loan.UpdatedAt = DateTime.UtcNow;
+        // Reset the SLA-breach dedupe flag — this is a new status, so it
+        // gets a fresh SLA clock and is eligible for its own breach
+        // notification later, independent of whether the PREVIOUS status
+        // was already notified.
+        loan.SlaBreachNotifiedAt = null;
 
         if (request.NewStatus == LoanStatus.Approved)
         {
@@ -242,6 +265,24 @@ public class LoanService : ILoanService
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Phase 4 (Loan Assignee Validation) — single source of truth for
+    /// "is this user-id valid to set on a loan", used for both
+    /// AssignedToUserId (Sales Person) and LoginUserId (Login Team
+    /// processor) — same rule (must exist + be active) applies to either.
+    /// Null is a valid input (unassigned). Returns an error message if
+    /// invalid, or null if acceptable (or none was provided).
+    /// </summary>
+    private async Task<string?> ValidateAssigneeAsync(int? assignedToUserId)
+    {
+        if (!assignedToUserId.HasValue) return null;
+
+        var assignee = await _uow.Users.GetByIdAsync(assignedToUserId.Value);
+        if (assignee == null) return "Assigned user not found.";
+        if (!assignee.IsActive) return "Assigned user is inactive.";
+        return null;
+    }
+
     private static decimal CalculateEmi(decimal principal, decimal ratePercent, int months)
     {
         if (ratePercent == 0) return Math.Round(principal / months, 2);
@@ -307,6 +348,13 @@ public class LoanService : ILoanService
                 FullName = l.AssignedTo.FullName,
                 Email    = l.AssignedTo.Email,
                 Role     = l.AssignedTo.Role.ToString()
+            },
+            LoginUser = l.LoginUser == null ? null : new UserDto
+            {
+                Id       = l.LoginUser.Id,
+                FullName = l.LoginUser.FullName,
+                Email    = l.LoginUser.Email,
+                Role     = l.LoginUser.Role.ToString()
             },
             StatusHistory = l.StatusHistory?.Select(h => new LoanStatusHistoryDto
             {

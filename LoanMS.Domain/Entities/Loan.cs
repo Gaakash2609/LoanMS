@@ -32,6 +32,35 @@ public class Loan : BaseEntity
     public int CreatedByUserId { get; set; }
     public int? AssignedToUserId { get; set; }
 
+    // ── Login Team / Operation Manager visibility (added per business owner
+    // request) — distinct from AssignedToUserId, which is dedicated to the
+    // Sales Person (see Wizard Sales Person Assignment). LoginUserId is who
+    // is actually processing this loan in the Login/Process stage, letting
+    // an individual Login Team member see only their own queue, and an
+    // Operation Manager supervise their whole team's queue, instead of the
+    // Location-based proxy used before this field existed.
+    public int? LoginUserId { get; set; }
+
+    // ── SLA breach notification dedupe (added) ──────────────────────────────
+    // Set when a background job (SlaAndTaskAutomationService) creates an
+    // overdue-SLA notification for this loan's CURRENT status (SLA clock =
+    // time since the last LoanStatusHistory entry, or CreatedAt if none —
+    // same rule the existing SLA badge already uses client-side). Reset to
+    // null every time the loan's Status actually changes (see
+    // LoanService.UpdateStatusAsync), so a loan that breaches again in its
+    // NEXT status is eligible for a fresh notification, but the same
+    // breach episode is never notified twice.
+    public DateTime? SlaBreachNotifiedAt { get; set; }
+
+    // ── Step 9 Loan Analytics — selected lender round-trip (added) ─────────
+    // Dedicated field so Step 9's bank-eligibility selection round-trips
+    // cleanly through GetDraft (resume) without needing to parse it back out
+    // of the combined Remarks text (Remarks already embeds a "Lender: ..."
+    // fragment for audit-trail/human-readable purposes — kept as-is,
+    // unrelated to this field). Comma-separated bank names, current
+    // selection only (overwritten on each save, not a history log).
+    public string? SelectedLenderNames { get; set; }
+
     // ── DSA / Partner / Location linkage (Phase 1 — data model only; no
     // wizard mapping, visibility, authorization, or assignment logic yet) ────
     public int? DsaId { get; set; }
@@ -58,6 +87,7 @@ public class Loan : BaseEntity
     public Customer Customer { get; set; } = null!;
     public User CreatedBy { get; set; } = null!;
     public User? AssignedTo { get; set; }
+    public User? LoginUser { get; set; }
     public DsaPartner? Dsa { get; set; }
     public DsaPartner? Partner { get; set; }
     public Location? Location { get; set; }

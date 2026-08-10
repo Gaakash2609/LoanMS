@@ -12,4 +12,8 @@ public class UpdateLoanRequestDto
     public string? Purpose { get; set; }
     public string? Remarks { get; set; }
     public int? AssignedToUserId { get; set; }
+    // Login Team processing assignee — distinct from AssignedToUserId (Sales
+    // Person). See LoanRepository.ApplyVisibilityScope (LoginTeam/
+    // OperationManager) for how this drives visibility.
+    public int? LoginUserId { get; set; }
 }

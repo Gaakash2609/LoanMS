@@ -185,13 +185,41 @@ public class WizardController : BaseController
             customer = await _db.Customers.FirstOrDefaultAsync(c =>
                 c.Phone == dto.Mobile.Trim() && !c.IsDeleted);
 
+        // BUGFIX (wizard bug sweep): Customer.Email has a unique index (same
+        // as PanNumber), but this lookup never checked it before falling
+        // through to "create new" — so a dto.Email that happens to match an
+        // EXISTING customer's email (PAN not yet entered, mobile blank or a
+        // typo) would try to INSERT a duplicate, hit the unique constraint,
+        // and surface as the same generic 500 "Could not save draft."
+        if (customer == null && !string.IsNullOrWhiteSpace(dto.Email))
+            customer = await _db.Customers.FirstOrDefaultAsync(c =>
+                c.Email == dto.Email.ToLower().Trim() && !c.IsDeleted);
+
         if (customer == null)
         {
+            // BUGFIX (wizard bug sweep): when Mobile is still blank (a very
+            // early autosave — e.g. FullName typed but Mobile not yet valid,
+            // now reachable even on a blocked forward-nav since the
+            // autosave-on-validation-failure fix above), this used to fall
+            // back to the literal "draft@efin.auto" for EVERY such customer.
+            // Customer.Email has a unique index, so the second concurrent
+            // draft anywhere in the whole system with no Mobile yet would
+            // hit a DbUpdateException here — caught by SaveDraft's try/catch
+            // below, surfaced as a 500 "Could not save draft." (indistinguishable
+            // from the reported bug). A per-attempt GUID keeps every such
+            // fallback address unique; once a real Mobile/Email is entered,
+            // a later autosave/submit already treats this as an update to
+            // the existing loan/customer (matched via LoanId — see the
+            // existingLoan lookup above), so this placeholder is short-lived.
+            var fallbackEmail = string.IsNullOrWhiteSpace(dto.Mobile)
+                ? $"draft-{Guid.NewGuid():N}@efin.auto"
+                : $"{dto.Mobile.Trim()}@efin.auto";
+
             customer = new Customer
             {
                 FullName       = (dto.FullName ?? string.Empty).Trim(),
                 Email          = string.IsNullOrWhiteSpace(dto.Email)
-                                 ? $"{(dto.Mobile ?? "draft").Trim()}@efin.auto"
+                                 ? fallbackEmail
                                  : dto.Email.ToLower().Trim(),
                 Phone          = (dto.Mobile ?? string.Empty).Trim(),
                 PanNumber      = dto.Pan?.ToUpper().Trim(),
@@ -233,6 +261,46 @@ public class WizardController : BaseController
         return customer;
     }
 
+    /// <summary>
+    /// Phase 2 (Wizard Sales Person Assignment) — resolves dto.SalesPerson
+    /// (the sales user's FullName, exactly as sent by the wizard's Sales
+    /// Person dropdown — see wSalesPersonChange/twUsers in efin-app.js) to an
+    /// active User, reusing the existing User table/lookup — no new
+    /// indirection or matching system. Shared error/resolution logic for both
+    /// Submit() loan-creation branches (new loan and existing-draft resume).
+    ///   missing SalesPerson -> reject
+    ///   no matching User    -> reject
+    ///   matching User inactive -> reject
+    ///   valid active User   -> resolved, ready for Loan.AssignedToUserId
+    /// </summary>
+    private async Task<(List<string> Errors, User? SalesPersonUser)> ResolveSalesPersonAsync(WizardSubmitDto dto)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(dto.SalesPerson))
+        {
+            errors.Add("Sales Person is required.");
+            return (errors, null);
+        }
+
+        var salesPersonUser = await _db.Users.FirstOrDefaultAsync(u =>
+            u.FullName == dto.SalesPerson.Trim() && !u.IsDeleted);
+
+        if (salesPersonUser == null)
+        {
+            errors.Add("Selected Sales Person was not found.");
+            return (errors, null);
+        }
+
+        if (!salesPersonUser.IsActive)
+        {
+            errors.Add("Selected Sales Person is inactive.");
+            return (errors, null);
+        }
+
+        return (errors, salesPersonUser);
+    }
+
     /// <summary>Submit full loan application from wizard.</summary>
     [HttpPost("submit")]
     public async Task<IActionResult> Submit([FromBody] WizardSubmitDto dto)
@@ -245,6 +313,12 @@ public class WizardController : BaseController
         if (string.IsNullOrWhiteSpace(dto.Mobile))
             errors.Add("Mobile number is required.");
         errors.AddRange(await ValidateMappingAsync(dto));
+
+        // Phase 2 — resolved once, up front, so both the new-loan and
+        // draft-resume branches below use the exact same validated User.
+        var (salesPersonErrors, salesPersonUser) = await ResolveSalesPersonAsync(dto);
+        errors.AddRange(salesPersonErrors);
+
         if (errors.Count > 0)
             return BadRequest(ApiResponseDto<WizardSubmitResponseDto>.Fail(errors));
 
@@ -325,8 +399,13 @@ public class WizardController : BaseController
                 loan.Purpose         = dto.Purpose;
                 loan.Remarks         = $"Source: {dto.Source ?? "Direct"} | Channel: {dto.Channel ?? "walk-in"}"
                                       + (dto.LenderName != null ? $" | Lender: {dto.LenderName}" : "");
+                loan.SelectedLenderNames = dto.LenderName;
                 loan.Status          = LoanStatus.Submitted;
                 loan.UpdatedAt       = DateTime.UtcNow;
+                // Phase 2 — Wizard Sales Person Assignment: resolved above
+                // (never null past the error-check), so a draft resume can
+                // reassign the loan the same way a fresh submission does.
+                loan.AssignedToUserId = salesPersonUser!.Id;
                 ApplyMapping(loan, dto);
             }
             else
@@ -346,10 +425,14 @@ public class WizardController : BaseController
                     // Internal routing stored in Remarks — never returned to external callers
                     Remarks         = $"Source: {dto.Source ?? "Direct"} | Channel: {dto.Channel ?? "walk-in"}"
                                     + (dto.LenderName != null ? $" | Lender: {dto.LenderName}" : ""),
+                    SelectedLenderNames = dto.LenderName,
                     CustomerId      = customer.Id,
                     // CreatedByUserId always comes from the authenticated JWT identity —
                     // never from the request body — so the request cannot spoof authorship.
                     CreatedByUserId = CurrentUserId,
+                    // Phase 2 — Wizard Sales Person Assignment: resolved above
+                    // (never null past the error-check).
+                    AssignedToUserId = salesPersonUser!.Id,
                     DsaId           = dto.DsaId,
                     PartnerId       = dto.PartnerId,
                     LocationId      = dto.LocationId,
@@ -571,6 +654,11 @@ public class WizardController : BaseController
             PartnerId   = loan.PartnerId,
             LocationId  = loan.LocationId,
             EfinId      = loan.LoanNumber,
+            // Round-trips Step 9's previously-selected bank(s) back to the
+            // wizard on resume — see Loan.SelectedLenderNames's own doc
+            // comment for why this is a dedicated field rather than parsed
+            // back out of Remarks.
+            LenderName  = loan.SelectedLenderNames,
         };
 
         return Ok(ApiResponseDto<WizardSubmitDto>.Ok(dto));
@@ -600,12 +688,18 @@ public class WizardController : BaseController
             .OrderByDescending(l => l.UpdatedAt ?? l.CreatedAt)
             .Select(l => new
             {
-                loanId    = l.Id,
-                step      = l.WizardStep,
-                loanType  = l.LoanType,
-                fullName  = l.Customer.FullName,
-                createdAt = l.CreatedAt,
-                updatedAt = l.UpdatedAt ?? l.CreatedAt
+                loanId             = l.Id,
+                step               = l.WizardStep,
+                loanType           = l.LoanType,
+                fullName           = l.Customer.FullName,
+                createdAt          = l.CreatedAt,
+                updatedAt          = l.UpdatedAt ?? l.CreatedAt,
+                // Real owner of the draft, independent of who is *viewing*
+                // this list (Admin/Manager see every draft — see isInternal
+                // above, untouched). Frontend needs this to tell "my draft"
+                // apart from "someone else's draft I can merely see".
+                createdByUserId    = l.CreatedByUserId,
+                createdByUserEmail = l.CreatedBy.Email
             })
             .ToListAsync();
 
@@ -614,14 +708,25 @@ public class WizardController : BaseController
         // no PII beyond what a Draft/Applications-list entry already implies.
         var result = drafts.Select(d => new
         {
-            loanId    = d.loanId,
-            step      = d.step,
-            loanType  = _loanTypeMap.FirstOrDefault(kv => kv.Value == d.loanType).Key ?? "personal_loan",
-            label     = string.IsNullOrWhiteSpace(d.fullName)
+            loanId             = d.loanId,
+            step               = d.step,
+            loanType           = _loanTypeMap.FirstOrDefault(kv => kv.Value == d.loanType).Key ?? "personal_loan",
+            label              = string.IsNullOrWhiteSpace(d.fullName)
                         ? "Untitled application"
                         : d.fullName,
-            createdAt = d.createdAt,
-            updatedAt = d.updatedAt
+            createdAt          = d.createdAt,
+            updatedAt          = d.updatedAt,
+            createdByUserId    = d.createdByUserId,
+            createdByUserEmail = d.createdByUserEmail,
+            // 🟡 Stale Draft Visibility (item #13) — days since last touched.
+            // No draft-staleness threshold is defined anywhere else in this
+            // project; 7 days is a reasonable default matching common
+            // "abandoned form" conventions, not a confirmed business rule —
+            // REQUIRES BUSINESS CONFIRMATION if a different value is wanted.
+            // Purely informational: nothing here deletes or changes any
+            // draft's lifecycle.
+            daysSinceUpdate    = Math.Round((DateTime.UtcNow - (d.updatedAt)).TotalDays, 1),
+            isStale            = (DateTime.UtcNow - (d.updatedAt)).TotalDays > 7
         });
 
         return Ok(ApiResponseDto<object>.Ok(result));
@@ -680,6 +785,20 @@ public class WizardController : BaseController
                 loan.InterestRate    = dto.LoanRate > 0 ? dto.LoanRate : 12;
                 loan.TenureMonths    = dto.Tenure > 0 ? dto.Tenure : 24;
                 loan.Purpose         = dto.Purpose;
+                // BUGFIX (Wizard forensic audit): SaveDraft never wrote
+                // Remarks at all, unlike Submit() (see below) — so Step 9's
+                // bank-eligibility selection (sent here as dto.LenderName,
+                // same field Submit already uses) had nowhere to land during
+                // autosave. A user who selected a bank then navigated away
+                // instead of submitting would have that selection vanish
+                // with no trace in the database. Same Remarks format Submit()
+                // already uses, so a later real Submit's own Remarks write
+                // simply overwrites this with the final, authoritative value.
+                if (dto.LenderName != null)
+                {
+                    loan.Remarks = $"Source: {dto.Source ?? "Direct"} | Channel: {dto.Channel ?? "walk-in"} | Lender: {dto.LenderName}";
+                    loan.SelectedLenderNames = dto.LenderName;
+                }
                 loan.UpdatedAt       = DateTime.UtcNow;
                 if (dto.Step.HasValue) loan.WizardStep = dto.Step;
                 ApplyMapping(loan, dto);
@@ -704,6 +823,11 @@ public class WizardController : BaseController
                     InterestRate    = dto.LoanRate > 0 ? dto.LoanRate : 12,
                     TenureMonths    = dto.Tenure > 0 ? dto.Tenure : 24,
                     Purpose         = dto.Purpose,
+                    // Same reasoning as the existingLoan branch above.
+                    Remarks         = dto.LenderName != null
+                                    ? $"Source: {dto.Source ?? "Direct"} | Channel: {dto.Channel ?? "walk-in"} | Lender: {dto.LenderName}"
+                                    : null,
+                    SelectedLenderNames = dto.LenderName,
                     WizardStep      = dto.Step,
                     CustomerId      = customer.Id,
                     // CreatedByUserId always comes from the authenticated JWT identity —

@@ -482,9 +482,9 @@ function Step1({ data, onChange, errors, touch }: {
   )
 }
 
-function Step2({ data, onChange, errors, touch }: {
+function Step2({ data, onChange, errors, touch, touched }: {
   data: WizardData; onChange: (f: Partial<WizardData>) => void; errors: Record<string, string>
-  touch: (field: string) => void
+  touch: (field: string) => void; touched: Record<string, boolean>
 }) {
   const [panImages, setPanImages] = useState<File[]>([])
   const [aadhaarImages, setAadhaarImages] = useState<File[]>([])
@@ -536,13 +536,20 @@ Extract exactly what is on the card. Be accurate.`,
 
         // Parse extracted text
         const panData = extractPanData(response.data.text || '')
+        // 🟠 KYC Auto-fill improvement (item #6): only fill a field the user
+        // hasn't already deliberately edited themselves (Step2's `touched`
+        // prop — set by each field's own onBlur, same mechanism every other
+        // field in this wizard already uses for validation timing). kycFirstName/
+        // kycLastName/kycFather ("what KYC extracted", shown for reference) are
+        // always updated; firstName/lastName/father (the actual submitted
+        // values) are only overwritten if not already touched.
         onChange({
           kycFirstName: panData.firstName,
-          firstName: panData.firstName,
           kycLastName: panData.lastName,
-          lastName: panData.lastName,
           kycFather: panData.fatherName,
-          father: panData.fatherName,
+          ...(!touched.firstName ? { firstName: panData.firstName } : {}),
+          ...(!touched.lastName ? { lastName: panData.lastName } : {}),
+          ...(!touched.father ? { father: panData.fatherName } : {}),
         })
 
         setExtractionStatus(s => ({
@@ -591,19 +598,20 @@ Extract exactly what is on the card. Be accurate.`,
 
         // Parse extracted text
         const aadhaarData = extractAadhaarData(response.data.text || '')
+        // Same touched-field precedence as extractPan above.
         onChange({
           kycAadhar: aadhaarData.aadhaarNumber,
-          aadhar: aadhaarData.aadhaarNumber,
           kycDob: aadhaarData.dateOfBirth,
-          dob: aadhaarData.dateOfBirth,
           kycGender: aadhaarData.gender,
-          gender: aadhaarData.gender,
           kycCity: aadhaarData.city,
-          city: aadhaarData.city,
           kycState: aadhaarData.state,
-          state: aadhaarData.state,
           kycPin: aadhaarData.pinCode,
-          zip: aadhaarData.pinCode,
+          ...(!touched.aadhar ? { aadhar: aadhaarData.aadhaarNumber } : {}),
+          ...(!touched.dob ? { dob: aadhaarData.dateOfBirth } : {}),
+          ...(!touched.gender ? { gender: aadhaarData.gender } : {}),
+          ...(!touched.city ? { city: aadhaarData.city } : {}),
+          ...(!touched.state ? { state: aadhaarData.state } : {}),
+          ...(!touched.zip ? { zip: aadhaarData.pinCode } : {}),
         })
 
         setExtractionStatus(s => ({
@@ -1755,7 +1763,7 @@ export default function NewApplicationPage() {
         </h2>
 
         {step === 1 && <Step1 data={data} onChange={update} errors={stepErrors} touch={touch} />}
-        {step === 2 && <Step2 data={data} onChange={update} errors={stepErrors} touch={touch} />}
+        {step === 2 && <Step2 data={data} onChange={update} errors={stepErrors} touch={touch} touched={touched} />}
         {step === 3 && <Step3 data={data} onChange={update} errors={stepErrors} touch={touch} />}
         {step === 4 && <Step4 data={data} onChange={update} errors={stepErrors} touch={touch} />}
         {step === 5 && <Step5 data={data} onChange={update} errors={stepErrors} touch={touch} />}

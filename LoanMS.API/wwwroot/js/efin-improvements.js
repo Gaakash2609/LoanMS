@@ -83,6 +83,9 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
      1. LOCALSTORAGE PERSISTENCE LAYER
   ─────────────────────────────────────────────────────────────────── */
 
+  // STORE_KEYS is kept (not removed) purely so window.efinClearStorage() below
+  // can still find and wipe any of these keys left over in a user's browser
+  // from a pre-cleanup session. Nothing in this file writes to them anymore.
   var STORE_KEYS = {
     apps:         'efin_v22_applications',
     tasks:        'efin_v22_tasks',
@@ -97,41 +100,23 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   };
 
   function persistSave() {
-    try {
-      if (window.APPLICATIONS)  localStorage.setItem(STORE_KEYS.apps,         JSON.stringify(APPLICATIONS));
-      if (window.TASK_STORE)    localStorage.setItem(STORE_KEYS.tasks,        JSON.stringify(TASK_STORE));
-      if (window.twUsers)       localStorage.setItem(STORE_KEYS.users,        JSON.stringify(twUsers));
-      if (window.twLocations)   localStorage.setItem(STORE_KEYS.locations,    JSON.stringify(twLocations));
-      if (window.twSalesTeams)  localStorage.setItem(STORE_KEYS.salesTeams,   JSON.stringify(twSalesTeams));
-      if (window.twLoginTeams)  localStorage.setItem(STORE_KEYS.loginTeams,   JSON.stringify(twLoginTeams));
-      if (window.PAYOUT_CLAIMS) localStorage.setItem(STORE_KEYS.payoutClaims, JSON.stringify(PAYOUT_CLAIMS));
-      if (window.twPartnerList) localStorage.setItem(STORE_KEYS.partners,     JSON.stringify(twPartnerList));
-      if (window.twDSAList)     localStorage.setItem(STORE_KEYS.dsaList,      JSON.stringify(twDSAList));
-      // Phase 3 audit fix: tickets (twTickets / TK_STORE) are intentionally
-      // NOT written to localStorage anymore — this module's copy of
-      // persistSave() had been left out of sync with the Phase 4B fix
-      // already made to the *other* persistSave() in efin-app.js (both
-      // files declare their own local persistSave(), same STORE_KEYS
-      // values, independently wired to their own event patches). Until
-      // now this one kept re-writing 'efin_v22_tickets' on every
-      // efinMarkTaskDone/changeStatus-style call, undoing the exact
-      // protection Phase 4B added: /api/tickets (via _syncTickets() in
-      // api-bridge.js) is the sole source of truth, and a stale local
-      // ticket snapshot must never be able to shadow or resurrect a
-      // server-deleted ticket. See the matching note in efin-app.js's
-      // persistSave().
-    } catch (e) {
-      // Storage quota exceeded — attempt to save only critical data
-      try {
-        if (window.APPLICATIONS) localStorage.setItem(STORE_KEYS.apps, JSON.stringify(APPLICATIONS));
-        if (window.PAYOUT_CLAIMS) localStorage.setItem(STORE_KEYS.payoutClaims, JSON.stringify(PAYOUT_CLAIMS));
-      } catch(e2) {
-        if (typeof showToast === 'function') {
-          showToast('⚠ Storage quota full. Export your data and clear saved data in Settings.', 'warn');
-        }
-      }
-    }
-    // Warn when approaching 80% of 5MB limit
+    // Write-side cleanup: this module's persistSave() no longer writes
+    // APPLICATIONS / TASK_STORE / twUsers / twLocations / twSalesTeams /
+    // twLoginTeams / PAYOUT_CLAIMS / twPartnerList / twDSAList to
+    // localStorage. persistLoad() below already never reads any of this
+    // data back (verified — nothing in this file restores from
+    // STORE_KEYS.apps/tasks/users/locations/salesTeams/loginTeams/
+    // payoutClaims/partners/dsaList), so these writes were pure dead
+    // weight: burning storage quota and doing JSON.stringify work on every
+    // task-done/status-change/edit-save for data nobody ever reads back.
+    // /api/* via the sync functions in api-bridge.js is the sole source of
+    // truth, same reasoning as the tickets fix already applied here.
+    // Kept as a callable no-op since persistSave() is still invoked
+    // elsewhere in this file after task/status/edit actions.
+
+    // Warn when approaching 80% of 5MB limit — kept: this is a generic
+    // total-localStorage-usage check, not specific to the writes removed
+    // above, and still useful if something else in the app fills storage.
     try {
       var _used = JSON.stringify(localStorage).length;
       if (_used > 4 * 1024 * 1024) { // 4MB

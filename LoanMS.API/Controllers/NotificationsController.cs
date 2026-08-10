@@ -115,19 +115,29 @@ public class NotificationsController : BaseController
     public async Task<IActionResult> GetNotifications([FromQuery] bool unreadOnly = false)
     {
         var role = CurrentUserRole;
-        var query = _db.AppNotifications
-            .Where(n => n.TargetRole == null || n.TargetRole == role);
+        var userId = CurrentUserId;
+        // Visibility: a pure broadcast (TargetRole AND TargetUserId both
+        // null) is visible to everyone; otherwise a role match OR a
+        // specific-user match makes it visible — NOT "TargetRole == null"
+        // alone, which would incorrectly broadcast a user-targeted (e.g.
+        // SLA-breach) notification to every role just because its
+        // TargetRole happens to be unset.
+        var query = _db.AppNotifications.Where(n =>
+            (n.TargetRole == null && n.TargetUserId == null) ||
+            n.TargetRole == role ||
+            n.TargetUserId == userId);
         if (unreadOnly) query = query.Where(n => !n.IsRead);
 
         var items = await query
             .OrderByDescending(n => n.CreatedAt)
             .Take(50)
-            .Select(n => new { n.Id, n.Type, n.ClaimId, n.Partner, n.Amount, n.IsRead, n.CreatedAt })
+            .Select(n => new { n.Id, n.Type, n.Icon, n.Message, n.ClaimId, n.Partner, n.Amount, n.TargetUserId, n.IsRead, n.CreatedAt })
             .ToListAsync();
         return Ok(ApiResponseDto<object>.Ok(items));
     }
 
-    /// <summary>Create a notification (called internally by app events, e.g. payout claim submission).</summary>
+    /// <summary>Create a notification (called internally by app events, e.g. payout claim submission,
+    /// application created/approved/rejected/disbursed/stage-changed).</summary>
     [HttpPost]
     public async Task<IActionResult> CreateNotification([FromBody] AppNotificationDto dto)
     {
@@ -137,10 +147,13 @@ public class NotificationsController : BaseController
         var notification = new AppNotification
         {
             Type = dto.Type.Trim(),
+            Icon = dto.Icon?.Trim(),
+            Message = dto.Message?.Trim(),
             ClaimId = dto.ClaimId,
             Partner = dto.Partner?.Trim(),
             Amount = dto.Amount,
             TargetRole = dto.TargetRole?.Trim(),
+            TargetUserId = dto.TargetUserId,
             CreatedAt = DateTime.UtcNow
         };
         _db.AppNotifications.Add(notification);
@@ -154,6 +167,21 @@ public class NotificationsController : BaseController
     {
         var n = await _db.AppNotifications.FindAsync(id);
         if (n == null) return NotFound(ApiResponseDto<bool>.Fail("Notification not found."));
+        // Ownership check (productivity/reliability audit item #7) — same
+        // visibility rule already used by GetNotifications: a pure
+        // broadcast (both null) is fair game for anyone, a role-targeted
+        // one requires a role match, a user-targeted one requires being
+        // that exact user. Prevents one user's client from being able to
+        // silently flip another user's/role's notification to read by
+        // guessing an id — low real-world impact (no data exposed either
+        // way) but closes the gap cleanly since the same rule already
+        // exists elsewhere in this file.
+        var isVisibleToCaller =
+            (n.TargetRole == null && n.TargetUserId == null) ||
+            n.TargetRole == CurrentUserRole ||
+            n.TargetUserId == CurrentUserId;
+        if (!isVisibleToCaller)
+            return NotFound(ApiResponseDto<bool>.Fail("Notification not found."));
         n.IsRead = true;
         n.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
@@ -164,10 +192,13 @@ public class NotificationsController : BaseController
 public class AppNotificationDto
 {
     public string Type { get; set; } = string.Empty;
+    public string? Icon { get; set; }
+    public string? Message { get; set; }
     public string? ClaimId { get; set; }
     public string? Partner { get; set; }
     public decimal? Amount { get; set; }
     public string? TargetRole { get; set; }
+    public int? TargetUserId { get; set; }
 }
 
 public class WebhookPayloadDto

@@ -97,6 +97,65 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       try { localStorage.setItem('efin_user_profiles', JSON.stringify(USER_PROFILES)); } catch(e) {}
     }
 
+    // ── Server sync: PhoneNumber + PhotoData are now DB-backed ─────────────
+    // localStorage ('efin_user_profiles') remains the instant-render cache —
+    // GET/PUT /api/users/profile (via window.apiReq, from api-bridge.js) is
+    // the actual source of truth for these two fields, same pattern already
+    // used for PRODUCT_CAM_MATRICES in product-offer-matrix.js. Previously
+    // this whole file was localStorage-only, so a photo/phone set on one
+    // device/browser never showed up on another, and was lost entirely if
+    // browser data was cleared. Every OTHER profile field (address/bank/
+    // DOB/employeeId/etc.) is intentionally left as localStorage-only for
+    // now — out of scope for this fix.
+
+    // Trigger point lives in api-bridge.js now, in the standard sync-list
+    // pattern (alongside _syncUsers, _syncTeams, etc.) — called once per
+    // login/boot instead of polling window.currentUser.email every 2s.
+
+    function _pullProfileFromServer() {
+      if (typeof window.apiReq !== 'function') return;
+      var email = (window.currentUser && window.currentUser.email) || '';
+      if (!email) return;
+      window.apiReq('GET', '/users/profile').then(function(res) {
+        if (!res || !res.success || !res.data) return;
+        if (!USER_PROFILES[email]) USER_PROFILES[email] = {};
+        // Null-safe: existing users pre-dating this fix will have
+        // PhoneNumber/PhotoData = null server-side. That's expected — don't
+        // let a null wipe out anything else already loaded locally, just
+        // reflect the server's current value for these two fields exactly
+        // (including clearing to '' / null if that's genuinely what the
+        // server has, e.g. after removing a photo on another device).
+        USER_PROFILES[email].mobile    = res.data.phoneNumber || '';
+        USER_PROFILES[email].photoData = res.data.photoData || null;
+        saveProfilesToStorage();
+        try { if (typeof renderProfilePage === 'function' && window.currentUser) renderProfilePage(); } catch (e) {}
+      }).catch(function(e) {
+        console.warn('[UserProfile] could not reach server for profile — using local cache:', e);
+      });
+    }
+
+    function _pushProfileToServer() {
+      if (typeof window.apiReq !== 'function') return;
+      var email = currentUser.email
+        || USER_ACCOUNTS.find(u => u.name === currentUser.name)?.email
+        || '';
+      var p = USER_PROFILES[email];
+      if (!email || !p) return;
+      window.apiReq('PUT', '/users/profile', {
+        phoneNumber: p.mobile || null,
+        photoData: p.photoData || null
+      }).then(function(res) {
+        if (!res || !res.success) {
+          console.warn('[UserProfile] profile sync to server failed — change saved locally only');
+          if (typeof showToast === 'function') showToast('⚠ Saved locally — could not sync profile to server', 'warn');
+        }
+      }).catch(function(e) {
+        console.warn('[UserProfile] profile sync to server failed — change saved locally only:', e);
+        if (typeof showToast === 'function') showToast('⚠ Saved locally — could not sync profile to server', 'warn');
+      });
+    }
+
+
     // All logged-in users can edit their own profile; admins/accounts/ops can edit any profile
     function profileCanEdit() {
       return !!currentUser && !!currentUser.name;
@@ -370,6 +429,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
       closeModal('modal-profile-edit');
       saveProfilesToStorage();
+      if (section === 'primary') _pushProfileToServer(); // mobile is DB-backed
       renderProfilePage();
       showToast(`${section.charAt(0).toUpperCase()+section.slice(1)} details saved`, 'success');
     }
@@ -384,6 +444,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         if (!USER_PROFILES[email]) USER_PROFILES[email] = {};
         USER_PROFILES[email].photoData = e.target.result;
         saveProfilesToStorage();
+        _pushProfileToServer(); // photoData is DB-backed
         renderProfilePage();
         showToast('Profile photo updated', 'success');
       };
@@ -475,6 +536,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     })();
 
     window.saveProfilesToStorage = saveProfilesToStorage;
+    window._pullProfileFromServer = _pullProfileFromServer;
+    window._pushProfileToServer = _pushProfileToServer;
     window.profileCanEdit = profileCanEdit;
     window.getProfileData = getProfileData;
     window.renderProfilePage = renderProfilePage;

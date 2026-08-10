@@ -100,6 +100,136 @@ public class LoanServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_WithInvalidAssignee_ReturnsFail()
+    {
+        var customer = new Customer { Id = 1, FullName = "Test Customer", Email = "t@t.com", Phone = "9999999999" };
+        _custRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(customer);
+        _userRepoMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((User?)null);
+
+        var svc    = CreateService();
+        var result = await svc.CreateAsync(
+            new CreateLoanRequestDto
+            {
+                CustomerId = 1, RequestedAmount = 100000, InterestRate = 10,
+                TenureMonths = 12, LoanType = LoanType.Personal, AssignedToUserId = 999
+            }, 1);
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("Assigned user not found"));
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithInactiveAssignee_ReturnsFail()
+    {
+        var customer = new Customer { Id = 1, FullName = "Test Customer", Email = "t@t.com", Phone = "9999999999" };
+        var inactiveUser = new User { Id = 5, FullName = "Inactive", Email = "i@i.com", IsActive = false };
+        _custRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(customer);
+        _userRepoMock.Setup(r => r.GetByIdAsync(5)).ReturnsAsync(inactiveUser);
+
+        var svc    = CreateService();
+        var result = await svc.CreateAsync(
+            new CreateLoanRequestDto
+            {
+                CustomerId = 1, RequestedAmount = 100000, InterestRate = 10,
+                TenureMonths = 12, LoanType = LoanType.Personal, AssignedToUserId = 5
+            }, 1);
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("inactive"));
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithValidActiveAssignee_ReturnsSuccess()
+    {
+        var customer     = new Customer { Id = 1, FullName = "Test Customer", Email = "t@t.com", Phone = "9999999999" };
+        var activeUser   = new User { Id = 7, FullName = "Active", Email = "a@a.com", IsActive = true };
+        var createdLoan  = CreateTestLoan();
+
+        _custRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(customer);
+        _userRepoMock.Setup(r => r.GetByIdAsync(7)).ReturnsAsync(activeUser);
+        _loanRepoMock.Setup(r => r.GenerateLoanNumberAsync()).ReturnsAsync("LMS-2024-0001");
+        _loanRepoMock.Setup(r => r.AddAsync(It.IsAny<Loan>())).ReturnsAsync((Loan l) => l);
+        _histRepoMock.Setup(r => r.AddAsync(It.IsAny<LoanStatusHistory>())).ReturnsAsync(new LoanStatusHistory());
+        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(It.IsAny<int>())).ReturnsAsync(createdLoan);
+
+        var svc    = CreateService();
+        var result = await svc.CreateAsync(
+            new CreateLoanRequestDto
+            {
+                CustomerId = 1, RequestedAmount = 100000, InterestRate = 10,
+                TenureMonths = 12, LoanType = LoanType.Personal, AssignedToUserId = 7
+            }, 1);
+
+        result.Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WithInvalidAssignee_ReturnsFail()
+    {
+        var loan = CreateTestLoan();
+        loan.Status = LoanStatus.Draft;
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string?>())).ReturnsAsync(true);
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _userRepoMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((User?)null);
+
+        var svc    = CreateService();
+        var result = await svc.UpdateAsync(1,
+            new UpdateLoanRequestDto
+            {
+                LoanType = LoanType.Personal, RequestedAmount = 100000, InterestRate = 10,
+                TenureMonths = 12, AssignedToUserId = 999
+            }, 1, "Admin");
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("Assigned user not found"));
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WithInactiveAssignee_ReturnsFail()
+    {
+        var loan = CreateTestLoan();
+        loan.Status = LoanStatus.Draft;
+        var inactiveUser = new User { Id = 5, FullName = "Inactive", Email = "i@i.com", IsActive = false };
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string?>())).ReturnsAsync(true);
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _userRepoMock.Setup(r => r.GetByIdAsync(5)).ReturnsAsync(inactiveUser);
+
+        var svc    = CreateService();
+        var result = await svc.UpdateAsync(1,
+            new UpdateLoanRequestDto
+            {
+                LoanType = LoanType.Personal, RequestedAmount = 100000, InterestRate = 10,
+                TenureMonths = 12, AssignedToUserId = 5
+            }, 1, "Admin");
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("inactive"));
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WithValidActiveAssignee_ReturnsSuccess()
+    {
+        var loan = CreateTestLoan();
+        loan.Status = LoanStatus.Draft;
+        var activeUser = new User { Id = 7, FullName = "Active", Email = "a@a.com", IsActive = true };
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string?>())).ReturnsAsync(true);
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _userRepoMock.Setup(r => r.GetByIdAsync(7)).ReturnsAsync(activeUser);
+        _loanRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Loan>())).ReturnsAsync((Loan l) => l);
+        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(1)).ReturnsAsync(loan);
+
+        var svc    = CreateService();
+        var result = await svc.UpdateAsync(1,
+            new UpdateLoanRequestDto
+            {
+                LoanType = LoanType.Personal, RequestedAmount = 100000, InterestRate = 10,
+                TenureMonths = 12, AssignedToUserId = 7
+            }, 1, "Admin");
+
+        result.Success.Should().BeTrue();
+    }
+
+    [Fact]
     public void MapToDto_WithZeroRate_ReturnsSimpleDivisionEmi()
     {
         var loan = CreateTestLoan();

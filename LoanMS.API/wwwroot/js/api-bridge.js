@@ -173,6 +173,10 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       name:c.fullName||'—', fname:(names[0]||'').toUpperCase(), lname:(names.slice(1).join(' ')||'').toUpperCase(),
       mobile:c.phone||'', email:c.email||'',
       pan:c.panNumber?'XXXXX'+c.panNumber.slice(-4)+'X':'XXXXX0000X',
+      // Productivity audit (P1) — bureau risk grade, already computed and
+      // persisted server-side (LoanDto.RiskGrade → BureauReport.RiskGrade),
+      // surfaced here purely for display/triage on the Applications table.
+      riskGrade: loan.riskGrade || null,
       aadhar:c.aadhaarNumber||'000000000000', dob:c.dateOfBirth?c.dateOfBirth.slice(0,10):'',
       gender:'M', cibil:c.cibilScore||700, city:c.city||'', state:c.state||'',
       street1:c.address||'', street2:'', zip:c.pinCode||'',
@@ -217,7 +221,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       return Promise.all(recentIds.map(function(id){
         return apiReq('GET', '/loans/' + id).then(function(r){ return r && r.success ? r.data : null; });
       })).then(function(detailed) {
-        var apiApps = detailed.filter(Boolean).map(_loanToApp);
+        // Exclude Draft-status loans — those are wizard autosave drafts
+        // (see _syncWizardDrafts below) and are represented there as their
+        // own is_draft:true "Continue" row, not as a normal pipeline
+        // entry. Without this filter every autosaved draft would appear
+        // twice: once here (mapped to status 'wip' via STATUS_MAP, with no
+        // Continue action) and once as the real draft row.
+        var apiApps = detailed.filter(Boolean).filter(function(l){ return l.status !== 'Draft'; }).map(_loanToApp);
         // IMPORTANT: mutate window.APPLICATIONS IN PLACE (splice/push) — do
         // NOT reassign it (`window.APPLICATIONS = ...`). efin-app.js's
         // renderTable()/_applyRoleFilter() read the closure-scoped
@@ -637,6 +647,11 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             priority:t.priority||'Medium', status:t.isCompleted?'done':'pending',
             appId:t.loanId?'API'+t.loanId:null, assign_type:'manual',
             assigned_user:t.assignedTo||'', due_date:_fmtDate(t.dueDate),
+            // Raw ISO date kept alongside the display-formatted due_date
+            // above (which is NOT sortable/comparable — "15 Mar 2026") so
+            // the overdue-reminder badge/toast (_refreshTaskNavBadge in
+            // efin-app.js) can reliably tell if a task is actually overdue.
+            due_date_raw:t.dueDate||null,
             created_date:_fmtDate(t.createdAt)
           };
           var existing = window.TASK_STORE.findIndex(function(ts){ return ts._apiId === t.id; });
@@ -992,6 +1007,463 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     }).catch(function(e) { console.warn('[Bridge] syncRejectionReasons:', e); });
   }
   window._apiSyncRejectionReasons = _syncRejectionReasons;
+
+  // 🟡 DSA/Partner Export (item #11) — GET /api/dsa/export returns a CSV
+  // file directly (not JSON), so this uses fetch()+blob download rather
+  // than the JSON-oriented apiReq() helper, same pattern as the
+  // Applications export button already uses.
+  window.dsaExportCsv = function () {
+    var tok = null;
+    try { tok = localStorage.getItem('loanms_token'); } catch (e) {}
+    fetch('/api/dsa/export', { headers: tok ? { 'Authorization': 'Bearer ' + tok } : {} })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Export failed (HTTP ' + res.status + ')');
+        return res.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'dsa_partners_export.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        if (typeof window.showToast === 'function') window.showToast('DSA/Partner list exported ✓', 'success');
+      })
+      .catch(function (e) {
+        if (typeof window.showToast === 'function') window.showToast('⚠ Export failed: ' + e.message, 'error');
+      });
+  };
+
+  /* ══════════════════════════════════════════════════════════
+     NOTIFICATIONS — topbar bell, fully server-backed
+     ══════════════════════════════════════════════════════════
+     Previously NOTIF_STORE (efin-app.js) was a pure in-memory array — every
+     item was added client-side via pushNotif() and never touched the server
+     at all, even though GET/POST /api/notifications and PUT .../read already
+     existed and correctly persist to AppNotifications. That meant a
+     notification was only ever visible in the one browser tab/session that
+     generated it: gone on refresh, invisible on another device, and — for
+     the one path that DID already POST to the server (notifyManagement(),
+     payout claim submissions) — never read back by anyone at all, so even
+     that data was functionally invisible despite being safely in Postgres.
+     This section makes NOTIF_STORE a synced cache of the server's data,
+     the same "wholesale replace" pattern as every other _syncX() here. */
+
+  function _notificationToLocal(n) {
+    return {
+      id: n.id, _apiId: n.id,
+      icon: n.icon || '🔔',
+      text: n.message || n.type,
+      time: n.createdAt,
+      read: !!n.isRead
+    };
+  }
+
+  function _syncNotifications() {
+    return apiReq('GET', '/notifications').then(function(res) {
+      if (!res || !res.success || !res.data || typeof window.NOTIF_STORE === 'undefined') return;
+      var mapped = res.data.map(_notificationToLocal);
+      window.NOTIF_STORE.length = 0;
+      Array.prototype.push.apply(window.NOTIF_STORE, mapped);
+      if (typeof window.updateNotifBadge === 'function') { try { window.updateNotifBadge(); } catch (e) {} }
+    }).catch(function(e) { console.warn('[Bridge] syncNotifications:', e); });
+  }
+  window._apiSyncNotifications = _syncNotifications;
+
+  // Patch pushNotif() → also POST /api/notifications, so every event that
+  // already generates a topbar-bell item locally (new application created,
+  // moved to Assign Lender, rejected, disbursed, approved — see the
+  // pushNotif() call sites in efin-app.js) is saved server-side too, not
+  // just added to the in-memory array. Re-syncs from the server on success
+  // so the locally-optimistic entry gets replaced by the real, database-id-
+  // backed row (needed for mark-as-read to have a real id to target).
+  function _patchPushNotif() {
+    if (window._bridgePushNotifPatched) return;
+    window._bridgePushNotifPatched = true;
+    var _orig = window.pushNotif;
+    if (typeof _orig !== 'function') return;
+    window.pushNotif = function(icon, text) {
+      var result = _orig.apply(this, arguments);
+      apiReq('POST', '/notifications', { type: 'event', icon: icon, message: text, targetRole: null })
+        .then(function(r) { if (r && r.success) _syncNotifications(); })
+        .catch(function(e) { console.warn('[Bridge] pushNotif save failed:', e); });
+      return result;
+    };
+  }
+
+  // Patch toggleNotifPanel() → the ORIGINAL function's own side effect of
+  // opening the panel is "mark everything currently shown as read"
+  // (NOTIF_STORE.forEach(n => n.read = true) right after rendering) — this
+  // patch detects that this call is actually opening the panel (as opposed
+  // to closing an already-open one) and pushes PUT .../read for whichever
+  // items were unread going in.
+  function _patchNotifPanelOpen() {
+    if (window._bridgeNotifPanelPatched) return;
+    window._bridgeNotifPanelPatched = true;
+    var _orig = window.toggleNotifPanel;
+    if (typeof _orig !== 'function') return;
+    window.toggleNotifPanel = function() {
+      var wasOpen = !!document.getElementById('notif-panel');
+      var unreadApiIds = (window.NOTIF_STORE || [])
+        .filter(function(n) { return !n.read && n._apiId; })
+        .map(function(n) { return n._apiId; });
+      var result = _orig.apply(this, arguments);
+      if (!wasOpen) {
+        unreadApiIds.forEach(function(apiId) {
+          apiReq('PUT', '/notifications/' + apiId + '/read').catch(function() {});
+        });
+      }
+      return result;
+    };
+  }
+
+  // Patch markNotifRead / markAllNotifsRead — defensive, in case either is
+  // ever called from somewhere other than the panel-open flow above.
+  function _patchNotifReadFns() {
+    if (window._bridgeNotifReadFnsPatched) return;
+    window._bridgeNotifReadFnsPatched = true;
+    var _origOne = window.markNotifRead;
+    var _origAll = window.markAllNotifsRead;
+    if (typeof _origOne === 'function') {
+      window.markNotifRead = function(id) {
+        var n = (window.NOTIF_STORE || []).find(function(x) { return x.id === id; });
+        var result = _origOne.apply(this, arguments);
+        if (n && n._apiId) apiReq('PUT', '/notifications/' + n._apiId + '/read').catch(function() {});
+        return result;
+      };
+    }
+    if (typeof _origAll === 'function') {
+      window.markAllNotifsRead = function() {
+        var unreadApiIds = (window.NOTIF_STORE || [])
+          .filter(function(n) { return !n.read && n._apiId; })
+          .map(function(n) { return n._apiId; });
+        var result = _origAll.apply(this, arguments);
+        unreadApiIds.forEach(function(apiId) {
+          apiReq('PUT', '/notifications/' + apiId + '/read').catch(function() {});
+        });
+        return result;
+      };
+    }
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     LENDER CONFIGURATION — Analytic Banks / Companies / Categories
+     (window.LA_DB — used by the Lender Configuration screen AND Wizard
+     Step 9's bank-eligibility matching). Previously entirely browser-memory
+     — every rule/company/category/line an admin configured vanished on the
+     next page refresh. Now backed by the Banks table's new eligibility
+     columns + AnalyticCompanies/AnalyticCategories/BankEligibilityLines
+     (GET /api/banks already includes each bank's Lines — see
+     BanksController.GetAll; GET /api/lenderconfig/companies|categories).
+     Same "wholesale replace on sync" convention as _syncBanks/_syncTeams. */
+  function _analyticBankToLocal(b) {
+    var empTypes = [], compTypes = [];
+    try { empTypes = JSON.parse(b.empTypesJson || '[]'); } catch (e) {}
+    try { compTypes = JSON.parse(b.compTypesJson || '[]'); } catch (e) {}
+    return {
+      id: b.id, _apiId: b.id, name: b.bankName,
+      isIncred: !!b.isIncred, isElite: !!b.isElite,
+      lines: (b.lines || []).map(function(l) {
+        return { id: l.id, _apiId: l.id, companyId: l.companyId, categoryId: l.categoryId, pinCode: l.pinCode || '', pf: !!l.pf };
+      }),
+      rules: {
+        minCibil: b.minCibil, acceptNTC: !!b.acceptNtc, maxLoanAmt: b.maxLoanAmt,
+        minTenure: b.minTenure, maxTenure: b.maxTenure, foirLimit: b.foirLimit,
+        pfRequired: !!b.pfRequired, minAge: b.minAge, maxAge: b.maxAge,
+        minExpMonths: b.minExpMonths, empTypes: empTypes, compTypes: compTypes,
+        acceptedCategories: []
+      }
+    };
+  }
+
+  function _syncAnalyticBanks() {
+    return apiReq('GET', '/banks').then(function(res) {
+      if (!res || !res.success || !res.data || typeof window.LA_DB === 'undefined') return;
+      var mapped = res.data.map(_analyticBankToLocal);
+      LA_DB.banks = mapped;
+      try {
+        var mx = mapped.reduce(function(m, b) { return Math.max(m, b.id || 0); }, 0);
+        LA_DB.nextId.bank = mx + 1;
+        var mxLine = mapped.reduce(function(m, b) { return Math.max(m, (b.lines || []).reduce(function(m2, l) { return Math.max(m2, l.id || 0); }, 0)); }, 0);
+        LA_DB.nextId.line = mxLine + 1;
+      } catch (e) {}
+      if (typeof window.laRenderBanks === 'function') { try { window.laRenderBanks(); } catch (e) {} }
+      if (typeof window.laLoadEligibility === 'function') { try { window.laLoadEligibility(); } catch (e) {} }
+    }).catch(function(e) { console.warn('[Bridge] syncAnalyticBanks:', e); });
+  }
+  window._apiSyncAnalyticBanks = _syncAnalyticBanks;
+
+  function _syncAnalyticCompanies() {
+    return apiReq('GET', '/lenderconfig/companies').then(function(res) {
+      if (!res || !res.success || !res.data || typeof window.LA_DB === 'undefined') return;
+      var mapped = res.data.map(function(c) {
+        var empTypes = []; try { empTypes = JSON.parse(c.empTypesJson || '[]'); } catch (e) {}
+        return { id: c.id, _apiId: c.id, name: c.name, compType: c.compType || '', empTypes: empTypes };
+      });
+      LA_DB.companies = mapped;
+      try {
+        var mx = mapped.reduce(function(m, c) { return Math.max(m, c.id || 0); }, 0);
+        LA_DB.nextId.company = mx + 1;
+      } catch (e) {}
+      if (typeof window.laRenderCompanies === 'function') { try { window.laRenderCompanies(); } catch (e) {} }
+      if (typeof window.laPopulateCompanySelect === 'function') { try { window.laPopulateCompanySelect(); } catch (e) {} }
+      if (typeof window.laPopulateWizardCompanySelect === 'function') { try { window.laPopulateWizardCompanySelect(); } catch (e) {} }
+    }).catch(function(e) { console.warn('[Bridge] syncAnalyticCompanies:', e); });
+  }
+  window._apiSyncAnalyticCompanies = _syncAnalyticCompanies;
+
+  function _syncAnalyticCategories() {
+    return apiReq('GET', '/lenderconfig/categories').then(function(res) {
+      if (!res || !res.success || !res.data || typeof window.LA_DB === 'undefined') return;
+      var mapped = res.data.map(function(c) { return { id: c.id, _apiId: c.id, name: c.name, salary: c.salary, bankId: null }; });
+      LA_DB.categories = mapped;
+      try {
+        var mx = mapped.reduce(function(m, c) { return Math.max(m, c.id || 0); }, 0);
+        LA_DB.nextId.category = mx + 1;
+      } catch (e) {}
+      if (typeof window.laRenderCategories === 'function') { try { window.laRenderCategories(); } catch (e) {} }
+    }).catch(function(e) { console.warn('[Bridge] syncAnalyticCategories:', e); });
+  }
+  window._apiSyncAnalyticCategories = _syncAnalyticCategories;
+
+  // ── Bank rules payload shape shared by add/edit patches below ──────────────
+  function _bankRulesPayload(bank) {
+    var r = bank.rules || {};
+    return {
+      isIncred: !!bank.isIncred, isElite: !!bank.isElite,
+      minCibil: r.minCibil, acceptNtc: !!r.acceptNTC, maxLoanAmt: r.maxLoanAmt,
+      minTenure: r.minTenure, maxTenure: r.maxTenure, foirLimit: r.foirLimit,
+      pfRequired: !!r.pfRequired, minAge: r.minAge, maxAge: r.maxAge,
+      minExpMonths: r.minExpMonths, empTypes: r.empTypes || [], compTypes: r.compTypes || []
+    };
+  }
+
+  // ── Patch: laConfirmAddBank → POST /api/banks (with rule fields) ───────────
+  function _patchLaConfirmAddBank() {
+    if (window._bridgeLaAddBankPatched) return;
+    window._bridgeLaAddBankPatched = true;
+    var _orig = window.laConfirmAddBank;
+    if (typeof _orig !== 'function') return;
+    window.laConfirmAddBank = function(ov) {
+      var beforeLen = (window.LA_DB && LA_DB.banks) ? LA_DB.banks.length : 0;
+      var result = _orig.apply(this, arguments);
+      if (!window.LA_DB || LA_DB.banks.length <= beforeLen) return result;
+      var bank = LA_DB.banks[LA_DB.banks.length - 1];
+      var payload = Object.assign({ bankName: bank.name }, _bankRulesPayload(bank));
+      apiReq('POST', '/banks', payload).then(function(r) {
+        if (r && r.success && r.data) { bank.id = r.data.id; bank._apiId = r.data.id; }
+        else if (typeof window.showToast === 'function') window.showToast('⚠ Bank added locally, but database save failed.', 'warn');
+      });
+      return result;
+    };
+  }
+
+  // ── Patch: laDeleteBank → DELETE /api/banks/{id} ────────────────────────────
+  function _patchLaDeleteBank() {
+    if (window._bridgeLaDeleteBankPatched) return;
+    window._bridgeLaDeleteBankPatched = true;
+    var _orig = window.laDeleteBank;
+    if (typeof _orig !== 'function') return;
+    window.laDeleteBank = function(id) {
+      var bank = window.LA_DB && LA_DB.banks.find(function(b) { return b.id === id; });
+      var apiId = bank && bank._apiId;
+      var result = _orig.apply(this, arguments);
+      if (!apiId) return result;
+      apiReq('DELETE', '/banks/' + apiId).then(function(r) {
+        if (!r || r.success === false) { if (typeof window.showToast === 'function') window.showToast('⚠ Bank deleted locally, but database delete failed.', 'warn'); }
+      });
+      return result;
+    };
+  }
+
+  // ── Patch: laSaveBankDetails → PUT /api/banks/{id} (name/InCred/Elite/rules) ─
+  function _patchLaSaveBankDetails() {
+    if (window._bridgeLaSaveBankDetailsPatched) return;
+    window._bridgeLaSaveBankDetailsPatched = true;
+    var _orig = window.laSaveBankDetails;
+    if (typeof _orig !== 'function') return;
+    window.laSaveBankDetails = function() {
+      var result = _orig.apply(this, arguments);
+      var bank = window.LA_DB && LA_DB.banks.find(function(b) { return b.id === LA_DB.currentBankId; });
+      var apiId = bank && bank._apiId;
+      if (!apiId) return result;
+      var payload = Object.assign({ bankName: bank.name }, _bankRulesPayload(bank));
+      apiReq('PUT', '/banks/' + apiId, payload).then(function(r) {
+        if (!r || r.success === false) { if (typeof window.showToast === 'function') window.showToast('⚠ Bank saved locally, but database save failed.', 'warn'); }
+      });
+      return result;
+    };
+  }
+
+  // ── Patches: bank rule quick-toggles (Bank Rules / CIBIL Rules / PIN /
+  // Employment Types tabs all mutate bank.rules in place then call
+  // laRenderBanks() — none of them go through laSaveBankDetails, so each
+  // needs its own save trigger). Rather than hunting down every individual
+  // toggle handler, this listens for the bank-detail panel's own explicit
+  // "save rules" affordance if present, and otherwise the line/company/
+  // category patches below cover the data that actually needs a foreign key
+  // (rules-only edits without a laSaveBankDetails click are covered the next
+  // time laSaveBankDetails or laConfirmAddBank runs for that bank).
+
+  // ── Patch: laSaveNewLine / laSaveMultipleLines → POST /api/lenderconfig/lines
+  function _patchLaLineAdds() {
+    if (window._bridgeLaLineAddPatched) return;
+    window._bridgeLaLineAddPatched = true;
+    var _origSingle = window.laSaveNewLine;
+    var _origMulti = window.laSaveMultipleLines;
+    if (typeof _origSingle === 'function') {
+      window.laSaveNewLine = function() {
+        var bank = window.LA_DB && LA_DB.banks.find(function(b) { return b.id === LA_DB.currentBankId; });
+        var beforeLen = bank ? bank.lines.length : 0;
+        var result = _origSingle.apply(this, arguments);
+        if (!bank || bank.lines.length <= beforeLen || !bank._apiId) return result;
+        var line = bank.lines[bank.lines.length - 1];
+        _postLine(bank, line);
+        return result;
+      };
+    }
+    if (typeof _origMulti === 'function') {
+      window.laSaveMultipleLines = function(ov) {
+        var bank = window.LA_DB && LA_DB.banks.find(function(b) { return b.id === LA_DB.currentBankId; });
+        var beforeLen = bank ? bank.lines.length : 0;
+        var result = _origMulti.apply(this, arguments);
+        if (!bank || !bank._apiId) return result;
+        bank.lines.slice(beforeLen).forEach(function(line) { _postLine(bank, line); });
+        return result;
+      };
+    }
+    function _postLine(bank, line) {
+      var company = LA_DB.companies.find(function(c) { return c.id === line.companyId; });
+      var category = LA_DB.categories.find(function(c) { return c.id === line.categoryId; });
+      if (!company || !company._apiId || !category || !category._apiId) return; // local-only company/category not yet synced to DB — line save deferred to the next full sync
+      apiReq('POST', '/lenderconfig/lines', {
+        bankId: bank._apiId, companyId: company._apiId, categoryId: category._apiId,
+        pinCode: line.pinCode || '', pf: !!line.pf
+      }).then(function(r) {
+        if (r && r.success && r.data) { line.id = r.data.id; line._apiId = r.data.id; }
+        else if (typeof window.showToast === 'function') window.showToast('⚠ Line added locally, but database save failed.', 'warn');
+      });
+    }
+  }
+
+  // ── Patch: laDeleteLine → DELETE /api/lenderconfig/lines/{id} ──────────────
+  function _patchLaDeleteLine() {
+    if (window._bridgeLaDeleteLinePatched) return;
+    window._bridgeLaDeleteLinePatched = true;
+    var _orig = window.laDeleteLine;
+    if (typeof _orig !== 'function') return;
+    window.laDeleteLine = function(lineId) {
+      var bank = window.LA_DB && LA_DB.banks.find(function(b) { return b.id === LA_DB.currentBankId; });
+      var line = bank && bank.lines.find(function(l) { return l.id === lineId; });
+      var apiId = line && line._apiId;
+      var result = _orig.apply(this, arguments);
+      if (!apiId) return result;
+      apiReq('DELETE', '/lenderconfig/lines/' + apiId).then(function(r) {
+        if (!r || r.success === false) { if (typeof window.showToast === 'function') window.showToast('⚠ Line deleted locally, but database delete failed.', 'warn'); }
+      });
+      return result;
+    };
+  }
+
+  // ── Patch: laConfirmAddCompany → POST /api/lenderconfig/companies ──────────
+  function _patchLaConfirmAddCompany() {
+    if (window._bridgeLaAddCompanyPatched) return;
+    window._bridgeLaAddCompanyPatched = true;
+    var _orig = window.laConfirmAddCompany;
+    if (typeof _orig !== 'function') return;
+    window.laConfirmAddCompany = function(ov) {
+      var beforeLen = (window.LA_DB && LA_DB.companies) ? LA_DB.companies.length : 0;
+      var result = _orig.apply(this, arguments);
+      if (!window.LA_DB || LA_DB.companies.length <= beforeLen) return result;
+      var company = LA_DB.companies[LA_DB.companies.length - 1];
+      apiReq('POST', '/lenderconfig/companies', { name: company.name, compType: company.compType || null, empTypes: company.empTypes || [] })
+        .then(function(r) {
+          if (r && r.success && r.data) { company.id = r.data.id; company._apiId = r.data.id; }
+          else if (typeof window.showToast === 'function') window.showToast('⚠ Company added locally, but database save failed.', 'warn');
+        });
+      return result;
+    };
+  }
+
+  // ── Patch: laUpdateCompany → PUT /api/lenderconfig/companies/{id} ──────────
+  function _patchLaUpdateCompany() {
+    if (window._bridgeLaUpdateCompanyPatched) return;
+    window._bridgeLaUpdateCompanyPatched = true;
+    var _orig = window.laUpdateCompany;
+    if (typeof _orig !== 'function') return;
+    window.laUpdateCompany = function(id, field, val) {
+      var result = _orig.apply(this, arguments);
+      var company = window.LA_DB && LA_DB.companies.find(function(c) { return c.id === id; });
+      if (!company || !company._apiId) return result;
+      apiReq('PUT', '/lenderconfig/companies/' + company._apiId, { name: company.name, compType: company.compType || null, empTypes: company.empTypes || [] })
+        .then(function(r) { if (!r || r.success === false) { if (typeof window.showToast === 'function') window.showToast('⚠ Company saved locally, but database save failed.', 'warn'); } });
+      return result;
+    };
+  }
+
+  // ── Patch: laDeleteCompany → DELETE /api/lenderconfig/companies/{id} ───────
+  function _patchLaDeleteCompany() {
+    if (window._bridgeLaDeleteCompanyPatched) return;
+    window._bridgeLaDeleteCompanyPatched = true;
+    var _orig = window.laDeleteCompany;
+    if (typeof _orig !== 'function') return;
+    window.laDeleteCompany = function(id) {
+      var company = window.LA_DB && LA_DB.companies.find(function(c) { return c.id === id; });
+      var apiId = company && company._apiId;
+      var result = _orig.apply(this, arguments);
+      if (!apiId) return result;
+      apiReq('DELETE', '/lenderconfig/companies/' + apiId).then(function(r) {
+        if (!r || r.success === false) { if (typeof window.showToast === 'function') window.showToast('⚠ Company deleted locally, but database delete failed.', 'warn'); }
+      });
+      return result;
+    };
+  }
+
+  // ── Patch: laConfirmAddCategory / laUpdateCategory / laDeleteCategory ──────
+  function _patchLaCategoryFns() {
+    if (window._bridgeLaCategoryPatched) return;
+    window._bridgeLaCategoryPatched = true;
+    var _origAdd = window.laConfirmAddCategory;
+    var _origUpd = window.laUpdateCategory;
+    var _origDel = window.laDeleteCategory;
+    if (typeof _origAdd === 'function') {
+      window.laConfirmAddCategory = function(ov) {
+        var beforeLen = (window.LA_DB && LA_DB.categories) ? LA_DB.categories.length : 0;
+        var result = _origAdd.apply(this, arguments);
+        if (!window.LA_DB || LA_DB.categories.length <= beforeLen) return result;
+        var category = LA_DB.categories[LA_DB.categories.length - 1];
+        apiReq('POST', '/lenderconfig/categories', { name: category.name, salary: category.salary || 0 }).then(function(r) {
+          if (r && r.success && r.data) { category.id = r.data.id; category._apiId = r.data.id; }
+          else if (typeof window.showToast === 'function') window.showToast('⚠ Category added locally, but database save failed.', 'warn');
+        });
+        return result;
+      };
+    }
+    if (typeof _origUpd === 'function') {
+      window.laUpdateCategory = function(id, field, val) {
+        var result = _origUpd.apply(this, arguments);
+        var category = window.LA_DB && LA_DB.categories.find(function(c) { return c.id === id; });
+        if (!category || !category._apiId) return result;
+        apiReq('PUT', '/lenderconfig/categories/' + category._apiId, { name: category.name, salary: category.salary || 0 })
+          .then(function(r) { if (!r || r.success === false) { if (typeof window.showToast === 'function') window.showToast('⚠ Category saved locally, but database save failed.', 'warn'); } });
+        return result;
+      };
+    }
+    if (typeof _origDel === 'function') {
+      window.laDeleteCategory = function(id) {
+        var category = window.LA_DB && LA_DB.categories.find(function(c) { return c.id === id; });
+        var apiId = category && category._apiId;
+        var result = _origDel.apply(this, arguments);
+        if (!apiId) return result;
+        apiReq('DELETE', '/lenderconfig/categories/' + apiId).then(function(r) {
+          if (!r || r.success === false) { if (typeof window.showToast === 'function') window.showToast('⚠ Category deleted locally, but database delete failed.', 'warn'); }
+        });
+        return result;
+      };
+    }
+  }
 
   /* Email Templates (Settings → Templates) — GET/PUT/DELETE /api/emailtemplates
      → window._EMAIL_TPL_OVERRIDES (efin-app.js reads this to override its
@@ -1951,12 +2423,21 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           _syncRejectionReasons();
           _syncEmailTemplates();
           _syncProductOfferMatrix();
+          // Wizard drafts (DB-backed, WizardController.ListDrafts) — one-shot
+          // pull on login, same as every other entity above. Populates the
+          // Applications → Drafts list from the server so a draft started on
+          // another device is visible/resumable here too.
+          _syncWizardDrafts();
           // Roles & permissions (ROLES / roleMenuVisibility) — previously
           // only synced when the Settings → Access tab was opened, so a
           // permission change made by one admin didn't apply anywhere else
           // until that tab happened to be visited. Now part of the regular
           // boot sync, same as every other entity above.
           if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer();
+          // Profile (PhoneNumber/PhotoData, DB-backed) — one-shot pull on
+          // login, same as every other entity above. Function itself is
+          // defined in user-profile.js and exposed on window.
+          if (typeof window._pullProfileFromServer === 'function') window._pullProfileFromServer();
           setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500); // after loans have _apiId populated
           setTimeout(tkMigrateLegacyLocalTickets, 1000);
         }, 800);
@@ -1997,6 +2478,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       _patchTicketStatusActions();
       _patchDsaSave();
       _patchPartnerSave();
+      _patchLaConfirmAddBank();
+      _patchLaDeleteBank();
+      _patchLaSaveBankDetails();
+      _patchLaLineAdds();
+      _patchLaDeleteLine();
+      _patchLaConfirmAddCompany();
+      _patchLaUpdateCompany();
+      _patchLaDeleteCompany();
+      _patchLaCategoryFns();
+      _patchPushNotif();
+      _patchNotifPanelOpen();
+      _patchNotifReadFns();
       _patchPayoutClaimCreate();
       _patchPayoutClaimStatusActions();
       _patchReports();
@@ -2063,7 +2556,9 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             _syncEmailTemplates();
             _syncProductOfferMatrix();
             // See the matching comment in the login-success sync block above.
+            _syncWizardDrafts();
             if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer();
+            if (typeof window._pullProfileFromServer === 'function') window._pullProfileFromServer();
             setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500);
             setTimeout(tkMigrateLegacyLocalTickets, 1400);
           }, 1200);
@@ -2140,7 +2635,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       // from the server (see _apiId below), resend it so the backend's
       // existing "resume by LoanId" path is used instead of creating a
       // second loan. On a brand-new application this is undefined/omitted.
-      loanId:      app._apiId || undefined,
+      // app._draftLoanId (see the wizard-draft autosave block below) covers
+      // the other case: this application started life as an autosaved
+      // Draft-status loan in the database (WizardController.SaveDraft) —
+      // sending that same id here makes Submit() resume/complete THAT
+      // record instead of leaving it behind as an orphaned Draft while a
+      // brand-new Submitted loan is created alongside it.
+      loanId:      app._apiId || app._draftLoanId || undefined,
       fullName:    app.name  || '',
       mobile:      app.mobile || '',
       email:       app.email  || '',
@@ -2175,7 +2676,22 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       source:      app.source  || 'Direct',
       channel:     app.channel || 'walk-in',
       lenderName:  app.bank    || '',
-      efinId:      app.id      || ''
+      efinId:      app.id      || '',
+      // BUGFIX (wizard bug sweep): these three were never sent on final
+      // Submit — only _buildWizardDraftPayload (autosave) resolved them.
+      // Usually harmless because WizardController.Submit()'s ApplyMapping
+      // only overwrites a field when the incoming dto actually supplies a
+      // value (so a value already saved by an earlier autosave survives),
+      // but a session where DSA/Partner/Location was picked/changed on the
+      // very last step — with no autosave cycle in between — would submit
+      // with that mapping silently missing. Same resolution helpers
+      // (_stripApiPrefixId / _resolveLocationIdByName) already used by the
+      // draft payload just above, applied here too, reading the same
+      // app.dsaId/app.partnerId/app.location fields submitWizard() sets on
+      // the application object (see newApp construction, efin-app.js).
+      dsaId:       _stripApiPrefixId(app.dsaId),
+      partnerId:   _stripApiPrefixId(app.partnerId),
+      locationId:  _resolveLocationIdByName(app.location)
     };
   }
 
@@ -2336,6 +2852,307 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       return result;
     };
   }
+
+  /* ══════════════════════════════════════════════════════════
+     WIZARD DRAFT — DB-BACKED AUTOSAVE (PUSH) + CROSS-DEVICE
+     DRAFT LIST/RESUME (PULL)
+
+     Backend (untouched, already live): WizardController.cs —
+       POST /api/wizard/draft         (SaveDraft)
+       GET  /api/wizard/draft/{id}    (GetDraft — full field resume)
+       GET  /api/wizard/drafts        (ListDrafts — summary list)
+
+     Push side: efin-app.js's wizardAutoSaveDraft() snapshots the wizard's
+     DOM fields (id starting "w-") straight onto the in-memory draft object
+     (draft['w-fname'], draft['w-mobile'], etc — see _snapshotIntoDraft) and
+     then calls window._pushWizardDraft(draft), defined here. This debounces
+     the actual network call so rapid Next/Previous navigation or repeated
+     autosave hooks (file upload, etc.) firing close together only produce
+     one POST, not one per call.
+
+     Pull side: window._syncWizardDrafts(), wired into the same boot-sync
+     call sites as every other _syncX() function (login success, session
+     restore, _apiSyncAll), populates APPLICATIONS with an is_draft:true
+     summary row per server draft. Those rows don't carry the full wizard
+     field set yet (ListDrafts intentionally only returns id/step/type/
+     label/timestamps) — window._fetchWizardDraftFields(loanId), called by
+     resumeDraftFromList() in efin-app.js when a row is still summary-only,
+     fetches the full WizardSubmitDto via GetDraft and maps it back onto
+     the same w-* keys _restoreDraftIntoWizard() already knows how to
+     replay into the form.
+  ══════════════════════════════════════════════════════════ */
+
+  // ── Push: draft object (efin-app.js shape) → WizardSubmitDto ──
+  // Strips the local "API<n>" id convention (see _dsaToLocal/_syncLocations
+  // above) back down to the raw numeric backend id. Returns undefined
+  // (never throws) when the value is missing/unrecognised, so an
+  // unresolved DSA/Partner/Location can never block the rest of the
+  // autosave from going through.
+  function _stripApiPrefixId(raw) {
+    if (!raw) return undefined;
+    var m = /^API(\d+)$/.exec(String(raw));
+    return m ? parseInt(m[1], 10) : undefined;
+  }
+
+  // w-location's <select> value is the location NAME, not an id (see
+  // wPopulateLocations) — resolve it against the already-synced
+  // window.twLocations list (_apiId set by _syncLocations above).
+  function _resolveLocationIdByName(name) {
+    if (!name || typeof window.twLocations === 'undefined' || !Array.isArray(window.twLocations)) return undefined;
+    var loc = window.twLocations.find(function(l) { return l.name === name; });
+    return (loc && loc._apiId) ? loc._apiId : undefined;
+  }
+
+  function _buildWizardDraftPayload(draft) {
+    var num = function(v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    var int = function(v) { var n = parseInt(v, 10); return isNaN(n) ? 0 : n; };
+    return {
+      // Set once a prior autosave for THIS draft got a loanId back (see
+      // _pushWizardDraftNow below) — makes every later call UPDATE the
+      // same Draft-status Loan row instead of creating a new one.
+      loanId:      draft._apiId || draft.LoanId || undefined,
+      step:        draft.wizardStep || 1,
+      fullName:    draft.name || ((draft['w-fname'] || '') + ' ' + (draft['w-lname'] || '')).trim(),
+      mobile:      draft['w-mobile'] || draft.mobile || '',
+      email:       draft['w-email'] || '',
+      pan:         draft['w-pan']   || draft.pan || '',
+      aadhar:      draft['w-aadhar'] || '',
+      dob:         draft['w-dob'] || '',
+      gender:      draft['w-gender'] || '',
+      fatherName:  draft['w-father'] || '',
+      cibil:       int(draft['w-cibil']),
+      city:        draft['w-city'] || '',
+      state:       draft['w-state'] || '',
+      street1:     draft['w-street1'] || '',
+      zip:         draft['w-zip'] || '',
+      homeType:    draft['w-hometype'] || '',
+      empType:     draft['w-emptype'] || '',
+      compName:    draft['w-compname'] || '',
+      compType:    draft['w-comptype'] || '',
+      salary:      num(draft['w-salary']),
+      obligations: num(draft['w-obligations']),
+      desig:       draft['w-desig'] || '',
+      officeEmail: draft['w-empcode'] || '',
+      loanType:    draft.loanType || draft['w-loantype'] || 'personal_loan',
+      amount:      num(draft.loanamt || draft['w-loanamt']),
+      loanRate:    num(draft['w-loanrate']) || 12,
+      tenure:      int(draft['w-tenure']) || 24,
+      // BUGFIX (Wizard forensic audit): Step 9's bank-eligibility selection
+      // (window.LA_DB.wizardSelectedBanks) was previously only ever sent to
+      // the server via the FINAL Submit path (_buildWizardPayload, through
+      // newApp.bank → lenderName) — this draft-autosave payload never
+      // included it at all. If a user selected bank(s) at Step 9 and then
+      // clicked Previous instead of submitting (or simply navigated away),
+      // that selection lived ONLY in this browser tab's in-memory LA_DB
+      // state — nothing about it reached PostgreSQL, so resuming the draft
+      // later (even in the SAME browser, let alone another device) would
+      // show no bank selected at all, with zero trace it ever happened.
+      // Reuses the exact same LenderName field the Submit path already
+      // populates correctly — no new backend field needed.
+      lenderName:  (function() {
+        try {
+          var selected = (window.LA_DB && window.LA_DB.wizardSelectedBanks) || [];
+          var names = selected.map(function(bid) {
+            var b = (window.LA_DB.banks || []).find(function(x) { return x.id === bid; });
+            return b && b.name;
+          }).filter(Boolean);
+          return names.join(', ');
+        } catch (e) { return undefined; }
+      })(),
+      purpose:     draft['w-purpose'] || '',
+      r1Name:      draft['w-r1name'] || '',
+      r1Mobile:    draft['w-r1no'] || '',
+      r1Relation:  draft['w-r1rel'] || '',
+      r2Name:      draft['w-r2name'] || '',
+      r2Mobile:    draft['w-r2no'] || '',
+      r2Relation:  draft['w-r2rel'] || '',
+      salesPerson: draft['w-sales'] || '',
+      source:      draft['w-channel'] || '',
+      channel:     draft['w-channel'] || '',
+      dsaId:       _stripApiPrefixId(draft['w-dsa-name-val']),
+      partnerId:   _stripApiPrefixId(draft['w-partner-name-val']),
+      locationId:  _resolveLocationIdByName(draft['w-location'])
+    };
+  }
+
+  var _draftPushTimer = null;
+  var WIZARD_DRAFT_DEBOUNCE_MS = 1800;
+
+  function _pushWizardDraftNow(draft) {
+    if (!draft) return;
+    var payload;
+    try { payload = _buildWizardDraftPayload(draft); }
+    catch (e) { console.warn('[Bridge] Draft autosave: payload build failed:', e); return; }
+
+    apiReq('POST', '/wizard/draft', payload).then(function(r) {
+      if (!r) {
+        // Network failure — surface nothing to the user, the next autosave
+        // cycle (next Next/Previous, next field-blur hook) will just try
+        // again with whatever the wizard state is by then.
+        console.warn('[Bridge] Draft autosave: no response, will retry next cycle.');
+        return;
+      }
+      if (r.success === false) {
+        console.warn('[Bridge] Draft autosave rejected:', r.message || (r.errors && r.errors.join(' ')));
+        return;
+      }
+      // r.success === true covers BOTH a real save AND the backend's
+      // intentional "Nothing to save yet." no-op (empty mobile/fullName —
+      // see SaveDraft) — the latter comes back with loanId 0, so only
+      // adopt a real, positive id.
+      var data = r.data;
+      if (data && data.loanId) {
+        draft._apiId = data.loanId;
+        draft.LoanId = data.loanId;
+        if (typeof window.persistSave === 'function') window.persistSave();
+      }
+    }).catch(function(e) {
+      console.warn('[Bridge] Draft autosave error:', e);
+    });
+  }
+
+  // Debounced entry point — called by efin-app.js's wizardAutoSaveDraft()
+  // right after it snapshots the DOM fields onto the draft object.
+  function _pushWizardDraft(draft) {
+    if (!draft) return;
+    if (_draftPushTimer) clearTimeout(_draftPushTimer);
+    _draftPushTimer = setTimeout(function() {
+      _draftPushTimer = null;
+      _pushWizardDraftNow(draft);
+    }, WIZARD_DRAFT_DEBOUNCE_MS);
+  }
+  window._pushWizardDraft = _pushWizardDraft;
+
+  // ── Pull: GetDraft's WizardSubmitDto → the same w-* keys
+  //    _snapshotIntoDraft()/_restoreDraftIntoWizard() already use ──
+  function _draftDtoToFields(dto) {
+    var names = (dto.fullName || '').split(' ');
+    return {
+      'w-fname':       names[0] || '',
+      'w-lname':       names.slice(1).join(' ') || '',
+      'w-mobile':      dto.mobile || '',
+      'w-email':       dto.email || '',
+      'w-pan':         dto.pan || '',
+      'w-aadhar':      dto.aadhar || '',
+      'w-dob':         dto.dob || '',
+      'w-gender':      dto.gender || '',
+      'w-father':      dto.fatherName || '',
+      'w-cibil':       dto.cibil || '',
+      'w-city':        dto.city || '',
+      'w-state':       dto.state || '',
+      'w-street1':     dto.street1 || '',
+      'w-zip':         dto.zip || '',
+      'w-hometype':    dto.homeType || '',
+      'w-emptype':     dto.empType || '',
+      'w-compname':    dto.compName || '',
+      'w-comptype':    dto.compType || '',
+      'w-salary':      dto.salary || '',
+      'w-obligations': dto.obligations || '',
+      'w-desig':       dto.desig || '',
+      'w-loantype':    dto.loanType || 'personal_loan',
+      'w-loanamt':     dto.amount || '',
+      'w-loanrate':    dto.loanRate || '',
+      'w-tenure':      dto.tenure || '',
+      'w-purpose':     dto.purpose || '',
+      'w-r1name':      dto.r1Name || '',
+      'w-r1no':        dto.r1Mobile || '',
+      'w-r1rel':       dto.r1Relation || '',
+      'w-r2name':      dto.r2Name || '',
+      'w-r2no':        dto.r2Mobile || '',
+      'w-r2rel':       dto.r2Relation || ''
+    };
+  }  // Fetches the full draft (GET /api/wizard/draft/{loanId}) and returns an
+  // object ready to Object.assign() onto a local draft row — the w-* field
+  // keys plus the same summary fields _snapshotIntoDraft() maintains
+  // (name/mobile/pan/loanamt/wizardStep/loanType). Returns null on any
+  // failure so the caller can fall back to whatever it already had.
+  window._fetchWizardDraftFields = function(loanId) {
+    if (!loanId) return Promise.resolve(null);
+    return apiReq('GET', '/wizard/draft/' + loanId).then(function(r) {
+      if (!r || !r.success || !r.data) return null;
+      var dto = r.data;
+      var fields = _draftDtoToFields(dto);
+      fields._apiId     = dto.loanId;
+      fields.LoanId     = dto.loanId;
+      fields.wizardStep = dto.step || 1;
+      fields.loanType   = dto.loanType || 'personal_loan';
+      fields.name       = dto.fullName || '(Draft)';
+      fields.mobile      = dto.mobile || '';
+      fields.pan          = dto.pan || '';
+      fields.loanamt    = dto.amount || '';
+      // Step 9 bank-selection round-trip (see Loan.SelectedLenderNames) —
+      // consumed by _restoreDraftIntoWizard (efin-app.js).
+      fields._selectedLenderNames = dto.lenderName || '';
+      return fields;
+    }).catch(function(e) { console.warn('[Bridge] fetchWizardDraftFields:', e); return null; });
+  };
+
+  function _wizardDraftOwner() {
+    return (window.currentUser && (window.currentUser.email || window.currentUser.name)) || 'anon';
+  }
+
+  // GET /api/wizard/drafts → APPLICATIONS[] summary rows (is_draft:true).
+  // Same replace-by-truth pattern as _syncLoans/_syncDsaPartners: any
+  // server-tracked draft row (has _apiId) whose loanId no longer comes
+  // back (submitted/deleted/expired-visibility) is removed; a local-only
+  // draft that hasn't been pushed yet (no _apiId) is always left alone.
+  function _syncWizardDrafts() {
+    return apiReq('GET', '/wizard/drafts').then(function(res) {
+      if (!res || !res.success) return;
+      var list = res.data || [];
+      if (typeof window.APPLICATIONS === 'undefined' || !Array.isArray(window.APPLICATIONS)) return;
+      var arr = window.APPLICATIONS;
+      var owner = _wizardDraftOwner();
+      var freshLoanIds = new Set(list.map(function(d) { return d.loanId; }));
+
+      for (var i = arr.length - 1; i >= 0; i--) {
+        var row = arr[i];
+        if (row.is_draft && row._apiId && !freshLoanIds.has(row._apiId)) arr.splice(i, 1);
+      }
+
+      list.forEach(function(d) {
+        var existing = arr.find(function(a) { return a.is_draft && a._apiId === d.loanId; });
+        if (existing) {
+          // Server is the source of truth for these summary/list-row
+          // fields — but never touch the w-* field snapshot (if any is
+          // already loaded locally), only the bits the table row shows.
+          existing.wizardStep  = d.step || existing.wizardStep;
+          existing.loanType    = d.loanType || existing.loanType;
+          existing.name        = d.label || existing.name;
+          existing.date        = _fmtDate(d.updatedAt || d.createdAt) || existing.date;
+          // Keep draft_owner in sync with the server's real-owner field too
+          // (falls back to whatever was already there if the server
+          // response is from an older backend that omits it) — otherwise a
+          // row created locally under the wrong owner before this fix could
+          // linger with a stale value across syncs.
+          if (d.createdByUserEmail) existing.draft_owner = d.createdByUserEmail;
+        } else {
+          // draft_owner must reflect who this draft actually BELONGS to, not
+          // who is currently looking at the list — Admin/Manager get every
+          // user's drafts back from the server (isInternal, backend-side,
+          // untouched), so blindly stamping the viewer's own identity here
+          // made findMyDraft() (efin-app.js) match a foreign draft against
+          // an Admin's own "my draft" lookup and silently overwrite it.
+          // Prefer the real owner the backend now sends; fall back to the
+          // viewer only for backward-compat with an older server response
+          // that doesn't include it yet.
+          var realOwner = d.createdByUserEmail || owner;
+          arr.unshift({
+            id: 'DRAFT-API' + d.loanId, _apiId: d.loanId, is_draft: true, status: 'draft',
+            draft_owner: realOwner, wizardStep: d.step || 1, loanType: d.loanType || 'personal_loan',
+            name: d.label || '(Draft)', sales: '', date: _fmtDate(d.updatedAt || d.createdAt),
+            tracking: [],
+            // Full wizard field data (w-* keys) hasn't been fetched yet —
+            // resumeDraftFromList() checks this flag and calls
+            // window._fetchWizardDraftFields() before opening the wizard.
+            _serverOnly: true
+          });
+        }
+      });
+      _refreshUI();
+    }).catch(function(e) { console.warn('[Bridge] syncWizardDrafts:', e); });
+  }
+  window._syncWizardDrafts = _syncWizardDrafts;
 
   /* ══════════════════════════════════════════════════════════
      CIBIL AUTO-CHECK on PAN entry (KYC step)
@@ -2530,7 +3347,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
 
   // Expose sync functions for manual refresh
-  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); _syncRmEmails(); _syncBanks(); _syncReportTargets(); _syncAssignmentAuditLog(); _syncRejectionReasons(); _syncEmailTemplates(); _syncProductOfferMatrix(); if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
+  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); _syncRmEmails(); _syncBanks(); _syncAnalyticBanks(); _syncAnalyticCompanies(); _syncAnalyticCategories(); _syncReportTargets(); _syncAssignmentAuditLog(); _syncRejectionReasons(); _syncEmailTemplates(); _syncProductOfferMatrix(); _syncWizardDrafts(); _syncNotifications(); if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer(); if (typeof window._pullProfileFromServer === 'function') window._pullProfileFromServer(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
   window._syncPayoutClaimsFromServer = _syncPayoutClaimsFromServer;
   window._apiSyncLoans  = _syncLoans;
   window._apiSyncUsers  = _syncUsers;
@@ -2643,6 +3460,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     else if (typeof window._apiSyncEmailTemplates === 'function') window._apiSyncEmailTemplates();
     if (typeof _syncProductOfferMatrix === 'function') _syncProductOfferMatrix();
     else if (typeof window._apiSyncProductOfferMatrix === 'function') window._apiSyncProductOfferMatrix();
+    if (typeof _syncNotifications === 'function') _syncNotifications();
+    else if (typeof window._apiSyncNotifications === 'function') window._apiSyncNotifications();
   }
   (function _smartPoller() {
     var _pollInterval = null;

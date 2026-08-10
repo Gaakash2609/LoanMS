@@ -15,14 +15,18 @@ public class CustomerService : ICustomerService
         _cache = cache;
     }
 
-    public async Task<ApiResponseDto<CustomerDto>> GetByIdAsync(int id, string callerRole = "Sales")
+    public async Task<ApiResponseDto<CustomerDto>> GetByIdAsync(int id, int currentUserId, string callerRole = "Sales")
     {
-        var c = await _uow.Customers.GetWithLoansAsync(id);
+        // Phase 4 — role-based visibility is enforced at the repository query
+        // level (via Customer.Loans, reusing Loan's ApplyVisibilityScope), not
+        // after the fact. A customer outside the caller's scope comes back
+        // null the same way a genuinely missing customer would.
+        var c = await _uow.Customers.GetWithLoansAsync(id, currentUserId, callerRole);
         if (c == null) return ApiResponseDto<CustomerDto>.Fail("Customer not found.");
         return ApiResponseDto<CustomerDto>.Ok(MapToDto(c, callerRole));
     }
 
-    public async Task<ApiResponseDto<PagedResultDto<CustomerDto>>> GetAllAsync(int page, int pageSize, string? search)
+    public async Task<ApiResponseDto<PagedResultDto<CustomerDto>>> GetAllAsync(int page, int pageSize, string? search, int currentUserId, string callerRole)
     {
         // Same fix as LoanService.GetAllAsync/GetDashboardStatsAsync (Phase 1/3):
         // this used to cache the no-search page for 30s under a
@@ -39,7 +43,7 @@ public class CustomerService : ICustomerService
         // other devices/replicas for up to 30s, exactly like the loan-list
         // bug this mirrors. Reading straight through removes the staleness
         // window entirely.
-        var result = await _uow.Customers.GetPagedAsync(page, pageSize, search);
+        var result = await _uow.Customers.GetPagedAsync(page, pageSize, search, currentUserId, callerRole);
         return ApiResponseDto<PagedResultDto<CustomerDto>>.Ok(result);
     }
 
@@ -180,6 +184,6 @@ public class CustomerService : ICustomerService
     public async Task<bool> PanExistsAsync(string pan, int? excludeId = null)
         => await _uow.Customers.PanExistsAsync(pan.ToUpper().Trim(), excludeId);
 
-    public async Task<PagedResultDto<CustomerDto>> GetPagedAsync(int page, int pageSize, string? search)
-        => await _uow.Customers.GetPagedAsync(page, pageSize, search);
+    public async Task<PagedResultDto<CustomerDto>> GetPagedAsync(int page, int pageSize, string? search, int currentUserId, string callerRole)
+        => await _uow.Customers.GetPagedAsync(page, pageSize, search, currentUserId, callerRole);
 }

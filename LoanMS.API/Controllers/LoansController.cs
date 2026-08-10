@@ -15,14 +15,13 @@ public class LoansController : BaseController
 {
     private readonly ILoanService _loanService;
     private readonly AppDbContext _db;
-    // Documents stored OUTSIDE wwwroot — never served as static files
-    private static readonly string _uploadRoot =
-        Path.Combine(AppContext.BaseDirectory, "secure_uploads", "loans");
+    private readonly LoanMS.Application.Interfaces.IFileStorageService _fileStorage;
 
-    public LoansController(ILoanService loanService, AppDbContext db)
+    public LoansController(ILoanService loanService, AppDbContext db, LoanMS.Application.Interfaces.IFileStorageService fileStorage)
     {
         _loanService = loanService;
         _db          = db;
+        _fileStorage = fileStorage;
     }
 
     /// <summary>Get dashboard statistics</summary>
@@ -106,6 +105,53 @@ public class LoansController : BaseController
 
         var result = await _loanService.UpdateStatusAsync(id, request, CurrentUserId, CurrentUserRole);
         return ApiResult(result);
+    }
+
+    /// <summary>
+    /// 🔴 CRITICAL — bulk status update (item #3). Reuses UpdateStatusAsync
+    /// PER LOAN — the exact same HasAccessAsync visibility check and
+    /// GetAllowedTransitions validation that already gate the single-loan
+    /// endpoint above, not a second/looser authorization path. A caller
+    /// seeing 100 loans in a list does NOT mean they're authorized to
+    /// modify all 100 — each id is individually re-checked here exactly as
+    /// if PATCH /{id}/status had been called on it one at a time. Partial
+    /// failure is expected and safe: one unauthorized/invalid id in the
+    /// batch does not roll back or block the others — each succeeds or
+    /// fails independently, and the response reports both lists so the
+    /// caller can see exactly what happened. Capped at 100 ids per call to
+    /// bound the work of one request.
+    /// </summary>
+    [HttpPatch("bulk-status")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
+    public async Task<IActionResult> BulkUpdateStatus([FromBody] BulkUpdateStatusRequestDto request)
+    {
+        if (request.LoanIds == null || request.LoanIds.Count == 0)
+            return BadRequest(ApiResponseDto<object>.Fail("At least one loan id is required."));
+        if (request.LoanIds.Count > 100)
+            return BadRequest(ApiResponseDto<object>.Fail("Bulk actions are limited to 100 loans per request."));
+        if (!ModelState.IsValid)
+            return BadRequest(ApiResponseDto<object>.Fail(
+                ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
+
+        var succeeded = new List<int>();
+        var failed    = new List<object>();
+
+        foreach (var loanId in request.LoanIds.Distinct())
+        {
+            var statusReq = new UpdateLoanStatusRequestDto { NewStatus = request.NewStatus, Comment = request.Comment, ApprovedAmount = null };
+            var result = await _loanService.UpdateStatusAsync(loanId, statusReq, CurrentUserId, CurrentUserRole);
+            if (result.Success) succeeded.Add(loanId);
+            else failed.Add(new { loanId, error = result.Errors?.FirstOrDefault() ?? result.Message ?? "Update failed." });
+        }
+
+        return Ok(ApiResponseDto<object>.Ok(new
+        {
+            totalRequested = request.LoanIds.Count,
+            succeededCount = succeeded.Count,
+            failedCount    = failed.Count,
+            succeeded,
+            failed
+        }, $"{succeeded.Count} of {request.LoanIds.Count} loan(s) updated."));
     }
 
     /// <summary>
@@ -199,6 +245,128 @@ public class LoansController : BaseController
         return Ok(result);
     }
 
+    /// <summary>
+    /// Applications → Export. Same filters as the standard list endpoint
+    /// (status, loan type, customer, assignee, date range, search) and the
+    /// same role-based visibility scope, but returns a CSV file instead of
+    /// a paginated JSON page — capped at 5000 rows so a very broad/empty
+    /// filter can't pull an unbounded result set into memory.
+    /// </summary>
+    [HttpGet("export")]
+    public async Task<IActionResult> Export([FromQuery] LoanFilterDto filter)
+    {
+        var rows = await _loanService.ExportAsync(filter, CurrentUserId, CurrentUserRole);
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Loan Number,Status,Loan Type,Requested Amount,Approved Amount,Interest Rate,Tenure (Months),Customer Name,Customer Phone,Created By,Assigned To,Login User,Created At");
+        foreach (var l in rows)
+        {
+            sb.AppendLine(string.Join(",",
+                CsvField(l.LoanNumber), CsvField(l.Status), CsvField(l.LoanType),
+                CsvField(l.RequestedAmount), CsvField(l.ApprovedAmount), CsvField(l.InterestRate), CsvField(l.TenureMonths),
+                CsvField(l.CustomerName), CsvField(l.CustomerPhone), CsvField(l.CreatedByName),
+                CsvField(l.AssignedToName), CsvField(l.LoginUserName), CsvField(l.CreatedAt.ToString("yyyy-MM-dd HH:mm"))));
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        var fileName = $"applications_export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv";
+        return File(bytes, "text/csv", fileName);
+    }
+
+    /// <summary>Minimal CSV field escaping — wraps in quotes and doubles any
+    /// embedded quotes, same convention already used elsewhere in this
+    /// codebase for CSV export (e.g. Payout's CSV export in efin-app.js).</summary>
+    private static string CsvField(object? value)
+    {
+        var s = value?.ToString() ?? "";
+        return s.Contains(',') || s.Contains('"') || s.Contains('\n')
+            ? "\"" + s.Replace("\"", "\"\"") + "\""
+            : s;
+    }
+
+    /// <summary>
+    /// 🟠 Missing Document Detection (item #7) — beyond the 2 hard-mandatory
+    /// documents already enforced at wizard Step 8 (salary_slip, bank_statement,
+    /// see NewApplicationPage.tsx's computeStepErrors), this checks against
+    /// information the wizard itself already collected: if the applicant is
+    /// self-employed and reported a GST number / filed ITR, a "gst"/"itr"
+    /// document (both already valid DocumentType values — see
+    /// UploadDocument's allowedDocTypes whitelist) is expected. This is the
+    /// one rule directly inferable from data already in the system; broader
+    /// per-lender/per-product document requirements are NOT represented
+    /// anywhere in the current schema — REQUIRES BUSINESS CONFIRMATION before
+    /// any further rules are added here.
+    /// </summary>
+    [HttpGet("{id:int}/missing-documents")]
+    public async Task<IActionResult> GetMissingDocuments(int id)
+    {
+        var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
+        if (!loan.Success) return NotFound(loan);
+
+        var customer = await _db.Set<Customer>().FirstOrDefaultAsync(c => c.Id == loan.Data!.Customer.Id);
+        var uploadedTypes = await _db.Set<LoanDocument>()
+            .Where(d => d.LoanId == id && !d.IsDeleted)
+            .Select(d => d.DocumentType)
+            .ToListAsync();
+
+        var missing = new List<object>();
+        if (!uploadedTypes.Contains("salary_slip"))
+            missing.Add(new { type = "salary_slip", reason = "Mandatory for every application (wizard hard requirement)" });
+        if (!uploadedTypes.Contains("bank_statement"))
+            missing.Add(new { type = "bank_statement", reason = "Mandatory for every application (wizard hard requirement)" });
+
+        var isSelfEmployed = customer?.EmploymentType is "Self-Employed" or "Professional";
+        if (isSelfEmployed)
+        {
+            if (!uploadedTypes.Contains("itr"))
+                missing.Add(new { type = "itr", reason = "Expected for self-employed/professional applicants" });
+            if (!uploadedTypes.Contains("gst"))
+                missing.Add(new { type = "gst", reason = "Expected for self-employed/professional applicants (if GST-registered)" });
+        }
+
+        return Ok(ApiResponseDto<object>.Ok(new { loanId = id, missingDocuments = missing, isComplete = missing.Count == 0 }));
+    }
+
+    /// <summary>
+    /// Duplicate-application check (productivity audit, P1 — the exact rule
+    /// already established client-side in efin-app.js's wPanCheck(): same
+    /// PAN, any non-Draft status, created within the last 60 days). That
+    /// existing check only ever looked at APPLICATIONS — this browser's
+    /// locally-synced (capped/paginated) copy — so it could miss a genuine
+    /// recent duplicate that simply hadn't synced to this particular
+    /// browser yet. This is the same rule, made authoritative against the
+    /// full database. Warning-only (matches existing UX) — does not block
+    /// anything, just surfaces the same "recent application on this PAN"
+    /// signal the wizard already shows, reliably this time.
+    /// </summary>
+    [HttpGet("duplicate-check")]
+    public async Task<IActionResult> DuplicateCheck([FromQuery] string pan)
+    {
+        if (string.IsNullOrWhiteSpace(pan) || pan.Trim().Length != 10)
+            return Ok(ApiResponseDto<object>.Ok(new { hasDuplicate = false }));
+
+        var cutoff = DateTime.UtcNow.AddDays(-60);
+        var match = await _db.Loans
+            .Where(l => l.Status != LoanStatus.Draft && l.CreatedAt >= cutoff)
+            .Include(l => l.Customer)
+            .Where(l => l.Customer.PanNumber == pan.Trim().ToUpper())
+            .OrderByDescending(l => l.CreatedAt)
+            .Select(l => new { l.LoanNumber, Status = l.Status.ToString(), l.Customer.FullName, l.CreatedAt })
+            .FirstOrDefaultAsync();
+
+        if (match == null)
+            return Ok(ApiResponseDto<object>.Ok(new { hasDuplicate = false }));
+
+        return Ok(ApiResponseDto<object>.Ok(new
+        {
+            hasDuplicate = true,
+            loanNumber = match.LoanNumber,
+            status = match.Status,
+            customerName = match.FullName,
+            daysAgo = Math.Round((DateTime.UtcNow - match.CreatedAt).TotalDays, 1)
+        }));
+    }
+
     /// <summary>Calculate EMI before submission — no DB write</summary>
     [HttpGet("calculate-emi")]
     public IActionResult CalculateEmi([FromQuery] decimal amount, [FromQuery] decimal rate, [FromQuery] int tenure)
@@ -260,18 +428,21 @@ public class LoansController : BaseController
         if (!allowedDocTypes.Contains(docType))
             return BadRequest(ApiResponseDto<object>.Fail("Invalid document type."));
 
-        // Store OUTSIDE wwwroot
-        var uploadDir = Path.Combine(_uploadRoot, id.ToString());
-        Directory.CreateDirectory(uploadDir);
+        // Store outside wwwroot — never served as static files. Storage key
+        // is prefixed "loans/" so this can never collide with a DSA
+        // document at the same numeric id in the same bucket/local root —
+        // the DB-stored FilePath itself stays exactly "{id}/{fileName}" as
+        // before (no schema/data change), the "loans/" prefix is added only
+        // at the storage-key level, consistently, on both save and read.
         var fileName = $"{Guid.NewGuid()}{ext}";
-        var filePath = Path.Combine(uploadDir, fileName);
+        var storageKey = $"loans/{id}/{fileName}";
 
-        await using (var stream = new FileStream(filePath, FileMode.Create))
-            await file.CopyToAsync(stream);
+        await using (var stream = file.OpenReadStream())
+            await _fileStorage.SaveAsync(storageKey, stream, file.ContentType);
 
         // Link the upload to the loan in the database — this is what makes it
         // show up under the loan record (and in GetDocuments below) rather
-        // than existing only as an orphaned file on disk.
+        // than existing only as an orphaned file in storage.
         var docRecord = new LoanDocument
         {
             LoanId           = id,
@@ -311,17 +482,28 @@ public class LoansController : BaseController
         var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(ApiResponseDto<object>.Fail("Loan not found."));
 
-        var filePath = Path.Combine(_uploadRoot, id.ToString(), fileName);
-        if (!System.IO.File.Exists(filePath))
+        var storageKey = $"loans/{id}/{fileName}";
+        var result = await _fileStorage.GetAsync(storageKey);
+        if (result == null)
             return NotFound(ApiResponseDto<object>.Fail("Document not found."));
 
-        // Serve with correct Content-Type
-        var provider = new FileExtensionContentTypeProvider();
-        if (!provider.TryGetContentType(fileName, out var contentType))
-            contentType = "application/octet-stream";
+        var (content, storedContentType) = result.Value;
 
-        var bytes = await System.IO.File.ReadAllBytesAsync(filePath);
-        return File(bytes, contentType, fileName);
+        // Serve with correct Content-Type — prefer whatever the storage
+        // backend recorded at upload time (S3), fall back to sniffing the
+        // extension (local disk never stored a content type).
+        var contentType = storedContentType;
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            var provider = new FileExtensionContentTypeProvider();
+            if (!provider.TryGetContentType(fileName, out contentType!))
+                contentType = "application/octet-stream";
+        }
+
+        using var ms = new MemoryStream();
+        await content.CopyToAsync(ms);
+        content.Dispose();
+        return File(ms.ToArray(), contentType, fileName);
     }
 
     /// <summary>List documents for a loan, sourced from the database (name, type, uploader).</summary>
@@ -345,6 +527,28 @@ public class LoansController : BaseController
             .ToListAsync();
 
         return Ok(ApiResponseDto<object>.Ok(docs));
+    }
+
+    /// <summary>
+    /// Delete an uploaded document (soft delete). Was missing entirely —
+    /// the frontend's deleteWizDoc() only ever removed the document from
+    /// local state, so it reappeared the next time GetDocuments/GetById
+    /// was called from any device. Same access rule as the other document
+    /// endpoints: the caller must have visibility on the parent loan.
+    /// </summary>
+    [HttpDelete("{id:int}/documents/{documentId:int}")]
+    public async Task<IActionResult> DeleteDocument(int id, int documentId)
+    {
+        var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
+        if (!loan.Success) return NotFound(loan);
+
+        var doc = await _db.Set<LoanDocument>().FirstOrDefaultAsync(d => d.Id == documentId && d.LoanId == id && !d.IsDeleted);
+        if (doc == null) return NotFound(ApiResponseDto<bool>.Fail("Document not found."));
+
+        doc.IsDeleted = true;
+        doc.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Document deleted."));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -422,6 +422,40 @@ namespace LoanMS.API.Controllers
             }
         }
 
+        /// <summary>
+        /// 🟠 CIBIL Stale Report Check (item #8) — read-only, does NOT trigger a
+        /// new bureau pull (no paid API call). Reports how old the customer's
+        /// latest bureau report is, so the wizard/detail view can warn the user
+        /// when resuming an old draft/application instead of silently working
+        /// off a stale score. Threshold (30 days) is a reasonable industry-
+        /// common default, not a business rule confirmed anywhere in this
+        /// project's existing code — REQUIRES BUSINESS CONFIRMATION if a
+        /// different value is intended; configurable via Bureau:StaleAfterDays.
+        /// </summary>
+        [HttpGet("staleness/{customerId:int}")]
+        public async Task<IActionResult> GetStaleness(int customerId, [FromServices] IConfiguration config)
+        {
+            var latest = await _bureauService.GetLatestBureauReport(customerId);
+            if (latest == null)
+                return Ok(new { success = true, data = new { hasReport = false, isStale = false } });
+
+            var staleAfterDays = config.GetValue<int?>("Bureau:StaleAfterDays") ?? 30;
+            var ageInDays = (DateTime.UtcNow - latest.ScoreGeneratedDate).TotalDays;
+
+            return Ok(new
+            {
+                success = true,
+                data = new
+                {
+                    hasReport = true,
+                    reportDate = latest.ScoreGeneratedDate,
+                    ageInDays = Math.Round(ageInDays, 1),
+                    staleAfterDays,
+                    isStale = ageInDays > staleAfterDays
+                }
+            });
+        }
+
         // ===== HELPER METHODS =====
 
         private string GetRiskCategory(int score)

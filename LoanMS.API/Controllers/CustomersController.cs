@@ -23,15 +23,19 @@ public class CustomersController : BaseController
         if (page < 1) page = 1;
         if (pageSize is < 1 or > 100) pageSize = 10;
 
-        var result = await _customerService.GetAllAsync(page, pageSize, search);
+        var result = await _customerService.GetAllAsync(page, pageSize, search, CurrentUserId, CurrentUserRole);
         return Ok(result);
     }
 
-    /// <summary>Get customer by ID</summary>
+    /// <summary>
+    /// Get customer by ID. Role-based visibility is enforced server-side (see
+    /// ICustomerRepository.GetWithLoansAsync) — passing someone else's
+    /// customerId here returns 404, not the customer's data.
+    /// </summary>
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
-        var result = await _customerService.GetByIdAsync(id, CurrentUserRole);
+        var result = await _customerService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
         if (!result.Success) return NotFound(result);
         return Ok(result);
     }
@@ -88,7 +92,7 @@ public class CustomersController : BaseController
         if (string.IsNullOrWhiteSpace(q) || q.Length < 3)
             return BadRequest(ApiResponseDto<object>.Fail("Search query must be at least 3 characters."));
         
-        var result = await _customerService.GetPagedAsync(1, 10, q);
+        var result = await _customerService.GetPagedAsync(1, 10, q, CurrentUserId, CurrentUserRole);
         return Ok(ApiResponseDto<object>.Ok(result.Items));
     }
 
