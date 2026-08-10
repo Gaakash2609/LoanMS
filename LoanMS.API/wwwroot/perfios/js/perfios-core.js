@@ -230,7 +230,7 @@ const NEFT_PATTERNS = [
   { re: _neftRe('RTGS[\\s\\-\\/]*DEBIT'),          sub: 'RTGS Debit' },
   { re: _neftRe('RTGS'),                            sub: 'RTGS Generic' },
   // ── NEFT — UTR-prefix format used by IDFC FIRST, ICICI, Kotak, etc. ──
-  // Examples: NEFT/KKBKH25344740757/Mudrahub, NEFT/SBIN425360185414/ITDTAX REFUND
+  // Examples: NEFT/KKBKH25344740757/MudraHub, NEFT/SBIN425360185414/ITDTAX REFUND
   { re: /(?:^|[^A-Za-z])NEFT\/[A-Z0-9]+\//i,      sub: 'NEFT Generic' },  // NEFT/UTR/... format
   // ── NEFT standard sub-types ──
   { re: _neftRe('NEFT[\\s\\-\\/]*RETURN'),         sub: 'NEFT Return' },

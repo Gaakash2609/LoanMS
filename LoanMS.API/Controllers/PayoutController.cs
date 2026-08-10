@@ -197,6 +197,31 @@ public class PayoutController : BaseController
     }
 
     /// <summary>
+    /// Delete a payout claim — Admin only. Soft-delete (same IsDeleted +
+    /// HasQueryFilter(!IsDeleted) pattern already used everywhere else in
+    /// this project — see AppDbContext's PayoutClaim configuration): the
+    /// row is flagged, not physically removed, so it's recoverable/
+    /// auditable, but it disappears from GetAll/MyEarnings/every other read
+    /// immediately since the query filter excludes it automatically. This
+    /// IS a real server-side delete from every user-facing point of view —
+    /// the claim will not reappear on refresh, another device, or another
+    /// user's session, which is what "delete se live server se bhi data
+    /// delete ho" requires.
+    /// </summary>
+    [HttpDelete("{id:int}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var claim = await _db.PayoutClaims.FirstOrDefaultAsync(p => p.Id == id);
+        if (claim == null) return NotFound(ApiResponseDto<bool>.Fail("Claim not found."));
+
+        claim.IsDeleted = true;
+        claim.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Claim deleted."));
+    }
+
+    /// <summary>
     /// Single source of truth for "what should this loan's payout claim
     /// amount be" — used by both Submit() (authoritative) and Suggest()
     /// (read-only preview), so the two can never drift apart. Decimal

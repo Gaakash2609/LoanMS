@@ -1864,6 +1864,24 @@
         'settings': 'Settings',
       }[name] || 'EFIN';
       if (navEl) { document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); navEl.classList.add('active'); }
+      // Only one search box per page (per business owner's request) — the
+      // topbar "Search applications…" box (filterTable) only actually does
+      // anything on the Applications page itself; every other page either
+      // already has its own dedicated, contextual search box (Payout,
+      // Sales/Login Teams, Users, DSA, Partner, Tasks, etc.) or has no
+      // search at all — showing the topbar one everywhere was redundant/
+      // confusing on top of those, and did nothing useful on pages that
+      // don't have their own. Hidden everywhere except Applications;
+      // nothing about filterTable()/topbar-search-input itself changed,
+      // it's simply not shown when it wouldn't do anything relevant.
+      var _topbarSearchWrap = document.getElementById('topbar-search-wrap');
+      // Exactly one search box per page (per business owner's request):
+      // hide the topbar "Search applications…" box only on pages that
+      // already have their own dedicated, contextual search input —
+      // otherwise keep it, so pages with no search of their own aren't
+      // left with zero. filterTable() itself is untouched either way.
+      var _pagesWithOwnSearch = ['payout', 'my-payout', 'payout-mgmt', 'sales-teams', 'login-teams', 'users-mgmt', 'dsa-mgmt', 'partner-mgmt', 'tasks-page'];
+      if (_topbarSearchWrap) _topbarSearchWrap.style.display = _pagesWithOwnSearch.includes(name) ? 'none' : '';
       if (name === 'applications') renderTable();
       if (name === 'settings') { setTimeout(function() { if (typeof _renderKycProxySettingsCard === 'function') _renderKycProxySettingsCard(); }, 80); }
       if (name === 'dashboard') { renderPipeline(); renderChart(); renderLoanTypeChart(); updateDashboardStats(); renderActivity(); if (typeof renderActionQueue === 'function') renderActionQueue(); }
@@ -5258,6 +5276,7 @@
               ${actionBtn(_pmCanManage && c.status!=='paid', 'Mark Paid', 'rgba(26,79,163,.1)', 'var(--accent)', 'rgba(26,79,163,.25)', `openStatusModal('${c.id}')`, '💳')}
               ${actionBtn(_pmCanManage && c.status!=='rejected', 'Reject', 'rgba(212,43,43,.08)', 'var(--accent2)', 'rgba(212,43,43,.2)', `quickMgmtAction('${c.id}','rejected')`, '✕')}
               ${actionBtn(true, 'View Details', 'var(--surface2)', 'var(--text3)', 'var(--border)', `openStatusModal('${c.id}')`, '👁')}
+              ${actionBtn(_isAdminRole(), 'Delete (Admin only)', 'rgba(212,43,43,.06)', '#991b1b', 'rgba(212,43,43,.2)', `pmDeleteClaim('${c.id}')`, '🗑')}
             </div>
           </td>
         </tr>`;
@@ -5327,6 +5346,48 @@
       updatePayoutNavBadge();
       renderPayoutMgmt();
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+    }
+
+    // Admin-only role check, same currentUser-reading convention already
+    // used by canManagePayout()/canManagePayoutClaims() elsewhere in this
+    // file — deliberately stricter than those (Admin ONLY, not Accounts/
+    // Finance/Team Leader too), matching the explicit "only admin ko delete
+    // ke rights" requirement for this specific action.
+    function _isAdminRole() {
+      const r = (currentUser && currentUser.role) || (window.currentUser && window.currentUser.role) || '';
+      return r === 'admin';
+    }
+
+    // Delete a payout claim — Admin only (both here and re-checked
+    // server-side in PayoutController.Delete, since a frontend-only check
+    // is never a real security boundary). Calls the real DELETE
+    // /api/payout/{id} endpoint (soft-delete server-side — see that
+    // endpoint's own doc comment) and only removes it from the local
+    // PAYOUT_CLAIMS array/table after the server confirms success, so a
+    // failed delete never shows a false "removed" state.
+    function pmDeleteClaim(claimId) {
+      if (!_isAdminRole()) { showToast('Only Admin can delete payout claims', 'error'); return; }
+      const claim = PAYOUT_CLAIMS.find(c => c.id === claimId);
+      if (!claim) return;
+      if (!confirm('Permanently delete this payout claim for ' + (claim.customerName || claimId) + '? This cannot be undone.')) return;
+      if (!claim._apiId || typeof apiReq !== 'function') {
+        showToast('This claim is not yet synced to the server — cannot delete.', 'error');
+        return;
+      }
+      apiReq('DELETE', '/payout/' + claim._apiId).then(function(res) {
+        if (!res || !res.success) {
+          showToast((res && (res.message || (res.errors && res.errors[0]))) || 'Delete failed — claim was not removed.', 'error');
+          return;
+        }
+        const idx = PAYOUT_CLAIMS.indexOf(claim);
+        if (idx !== -1) PAYOUT_CLAIMS.splice(idx, 1);
+        showToast('Claim deleted ✓', 'success');
+        updatePayoutNavBadge();
+        renderPayoutMgmt();
+        if (typeof renderPayoutPage === 'function') { try { renderPayoutPage(); } catch(e) {} }
+      }).catch(function() {
+        showToast('Network error — claim was not deleted.', 'error');
+      });
     }
 
     // ── Status / Payment Update Modal ──
@@ -8111,8 +8172,8 @@
           const stateMap = { wip:'WIP', login:'Assign Lender', underwriting:'Underwriting', approved:'Approved',
             disbursed:'Disbursed', cancelled:'Cancelled', rejected:'Rejected', hold:'Hold', ni:'NI' };
           const stateLabel = stateMap[recentDup.status] || recentDup.status;
-          // matches exact message: "Customer has a recent in {state} loan application with Mudrahub"
-          const msg = `Customer has a recent ${stateLabel} loan application with Mudrahub (${recentDup.id} — ${recentDup.name})`;
+          // matches exact message: "Customer has a recent in {state} loan application with MudraHub"
+          const msg = `Customer has a recent ${stateLabel} loan application with MudraHub (${recentDup.id} — ${recentDup.name})`;
           const alertEl = document.getElementById('w-pan-dup-alert');
           const msgEl   = document.getElementById('w-pan-dup-msg');
           if (alertEl) alertEl.style.display = '';
@@ -16012,7 +16073,7 @@ ${printContent}
             </label>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500">
               <input type="checkbox" id="lcab-elite" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)">
-              Mudrahub Bank
+              MudraHub Bank
             </label>
           </div>
 
@@ -16115,7 +16176,7 @@ ${printContent}
             </label>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500">
               <input type="checkbox" id="lceb-elite" ${bank.isElite?'checked':''} style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)">
-              Mudrahub Bank
+              MudraHub Bank
             </label>
           </div>
           <!-- Quick Rules -->
@@ -18199,7 +18260,7 @@ ${printContent}
           ? `<span style="font-size:10.5px;background:rgba(26,79,163,.07);color:var(--accent);padding:2px 8px;border-radius:8px">₹${((r.maxLoanAmt||0)/100000).toFixed(0)}L · ${r.foirLimit||50}% FOIR</span>`
           : `<span style="font-size:11px;color:var(--text3)">Default</span>`;
         return `<tr>
-          <td><div style="display:flex;align-items:center;gap:10px"><div style="width:32px;height:32px;border-radius:9px;background:${b.isIncred?"rgba(245,158,11,.15)":"rgba(77,124,255,.12)"};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:${b.isIncred?"#f59e0b":"var(--accent)"};flex-shrink:0">${b.name[0]}</div><div><div style="font-weight:700;font-size:13px">${b.name}</div>${b.isIncred?'<span style="font-size:9.5px;color:#f59e0b;font-weight:700">InCred</span>':''}${b.isElite?'<span style="font-size:9.5px;color:var(--success);font-weight:700;margin-left:4px">Mudrahub</span>':''}</div></div></td>
+          <td><div style="display:flex;align-items:center;gap:10px"><div style="width:32px;height:32px;border-radius:9px;background:${b.isIncred?"rgba(245,158,11,.15)":"rgba(77,124,255,.12)"};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:${b.isIncred?"#f59e0b":"var(--accent)"};flex-shrink:0">${b.name[0]}</div><div><div style="font-weight:700;font-size:13px">${b.name}</div>${b.isIncred?'<span style="font-size:9.5px;color:#f59e0b;font-weight:700">InCred</span>':''}${b.isElite?'<span style="font-size:9.5px;color:var(--success);font-weight:700;margin-left:4px">MudraHub</span>':''}</div></div></td>
           <td>${modeBadge}</td>
           <td>${compHtml}</td>
           <td>${catsHtml}</td>
@@ -18831,10 +18892,10 @@ ${printContent}
             </div>
           </div>
 
-          <!-- InCred / Mudrahub -->
+          <!-- InCred / MudraHub -->
           <div style="display:flex;gap:16px;margin-bottom:22px">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2)"><input type="checkbox" id="ab-incred" style="width:16px;height:16px;accent-color:var(--accent)"> InCred Bank</label>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2)"><input type="checkbox" id="ab-elite" style="width:16px;height:16px;accent-color:var(--accent)"> Mudrahub Bank</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2)"><input type="checkbox" id="ab-elite" style="width:16px;height:16px;accent-color:var(--accent)"> MudraHub Bank</label>
           </div>
 
           <div style="background:rgba(26,79,163,.04);border:1px solid rgba(26,79,163,.12);border-radius:9px;padding:10px 14px;font-size:11.5px;color:var(--text3);margin-bottom:18px">
@@ -19041,7 +19102,7 @@ ${printContent}
     }
 
     function laExportBanks() {
-      const rows = [["Bank","InCred","Mudrahub","Lines","Max Loan","Min CIBIL","FOIR%"]];
+      const rows = [["Bank","InCred","MudraHub","Lines","Max Loan","Min CIBIL","FOIR%"]];
       LA_DB.banks.forEach(b => { const r=b.rules||{}; rows.push([b.name,b.isIncred?"Yes":"No",b.isElite?"Yes":"No",b.lines.length,r.maxLoanAmt||"",r.minCibil||"",r.foirLimit||""]); });
       _laCsvDownload(rows, "analytic_banks.csv"); showToast("Banks exported ✓", "success");
     }
@@ -19671,7 +19732,7 @@ ${printContent}
           <div>
             <div style="font-size:12.5px;font-weight:700;color:var(--text)">${b.bankName}</div>
             ${b.isIncred?'<div style="font-size:10px;color:#f59e0b;font-weight:600">InCred</div>':''}
-            ${b.isElite?'<div style="font-size:10px;color:var(--danger);font-weight:600">Mudrahub</div>':''}
+            ${b.isElite?'<div style="font-size:10px;color:var(--danger);font-weight:600">MudraHub</div>':''}
           </div>
         </div>`).join('');
     }
@@ -19883,7 +19944,7 @@ ${printContent}
         const tenureInfo = (e.rules.minTenure && e.rules.maxTenure) ? `${e.rules.minTenure}–${e.rules.maxTenure} mo` : null;
         const tagColor   = e.isIncred ? '#f59e0b' : e.isElite ? 'var(--accent2)' : 'var(--accent)';
         const tagBg      = e.isIncred ? 'rgba(245,158,11,.12)' : e.isElite ? 'rgba(212,43,43,.08)' : 'rgba(26,79,163,.08)';
-        const tag        = e.isIncred ? 'InCred' : e.isElite ? 'Mudrahub' : '';
+        const tag        = e.isIncred ? 'InCred' : e.isElite ? 'MudraHub' : '';
 
         return `<div id="ewcard-${e.bankId}" onclick="ewToggleCard(${e.bankId},${JSON.stringify(e).replace(/"/g,'&quot;')})"
           style="background:${isSel?'rgba(26,79,163,.07)':'var(--surface2)'};border:2px solid ${isSel?'var(--accent)':'var(--border2)'};border-radius:14px;padding:16px 14px;cursor:pointer;transition:all .18s;position:relative">
@@ -19965,7 +20026,7 @@ ${printContent}
           <span style="font-size:13px">🏦</span>
           <span style="font-size:13px;font-weight:700;color:var(--accent)">${b.bankName}</span>
           ${b.isIncred?'<span style="font-size:10px;color:#f59e0b;font-weight:600">InCred</span>':''}
-          ${b.isElite?'<span style="font-size:10px;color:var(--danger);font-weight:600">Mudrahub</span>':''}
+          ${b.isElite?'<span style="font-size:10px;color:var(--danger);font-weight:600">MudraHub</span>':''}
           <span onclick="ewToggleCard(${b.bankId},{})" style="cursor:pointer;color:var(--danger);font-size:14px;line-height:1;margin-left:2px" title="Remove">✕</span>
         </div>`
       ).join('');
@@ -20352,6 +20413,8 @@ ${printContent}
     window.toggleAllMgmtChk = toggleAllMgmtChk;
     window.bulkMgmtAction = bulkMgmtAction;
     window.quickMgmtAction = quickMgmtAction;
+    window.pmDeleteClaim = pmDeleteClaim;
+    window._isAdminRole = _isAdminRole;
     window.openStatusModal = openStatusModal;
     window.closeStatusModal = closeStatusModal;
     window.saveClaimStatus = saveClaimStatus;
@@ -20946,32 +21009,12 @@ ${printContent}
       const reader = new FileReader();
       reader.onload = function(e) {
         const dataUrl = e.target.result;
-        // Apply to actual login page logo
+        // Apply to actual login page logo — instant local preview, but this
+        // is NOT the save confirmation (see below).
         applyLogoToLogin(dataUrl);
         try { localStorage.setItem('efin_signin_logo', dataUrl); } catch(err) {}
-        // Save to server so logo persists across all browsers/sessions.
-        // NOTE: token key must match the one api-bridge.js actually stores
-        // ('loanms_token') — this previously read a non-existent
-        // 'efin_auth_token' key, so the Authorization header was always
-        // empty/invalid and this Admin-only save silently 401'd.
-        // BUGFIX (forensic audit): the success toast below used to fire
-        // unconditionally, immediately, without even waiting for this fetch
-        // to resolve — so a failed/401'd save still told the admin "updated
-        // successfully" while the server never actually got the new logo.
-        fetch('/api/settings/signin-logo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '') },
-          body: JSON.stringify({ logo: dataUrl })
-        }).then(function(res) {
-          if (!res.ok && typeof showToast === 'function') {
-            showToast('⚠ Sign-in logo saved on this device only — server save failed. Other devices won\'t see it yet.', 'error');
-          }
-        }).catch(function() {
-          if (typeof showToast === 'function') {
-            showToast('⚠ Sign-in logo saved on this device only — server save failed. Other devices won\'t see it yet.', 'error');
-          }
-        });
-        // Update panel preview
+        // Update panel preview immediately — this is safe to do optimistically
+        // since it's just showing what was just picked, not claiming it saved.
         const prev = document.getElementById('branding-signin-preview-img');
         const placeholder = document.getElementById('branding-signin-preview-placeholder');
         const removeBtn = document.getElementById('branding-signin-remove-btn');
@@ -20979,7 +21022,34 @@ ${printContent}
         if (placeholder) placeholder.style.display = 'none';
         if (removeBtn) removeBtn.style.display = '';
         document.getElementById('branding-signin-filename').textContent = '✓ ' + file.name;
-        showToast('Sign-in logo updated successfully', 'success');
+
+        // BUGFIX (round 2): the previous fix added an error toast inside
+        // .then()/.catch() but left the "updated successfully" toast as a
+        // separate, synchronous statement right after fetch() was merely
+        // INITIATED — fetch() doesn't block, so that success toast fired
+        // immediately regardless of whether the server request had even
+        // reached the server yet, let alone succeeded. A save that failed
+        // seconds later (auth issue, payload-too-large, network blip) still
+        // showed a clean, unconditional "success" with the error toast
+        // easy to miss underneath it. The success toast now only fires
+        // from inside the .then(), gated on res.ok — same as the error path.
+        fetch('/api/settings/signin-logo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('loanms_token') || '') },
+          body: JSON.stringify({ logo: dataUrl })
+        }).then(function(res) {
+          if (res.ok) {
+            if (typeof showToast === 'function') showToast('Sign-in logo updated successfully', 'success');
+          } else {
+            if (typeof showToast === 'function') {
+              showToast('⚠ Sign-in logo NOT saved to the server (HTTP ' + res.status + ') — it will revert to the old logo on refresh.', 'error');
+            }
+          }
+        }).catch(function(err) {
+          if (typeof showToast === 'function') {
+            showToast('⚠ Sign-in logo NOT saved to the server (network error) — it will revert to the old logo on refresh.', 'error');
+          }
+        });
       };
       reader.readAsDataURL(file);
     }
@@ -21102,7 +21172,7 @@ ${printContent}
     }
 
     function brandingUpdateText() {
-      const name = document.getElementById('branding-text-name').value || 'Mudrahub';
+      const name = document.getElementById('branding-text-name').value || 'MudraHub';
       const sub  = document.getElementById('branding-text-sub').value  || 'LET\'S MAKE IT HAPPEN';
       // Live preview in panel
       const pName = document.getElementById('branding-text-preview-name');
@@ -21128,7 +21198,7 @@ ${printContent}
       brandingRemoveBannerSilent();
       brandingRemoveSigninSilent();
       // Reset text
-      document.getElementById('branding-text-name').value = 'Mudrahub';
+      document.getElementById('branding-text-name').value = 'MudraHub';
       document.getElementById('branding-text-sub').value  = "LET'S MAKE IT HAPPEN";
       brandingUpdateText();
       // Reset sizes
@@ -33091,7 +33161,7 @@ function confirmEcsReturn() {
           </div>
           <div class="dc-group">
             <label>CC (optional)</label>
-            <input type="email" class="dc-input" id="dc-cc" placeholder="e.g. manager@Mudrahub.com">
+            <input type="email" class="dc-input" id="dc-cc" placeholder="e.g. manager@MudraHub.com">
           </div>
         </div>
       </div>

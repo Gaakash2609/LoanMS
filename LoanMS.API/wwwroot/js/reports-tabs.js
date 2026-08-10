@@ -250,7 +250,7 @@ function _renderReportsBankEligibility(app) {
           '<div>' +
             '<div style="font-size:14px;font-weight:700;color:var(--text)">' + _escHtml(b.bankName) + '</div>' +
             (b.isIncred ? '<div style="font-size:10.5px;color:#f59e0b;font-weight:600;margin-top:3px">● InCred</div>' : '') +
-            (b.isElite  ? '<div style="font-size:10.5px;color:var(--accent2);font-weight:600;margin-top:3px">● Mudrahub</div>' : '') +
+            (b.isElite  ? '<div style="font-size:10.5px;color:var(--accent2);font-weight:600;margin-top:3px">● MudraHub</div>' : '') +
           '</div>' +
         '</div>';
       }).join('')

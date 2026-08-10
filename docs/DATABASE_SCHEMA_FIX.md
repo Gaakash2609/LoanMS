@@ -138,7 +138,7 @@ Once the columns are added, verify the fix by:
    ```
 
 2. **Test the wizard API**:
-   - Go to https://app.mudrahub.com
+   - Go to https://app.MudraHub.com
    - Try submitting a new loan application
    - Check browser DevTools → Network tab for `/api/wizard/submit`
    - Should return **200** with `success: true`
