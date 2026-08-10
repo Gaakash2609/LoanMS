@@ -4875,10 +4875,10 @@
     }
 
     /* ═══════════════════════════════════════════════════
-       ENHANCED UI — MudraHub Design System v2
+       ENHANCED UI — Mudrahub Design System v2
     ═══════════════════════════════════════════════════ */
 
-    /* BODY & BACKGROUND — MudraHub Brand */
+    /* BODY & BACKGROUND — Mudrahub Brand */
     body {
       background: #f4f7fd;
       background-image:
@@ -4887,7 +4887,7 @@
         url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%231b4fa0' fill-opacity='0.018'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
     }
 
-    /* ══ MudraHub BRAND SIDEBAR — handled by new sidebar CSS above ══ */
+    /* ══ Mudrahub BRAND SIDEBAR — handled by new sidebar CSS above ══ */
     /* sidebar, nav-item, nav-label, nav-icon, nav-badge, sidebar-footer,
        user-card, avatar, status-dot, role-badge-* styles are defined in
        the new sidebar block — no overrides needed here */
@@ -8300,7 +8300,7 @@
 
     /* ── SIDEBAR SECTION LABEL — no decorative line (handled by collapsible header) ── */
 
-    /* ── MudraHub BRAND FINAL POLISH ── */
+    /* ── Mudrahub BRAND FINAL POLISH ── */
     /* logo-default-icon is shown (emoji 🏦) — do not hide */
 
     .sidebar-logo {

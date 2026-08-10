@@ -1874,14 +1874,13 @@
       // don't have their own. Hidden everywhere except Applications;
       // nothing about filterTable()/topbar-search-input itself changed,
       // it's simply not shown when it wouldn't do anything relevant.
-      var _topbarSearchWrap = document.getElementById('topbar-search-wrap');
-      // Exactly one search box per page (per business owner's request):
-      // hide the topbar "Search applications…" box only on pages that
-      // already have their own dedicated, contextual search input —
-      // otherwise keep it, so pages with no search of their own aren't
-      // left with zero. filterTable() itself is untouched either way.
-      var _pagesWithOwnSearch = ['payout', 'my-payout', 'payout-mgmt', 'sales-teams', 'login-teams', 'users-mgmt', 'dsa-mgmt', 'partner-mgmt', 'tasks-page'];
-      if (_topbarSearchWrap) _topbarSearchWrap.style.display = _pagesWithOwnSearch.includes(name) ? 'none' : '';
+      // Topbar search-box visibility (exactly one search per page) is
+      // controlled in ONE place only — the showPage-wrapping IIFE further
+      // down this file (search for "BUGFIX" near topbar-search-wrap) —
+      // this used to ALSO be set here, which meant two separate pieces of
+      // code fought over the same element and whichever ran last silently
+      // won, undoing the other. Removed from here to leave a single source
+      // of truth; the wrapper below runs on every showPage() call regardless.
       if (name === 'applications') renderTable();
       if (name === 'settings') { setTimeout(function() { if (typeof _renderKycProxySettingsCard === 'function') _renderKycProxySettingsCard(); }, 80); }
       if (name === 'dashboard') { renderPipeline(); renderChart(); renderLoanTypeChart(); updateDashboardStats(); renderActivity(); if (typeof renderActionQueue === 'function') renderActionQueue(); }
@@ -8172,8 +8171,8 @@
           const stateMap = { wip:'WIP', login:'Assign Lender', underwriting:'Underwriting', approved:'Approved',
             disbursed:'Disbursed', cancelled:'Cancelled', rejected:'Rejected', hold:'Hold', ni:'NI' };
           const stateLabel = stateMap[recentDup.status] || recentDup.status;
-          // matches exact message: "Customer has a recent in {state} loan application with MudraHub"
-          const msg = `Customer has a recent ${stateLabel} loan application with MudraHub (${recentDup.id} — ${recentDup.name})`;
+          // matches exact message: "Customer has a recent in {state} loan application with Mudrahub"
+          const msg = `Customer has a recent ${stateLabel} loan application with Mudrahub (${recentDup.id} — ${recentDup.name})`;
           const alertEl = document.getElementById('w-pan-dup-alert');
           const msgEl   = document.getElementById('w-pan-dup-msg');
           if (alertEl) alertEl.style.display = '';
@@ -16073,7 +16072,7 @@ ${printContent}
             </label>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500">
               <input type="checkbox" id="lcab-elite" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)">
-              MudraHub Bank
+              Mudrahub Bank
             </label>
           </div>
 
@@ -16176,7 +16175,7 @@ ${printContent}
             </label>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500">
               <input type="checkbox" id="lceb-elite" ${bank.isElite?'checked':''} style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)">
-              MudraHub Bank
+              Mudrahub Bank
             </label>
           </div>
           <!-- Quick Rules -->
@@ -18260,7 +18259,7 @@ ${printContent}
           ? `<span style="font-size:10.5px;background:rgba(26,79,163,.07);color:var(--accent);padding:2px 8px;border-radius:8px">₹${((r.maxLoanAmt||0)/100000).toFixed(0)}L · ${r.foirLimit||50}% FOIR</span>`
           : `<span style="font-size:11px;color:var(--text3)">Default</span>`;
         return `<tr>
-          <td><div style="display:flex;align-items:center;gap:10px"><div style="width:32px;height:32px;border-radius:9px;background:${b.isIncred?"rgba(245,158,11,.15)":"rgba(77,124,255,.12)"};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:${b.isIncred?"#f59e0b":"var(--accent)"};flex-shrink:0">${b.name[0]}</div><div><div style="font-weight:700;font-size:13px">${b.name}</div>${b.isIncred?'<span style="font-size:9.5px;color:#f59e0b;font-weight:700">InCred</span>':''}${b.isElite?'<span style="font-size:9.5px;color:var(--success);font-weight:700;margin-left:4px">MudraHub</span>':''}</div></div></td>
+          <td><div style="display:flex;align-items:center;gap:10px"><div style="width:32px;height:32px;border-radius:9px;background:${b.isIncred?"rgba(245,158,11,.15)":"rgba(77,124,255,.12)"};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:${b.isIncred?"#f59e0b":"var(--accent)"};flex-shrink:0">${b.name[0]}</div><div><div style="font-weight:700;font-size:13px">${b.name}</div>${b.isIncred?'<span style="font-size:9.5px;color:#f59e0b;font-weight:700">InCred</span>':''}${b.isElite?'<span style="font-size:9.5px;color:var(--success);font-weight:700;margin-left:4px">Mudrahub</span>':''}</div></div></td>
           <td>${modeBadge}</td>
           <td>${compHtml}</td>
           <td>${catsHtml}</td>
@@ -18892,10 +18891,10 @@ ${printContent}
             </div>
           </div>
 
-          <!-- InCred / MudraHub -->
+          <!-- InCred / Mudrahub -->
           <div style="display:flex;gap:16px;margin-bottom:22px">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2)"><input type="checkbox" id="ab-incred" style="width:16px;height:16px;accent-color:var(--accent)"> InCred Bank</label>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2)"><input type="checkbox" id="ab-elite" style="width:16px;height:16px;accent-color:var(--accent)"> MudraHub Bank</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2)"><input type="checkbox" id="ab-elite" style="width:16px;height:16px;accent-color:var(--accent)"> Mudrahub Bank</label>
           </div>
 
           <div style="background:rgba(26,79,163,.04);border:1px solid rgba(26,79,163,.12);border-radius:9px;padding:10px 14px;font-size:11.5px;color:var(--text3);margin-bottom:18px">
@@ -19102,7 +19101,7 @@ ${printContent}
     }
 
     function laExportBanks() {
-      const rows = [["Bank","InCred","MudraHub","Lines","Max Loan","Min CIBIL","FOIR%"]];
+      const rows = [["Bank","InCred","Mudrahub","Lines","Max Loan","Min CIBIL","FOIR%"]];
       LA_DB.banks.forEach(b => { const r=b.rules||{}; rows.push([b.name,b.isIncred?"Yes":"No",b.isElite?"Yes":"No",b.lines.length,r.maxLoanAmt||"",r.minCibil||"",r.foirLimit||""]); });
       _laCsvDownload(rows, "analytic_banks.csv"); showToast("Banks exported ✓", "success");
     }
@@ -19732,7 +19731,7 @@ ${printContent}
           <div>
             <div style="font-size:12.5px;font-weight:700;color:var(--text)">${b.bankName}</div>
             ${b.isIncred?'<div style="font-size:10px;color:#f59e0b;font-weight:600">InCred</div>':''}
-            ${b.isElite?'<div style="font-size:10px;color:var(--danger);font-weight:600">MudraHub</div>':''}
+            ${b.isElite?'<div style="font-size:10px;color:var(--danger);font-weight:600">Mudrahub</div>':''}
           </div>
         </div>`).join('');
     }
@@ -19944,7 +19943,7 @@ ${printContent}
         const tenureInfo = (e.rules.minTenure && e.rules.maxTenure) ? `${e.rules.minTenure}–${e.rules.maxTenure} mo` : null;
         const tagColor   = e.isIncred ? '#f59e0b' : e.isElite ? 'var(--accent2)' : 'var(--accent)';
         const tagBg      = e.isIncred ? 'rgba(245,158,11,.12)' : e.isElite ? 'rgba(212,43,43,.08)' : 'rgba(26,79,163,.08)';
-        const tag        = e.isIncred ? 'InCred' : e.isElite ? 'MudraHub' : '';
+        const tag        = e.isIncred ? 'InCred' : e.isElite ? 'Mudrahub' : '';
 
         return `<div id="ewcard-${e.bankId}" onclick="ewToggleCard(${e.bankId},${JSON.stringify(e).replace(/"/g,'&quot;')})"
           style="background:${isSel?'rgba(26,79,163,.07)':'var(--surface2)'};border:2px solid ${isSel?'var(--accent)':'var(--border2)'};border-radius:14px;padding:16px 14px;cursor:pointer;transition:all .18s;position:relative">
@@ -20026,7 +20025,7 @@ ${printContent}
           <span style="font-size:13px">🏦</span>
           <span style="font-size:13px;font-weight:700;color:var(--accent)">${b.bankName}</span>
           ${b.isIncred?'<span style="font-size:10px;color:#f59e0b;font-weight:600">InCred</span>':''}
-          ${b.isElite?'<span style="font-size:10px;color:var(--danger);font-weight:600">MudraHub</span>':''}
+          ${b.isElite?'<span style="font-size:10px;color:var(--danger);font-weight:600">Mudrahub</span>':''}
           <span onclick="ewToggleCard(${b.bankId},{})" style="cursor:pointer;color:var(--danger);font-size:14px;line-height:1;margin-left:2px" title="Remove">✕</span>
         </div>`
       ).join('');
@@ -21172,7 +21171,7 @@ ${printContent}
     }
 
     function brandingUpdateText() {
-      const name = document.getElementById('branding-text-name').value || 'MudraHub';
+      const name = document.getElementById('branding-text-name').value || 'Mudrahub';
       const sub  = document.getElementById('branding-text-sub').value  || 'LET\'S MAKE IT HAPPEN';
       // Live preview in panel
       const pName = document.getElementById('branding-text-preview-name');
@@ -21198,7 +21197,7 @@ ${printContent}
       brandingRemoveBannerSilent();
       brandingRemoveSigninSilent();
       // Reset text
-      document.getElementById('branding-text-name').value = 'MudraHub';
+      document.getElementById('branding-text-name').value = 'Mudrahub';
       document.getElementById('branding-text-sub').value  = "LET'S MAKE IT HAPPEN";
       brandingUpdateText();
       // Reset sizes
@@ -31670,11 +31669,23 @@ function confirmDisburse() {
     // Hide/show topbar New Application button and search on channel pages
     // (Only the search box is channel-page-specific — the hamburger, title,
     // notifications and profile avatar must stay visible on every page.)
-    const isChannelPage = pageId === 'dsa-mgmt' || pageId === 'partner-mgmt';
+    // BUGFIX: this wrapper runs AFTER showPage()'s own body (which already
+    // sets topbar-search-wrap's visibility correctly per _pagesWithOwnSearch —
+    // exactly one search box per page, per the business owner's requirement),
+    // and it was unconditionally OVERRIDING that with its own older, narrower
+    // rule (only dsa-mgmt/partner-mgmt hidden, every other page — including
+    // Payout, Sales Teams, Login Teams, Users, Tasks — forced back to
+    // visible). Two separate pieces of code fighting over the same element
+    // is exactly the "duplicate search bar" symptom reported: the topbar
+    // search and each page's own dedicated search box both ended up showing
+    // simultaneously because this ran last and won. Now reuses the exact
+    // same page list instead of maintaining a second, conflicting one.
+    const _pagesWithOwnSearch = ['payout', 'my-payout', 'payout-mgmt', 'sales-teams', 'login-teams', 'users-mgmt', 'dsa-mgmt', 'partner-mgmt', 'tasks-page'];
+    const isChannelPage = _pagesWithOwnSearch.includes(pageId);
     const searchWrap = document.getElementById('topbar-search-wrap');
     if (searchWrap) searchWrap.style.display = isChannelPage ? 'none' : '';
     const newAppBtn = document.getElementById('topbar-new-btn');
-    if (newAppBtn) newAppBtn.style.display = isChannelPage ? 'none' : '';
+    if (newAppBtn) newAppBtn.style.display = (pageId === 'dsa-mgmt' || pageId === 'partner-mgmt') ? 'none' : '';
     if (pageId === 'dsa-mgmt') {
       const btn = document.getElementById('dsa-add-btn');
       if (btn) btn.style.display = dsaCanCreate() ? '' : 'none';
@@ -33161,7 +33172,7 @@ function confirmEcsReturn() {
           </div>
           <div class="dc-group">
             <label>CC (optional)</label>
-            <input type="email" class="dc-input" id="dc-cc" placeholder="e.g. manager@MudraHub.com">
+            <input type="email" class="dc-input" id="dc-cc" placeholder="e.g. manager@Mudrahub.com">
           </div>
         </div>
       </div>

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="EFIN — Enterprise Loan Management System. Manage loan applications, teams, disbursements, and partner operations.">
   <meta name="robots" content="noindex, nofollow">
-  <meta property="og:title" content="MudraHub">
+  <meta property="og:title" content="Mudrahub">
   <meta property="og:description" content="Enterprise Loan Management System">
   <meta property="og:type" content="website">
   <!-- AWS CloudFront: set these response headers in your distribution policy:
@@ -21,7 +21,7 @@
   <link rel="stylesheet" href="/css/app.css?v=2">
   <link rel="stylesheet" href="/css/efin-improvements.css">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231a4fa3'/><text x='50%25' y='54%25' font-size='18' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle' dominant-baseline='middle'>M</text></svg>">
-  <title>MudraHub</title>
+  <title>Mudrahub</title>
 
   <!-- ══ Session pre-check — MUST stay here, in <head>, as a plain
        blocking <script> (no defer/async) ══
@@ -243,7 +243,7 @@
                sets img.src and reveals it only once a real logo (server or
                localStorage-cached) is found on load, or after an upload
                via Settings → Branding. -->
-          <img id="login-logo-img" alt="MudraHub"
+          <img id="login-logo-img" alt="Mudrahub"
             onerror="this.onerror=null;this.style.display='none';var l=document.getElementById('login-logo-letter');if(l)l.style.display='block';"
             style="display:none;max-width:100%;max-height:68px;width:auto;height:auto;object-fit:contain;">
           <span id="login-logo-letter" style="display:none;font-size:40px;font-weight:900;color:var(--accent);font-family:var(--font-head)"></span>
@@ -365,7 +365,7 @@
           <div class="logo-banner-box" id="logo-banner-box">
             <img id="logo-banner-img" src="" alt="" style="max-width:100%;max-height:100%;object-fit:contain;display:none;">
             <div id="logo-banner-default" class="logo-banner-default-text">
-              <div id="sidebar-logo-text" class="logo-mark">MudraHub</div>
+              <div id="sidebar-logo-text" class="logo-mark">Mudrahub</div>
               <div id="sidebar-logo-sub" class="logo-sub">LET'S MAKE IT HAPPEN</div>
             </div>
           </div>
@@ -3101,7 +3101,7 @@
                   <div class="form-group" style="margin:0"><label>Bank Name *</label><input type="text" id="la-detail-name-input" placeholder="Bank name"/></div>
                   <div style="display:flex;gap:16px;align-items:center;padding-bottom:4px">
                     <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2)"><input type="checkbox" id="la-detail-incred" style="width:auto"> InCred</label>
-                    <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2)"><input type="checkbox" id="la-detail-elite" style="width:auto"> MudraHub</label>
+                    <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2)"><input type="checkbox" id="la-detail-elite" style="width:auto"> Mudrahub</label>
                   </div>
                   <button class="btn btn-primary btn-sm" onclick="laSaveBankDetails()">✓ Save</button>
                 </div>
@@ -8698,7 +8698,7 @@ Please log in and change your password immediately.
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
               <div>
                 <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:6px">Brand Name</label>
-                <input type="text" id="branding-text-name" placeholder="e.g. MudraHub"
+                <input type="text" id="branding-text-name" placeholder="e.g. Mudrahub"
                   style="width:100%;padding:9px 13px;border:1.5px solid var(--border2);border-radius:9px;font-size:14px;font-weight:700;background:var(--surface);color:var(--text);outline:none;font-family:var(--font-head)"
                   oninput="brandingUpdateText()">
               </div>
@@ -8712,7 +8712,7 @@ Please log in and change your password immediately.
             <div style="margin-top:16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px">
               <div style="font-size:11px;color:var(--text3)">Live preview:</div>
               <div>
-                <div id="branding-text-preview-name" style="font-family:var(--font-head);font-size:18px;font-weight:900;background:linear-gradient(135deg,var(--accent),var(--accent2));background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1.2">MudraHub</div>
+                <div id="branding-text-preview-name" style="font-family:var(--font-head);font-size:18px;font-weight:900;background:linear-gradient(135deg,var(--accent),var(--accent2));background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1.2">Mudrahub</div>
                 <div id="branding-text-preview-sub" style="font-size:8px;color:#b0b8cc;letter-spacing:.9px;text-transform:uppercase;margin-top:2px">LET'S MAKE IT HAPPEN</div>
               </div>
             </div>
@@ -8794,7 +8794,7 @@ Please log in and change your password immediately.
             <div style="background:rgba(212,43,43,.05);border:1px solid rgba(212,43,43,.18);border-radius:12px;padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
               <div>
                 <div style="font-size:13px;font-weight:700;color:var(--danger)">⚠️ Reset all logos and brand text</div>
-                <div style="font-size:12px;color:var(--text3);margin-top:3px">Both icon and banner logos will be removed. Brand text will revert to "MudraHub / LET'S MAKE IT HAPPEN".</div>
+                <div style="font-size:12px;color:var(--text3);margin-top:3px">Both icon and banner logos will be removed. Brand text will revert to "Mudrahub / LET'S MAKE IT HAPPEN".</div>
               </div>
               <button class="btn btn-sm" onclick="brandingResetAll()"
                 style="background:var(--danger);color:#fff;border:none;padding:9px 20px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">
