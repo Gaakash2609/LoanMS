@@ -23727,6 +23727,31 @@ ${printContent}
     }
 
     // ── SALES TEAMS (cus.sales.team) ──
+    // BUGFIX (Actions button root cause — confirmed via prior forensic
+    // analysis): server-synced team ids are strings like "API42"
+    // (_syncTeams() in api-bridge.js sets id:'API'+at.id), while locally-
+    // created-but-not-yet-synced teams use a plain number (Date.now()).
+    // Every onclick="...(${t.id})" template below used to interpolate that
+    // id UNQUOTED into the HTML attribute — fine for a number ("...(42)"),
+    // but for a string it produced invalid JS ("...(API42)"), which the
+    // browser parses as a reference to an undefined variable named API42
+    // and throws a ReferenceError the instant the button is clicked — the
+    // Actions dropdown never opens, silently, only visible in devtools.
+    // Fix has two parts, applied consistently everywhere a team id crosses
+    // an inline-onclick boundary:
+    //   1. Always single-quote the id in the onclick string, so it's valid
+    //      JS regardless of whether the underlying value is numeric or
+    //      alphanumeric (a numeric id quoted as '42' is still perfectly
+    //      usable — see _twFindTeamById below, which is format-agnostic).
+    //   2. Compare ids via this single shared, type-agnostic lookup instead
+    //      of each call site repeating its own strict === (which would
+    //      break the moment the same id crosses the string/number boundary
+    //      a quoted onclick param introduces) — works for numbers, numeric
+    //      strings, and "API42"-style strings alike, present or future.
+    function _twFindTeamById(arr, id) {
+      return (arr || []).find(function(x) { return String(x.id) === String(id); });
+    }
+
     function twRenderSalesTeams(data) {
       const tb=document.getElementById('tw-sales-team-table'); if(!tb) return;
       tb.innerHTML=(data||twSalesTeams).map(t=>{
@@ -23740,7 +23765,7 @@ ${printContent}
           <td>${memberPills}</td>
           <td><span class="badge ${t.active?'badge-approved':'badge-hold'}">${t.active?'Active':'Archived'}</span></td>
           <td style="width:100px;text-align:right"><div class="row-menu-wrap">
-            <button class="row-menu-btn" onclick="twTeamMenu(this,'sales',${t.id})">Actions <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+            <button class="row-menu-btn" onclick="twTeamMenu(this,'sales','${t.id}')">Actions <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
           </div></td>
         </tr>`;
       }).join('')||'<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px">No teams found</td></tr>';
@@ -23751,7 +23776,7 @@ ${printContent}
       fn(q ? src.filter(t=>t.name.toLowerCase().includes(q.toLowerCase())||t.leader.toLowerCase().includes(q.toLowerCase())||(t.location||'').toLowerCase().includes(q.toLowerCase())) : src);
     }
     function twEditSalesTeam(id) {
-      const t=twSalesTeams.find(x=>x.id===id); if(!t) return;
+      const t=_twFindTeamById(twSalesTeams,id); if(!t) return;
       _twEditSalesId=id;
       twPopulateLocSelect('tw-st-loc', t.location);
       twPopulateUserSelect('tw-st-leader', t.leader);
@@ -23770,7 +23795,7 @@ ${printContent}
       const loc=document.getElementById('tw-st-loc').value;
       const active=document.getElementById('tw-st-active').value==='true';
       const members=[...(document.getElementById('tw-st-members')?.querySelectorAll('[data-member]')||[])].map(el=>el.dataset.member);
-      if(_twEditSalesId){const t=twSalesTeams.find(x=>x.id===_twEditSalesId);if(t){t.name=name;t.leader=leader;t.location=loc;t.active=active;t.members=members;}showToast('Sales Team saved','success');}
+      if(_twEditSalesId){const t=_twFindTeamById(twSalesTeams,_twEditSalesId);if(t){t.name=name;t.leader=leader;t.location=loc;t.active=active;t.members=members;}showToast('Sales Team saved','success');}
       else{twSalesTeams.unshift({id:Date.now(),name,leader,location:loc,members,active});twUpdateCounts();showToast(`Team "${name}" created`,'success');}
       _twEditSalesId=null; twRenderSalesTeams(); document.getElementById('tw-sales-team-detail').style.display='none';
       if (typeof persistSave === 'function') persistSave();
@@ -23798,13 +23823,13 @@ ${printContent}
           <td>${memberPills}</td>
           <td><span class="badge ${t.active?'badge-approved':'badge-hold'}">${t.active?'Active':'Archived'}</span></td>
           <td style="width:100px;text-align:right"><div class="row-menu-wrap">
-            <button class="row-menu-btn" onclick="twTeamMenu(this,'login',${t.id})">Actions <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+            <button class="row-menu-btn" onclick="twTeamMenu(this,'login','${t.id}')">Actions <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
           </div></td>
         </tr>`;
       }).join('')||'<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px">No teams found</td></tr>';
     }
     function twEditLoginTeam(id) {
-      const t=twLoginTeams.find(x=>x.id===id); if(!t) return;
+      const t=_twFindTeamById(twLoginTeams,id); if(!t) return;
       _twEditLoginId=id;
       twPopulateLocSelect('tw-lt-loc', t.location);
       twPopulateUserSelect('tw-lt-leader', t.leader);
@@ -23823,14 +23848,14 @@ ${printContent}
       const loc=document.getElementById('tw-lt-loc').value;
       const active=document.getElementById('tw-lt-active').value==='true';
       const members=[...(document.getElementById('tw-lt-members')?.querySelectorAll('[data-member]')||[])].map(el=>el.dataset.member);
-      if(_twEditLoginId){const t=twLoginTeams.find(x=>x.id===_twEditLoginId);if(t){t.name=name;t.leader=leader;t.location=loc;t.active=active;t.members=members;}showToast('Login Team saved','success');}
+      if(_twEditLoginId){const t=_twFindTeamById(twLoginTeams,_twEditLoginId);if(t){t.name=name;t.leader=leader;t.location=loc;t.active=active;t.members=members;}showToast('Login Team saved','success');}
       else{twLoginTeams.unshift({id:Date.now(),name,leader,location:loc,members,active});twUpdateCounts();showToast(`Team "${name}" created`,'success');}
       _twEditLoginId=null; twRenderLoginTeams(); document.getElementById('tw-login-team-detail').style.display='none';
       if (typeof persistSave === 'function') persistSave();
     }
     function twViewTeamDetail(type, id) {
       const arr = type==='sales' ? twSalesTeams : twLoginTeams;
-      const t = arr.find(x=>x.id===id); if(!t) return;
+      const t = _twFindTeamById(arr, id); if(!t) return;
       const color = type==='sales' ? '#1a4fa3' : '#10b981';
       const pills = (a) => (a&&a.length) ? a.map(v=>`<span style="display:inline-block;background:${color}22;color:${color};padding:2px 9px;border-radius:20px;font-size:11.5px;font-weight:600;margin:2px 3px 2px 0">${v}</span>`).join('') : '—';
       const row = (l,v)=>`<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)"><div style="min-width:120px;color:var(--text3);font-size:12px;font-weight:600">${l}</div><div style="font-size:13px">${v||'—'}</div></div>`;
@@ -23859,7 +23884,7 @@ ${printContent}
     function twDuplicateTeam(type, id) {
       if (typeof twCanManageUsers === 'function' && !twCanManageUsers()) { showToast('Only Admin or Product Team can duplicate teams','error'); return; }
       const arr = type==='sales' ? twSalesTeams : twLoginTeams;
-      const t = arr.find(x=>x.id===id); if(!t) return;
+      const t = _twFindTeamById(arr, id); if(!t) return;
       const copy = { id: Date.now(), name: t.name+' (Copy)', leader: t.leader, location: t.location, members: [...(t.members||[])], active: t.active };
       arr.unshift(copy);
       if(type==='sales') twRenderSalesTeams(); else twRenderLoginTeams();
@@ -23869,19 +23894,19 @@ ${printContent}
     function twTeamMenu(btn, type, id) {
       closeAllRowMenus();
       const arr = type === 'sales' ? twSalesTeams : twLoginTeams;
-      const t = arr.find(x => x.id === id); if (!t) return;
+      const t = _twFindTeamById(arr, id); if (!t) return;
       const editFn = type === 'sales' ? 'twEditSalesTeam' : 'twEditLoginTeam';
       const wrap = btn.closest('.row-menu-wrap');
       const dropdown = document.createElement('div');
       dropdown.className = 'row-menu-dropdown';
       const canManage = (typeof twCanManageUsers === 'function') ? twCanManageUsers() : true;
       dropdown.innerHTML = `
-        <button class="row-menu-item" onclick="closeAllRowMenus();twViewTeamDetail('${type}',${id})">👁 View Details</button>` +
+        <button class="row-menu-item" onclick="closeAllRowMenus();twViewTeamDetail('${type}','${id}')">👁 View Details</button>` +
         (canManage ? `
-        <button class="row-menu-item" onclick="closeAllRowMenus();${editFn}(${id})">✏️ Edit Team</button>
-        <button class="row-menu-item" onclick="closeAllRowMenus();twDuplicateTeam('${type}',${id})">📋 Duplicate Team</button>
-        <button class="row-menu-item warn" onclick="closeAllRowMenus();twArchiveTeam('${type}',${id})">${t.active ? '🗄 Archive Team' : '♻️ Restore Team'}</button>
-        <button class="row-menu-item danger" onclick="closeAllRowMenus();twDeleteTeam('${type}',${id})">🗑 Delete Team</button>` : '');
+        <button class="row-menu-item" onclick="closeAllRowMenus();${editFn}('${id}')">✏️ Edit Team</button>
+        <button class="row-menu-item" onclick="closeAllRowMenus();twDuplicateTeam('${type}','${id}')">📋 Duplicate Team</button>
+        <button class="row-menu-item warn" onclick="closeAllRowMenus();twArchiveTeam('${type}','${id}')">${t.active ? '🗄 Archive Team' : '♻️ Restore Team'}</button>
+        <button class="row-menu-item danger" onclick="closeAllRowMenus();twDeleteTeam('${type}','${id}')">🗑 Delete Team</button>` : '');
       document.body.appendChild(dropdown);
       positionDropdownFixed(btn, dropdown, wrap);
     }
@@ -23890,7 +23915,7 @@ ${printContent}
     function twDeleteTeam(type, id) {
       if (typeof twCanManageUsers === 'function' && !twCanManageUsers()) { showToast('Only Admin or Product Team can delete teams', 'error'); return; }
       const arr = type === 'sales' ? twSalesTeams : twLoginTeams;
-      const t = arr.find(x => x.id === id); if (!t) return;
+      const t = _twFindTeamById(arr, id); if (!t) return;
       if (!confirm('Delete team "' + t.name + '"? This cannot be undone.')) return;
 
       const finishLocalRemoval = () => {
@@ -23941,7 +23966,7 @@ ${printContent}
 
     function twArchiveTeam(type,id) {
       if (typeof twCanManageUsers === 'function' && !twCanManageUsers()) { showToast('Only Admin or Product Team can archive teams','error'); return; }
-      const arr=type==='sales'?twSalesTeams:twLoginTeams; const t=arr.find(x=>x.id===id); if(t) t.active=!t.active;
+      const arr=type==='sales'?twSalesTeams:twLoginTeams; const t=_twFindTeamById(arr,id); if(t) t.active=!t.active;
       if(type==='sales') twRenderSalesTeams(); else twRenderLoginTeams();
       twUpdateCounts(); showToast('Team status updated','success');
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }

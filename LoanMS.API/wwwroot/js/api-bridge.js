@@ -425,7 +425,15 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           if (trow._apiId && !freshTeamIds.has(trow._apiId)) store.splice(tmi, 1);
         }
         apiList.forEach(function(at) {
-          var mapped = { id:'API'+at.id, _apiId:at.id, name:at.name, lead:at.teamLead||'',
+          // BUGFIX (Team Leader field mismatch — confirmed via prior
+          // forensic analysis): every render/edit function in efin-app.js
+          // (twRenderSalesTeams, twRenderLoginTeams, twEditSalesTeam,
+          // twEditLoginTeam, twTeamMenu, etc.) reads t.leader — this mapping
+          // was writing t.lead instead, so a server-synced team's leader
+          // name never showed up anywhere in the UI (displayed as "—") even
+          // though the backend had it correctly. Confirmed no other code
+          // anywhere reads the (wrong) .lead field, so this rename is safe.
+          var mapped = { id:'API'+at.id, _apiId:at.id, name:at.name, leader:at.teamLead||'',
                          members:(at.members||[]).map(function(m){ return m.fullName; }), location:at.locationId||'' };
           var existing = store.findIndex(function(t){ return t._apiId === at.id; });
           if (existing >= 0) store[existing] = Object.assign(store[existing], mapped);
@@ -477,7 +485,13 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           var store = window[c.store];
           if (!Array.isArray(store)) return;
           var team = editId
-            ? store.find(function(t){ return t.id === editId; })
+            // Same type-agnostic comparison as _twFindTeamById in
+            // efin-app.js (see that helper's comment for the full reasoning) —
+            // editId is always a string after the Actions-button fix, but a
+            // locally-created (not yet synced) team's id is still a plain
+            // number, so a normalized String() comparison is required here
+            // too, not a strict ===.
+            ? store.find(function(t){ return String(t.id) === String(editId); })
             : store.find(function(t){ return t.name === nameVal && !t._apiId; });
           if (!team) return;
 

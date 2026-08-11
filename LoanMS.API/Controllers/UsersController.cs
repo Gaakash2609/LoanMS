@@ -1,7 +1,10 @@
 using LoanMS.Application.DTOs;
 using LoanMS.Application.Interfaces;
+using LoanMS.Domain.Entities;
+using LoanMS.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace LoanMS.API.Controllers;
 
@@ -9,8 +12,20 @@ namespace LoanMS.API.Controllers;
 public class UsersController : BaseController
 {
     private readonly IUserService _userService;
+    // Direct AppDbContext access for the TeamMember auto-mapping below —
+    // same pattern already used by DashboardController/LenderConfigController/
+    // SearchController for cross-entity work that doesn't belong inside one
+    // repository. IUserService/IUnitOfWork deliberately don't expose
+    // Teams/TeamMembers (Application layer can't reference Infrastructure's
+    // AppDbContext — see IUnitOfWork), so this stays at the controller level
+    // rather than growing IUnitOfWork just for this one feature.
+    private readonly AppDbContext _db;
 
-    public UsersController(IUserService userService) => _userService = userService;
+    public UsersController(IUserService userService, AppDbContext db)
+    {
+        _userService = userService;
+        _db = db;
+    }
 
     /// <summary>Get all users [Admin only]</summary>
     [HttpGet]
@@ -79,7 +94,24 @@ public class UsersController : BaseController
 
         var result = await _userService.CreateAsync(request);
         if (!result.Success) return BadRequest(result);
-        return CreatedAtAction(nameof(GetById), new { id = result.Data!.Id }, result);
+
+        // Auto-map Sales/Login team membership (User Creation + Mapping
+        // simplification — analysis approved). A brand-new user has no
+        // previous team, so this is purely additive: if SalesTeam/OpTeam
+        // was selected in the Create User form, the corresponding
+        // TeamMember row is created here in the same request, using the
+        // exact same add-if-not-already-a-member pattern as
+        // TeamsController.AddMember — no new membership architecture.
+        // Non-fatal by design: the user is already successfully created at
+        // this point, so a team-mapping issue (e.g. team renamed/deleted in
+        // the instant between the dropdown loading and this save) doesn't
+        // roll back a perfectly valid user — it's surfaced in the response
+        // message instead, and the existing manual Teams → Add Member flow
+        // remains available to complete it.
+        var mappingNote = await ApplyTeamMembershipAsync(result.Data!.Id, request.SalesTeam, request.OpTeam, null, null);
+
+        return CreatedAtAction(nameof(GetById), new { id = result.Data!.Id },
+            string.IsNullOrEmpty(mappingNote) ? result : ApiResponseDto<UserDto>.Ok(result.Data, (result.Message ?? "User created.") + " " + mappingNote));
     }
 
     /// <summary>Update user [Admin only]</summary>
@@ -91,8 +123,92 @@ public class UsersController : BaseController
             return BadRequest(ApiResponseDto<UserDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
 
+        // Capture the CURRENT SalesTeam/OpTeam before the service call
+        // overwrites them — needed to correctly diff old→new (remove the
+        // stale membership, add the new one, no duplicates) rather than
+        // blindly re-adding on every save. Read-only, no side effects.
+        var existingUser = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == id);
+        var oldSalesTeam = existingUser?.SalesTeam;
+        var oldOpTeam    = existingUser?.OpTeam;
+
         var result = await _userService.UpdateAsync(id, request);
+        if (!result.Success) return ApiResult(result);
+
+        var mappingNote = await ApplyTeamMembershipAsync(id, request.SalesTeam, request.OpTeam, oldSalesTeam, oldOpTeam);
+        if (!string.IsNullOrEmpty(mappingNote))
+            return Ok(ApiResponseDto<UserDto>.Ok(result.Data, (result.Message ?? "User updated.") + " " + mappingNote));
+
         return ApiResult(result);
+    }
+
+    /// <summary>
+    /// User Creation + Mapping simplification (analysis approved — see
+    /// prior forensic report). Reconciles ONE team-type (Sales or Login)
+    /// between an old and new team NAME (User.SalesTeam/OpTeam are already
+    /// stored as team names, matching what the Create/Edit User dropdowns
+    /// send — see CreateUserRequestDto). Only ever touches the ONE
+    /// membership this specific field tracked previously — any OTHER
+    /// membership a user has (added manually via Teams → Add Member, for a
+    /// team unrelated to this field) is never read or modified here, so
+    /// existing manual mappings are never silently altered.
+    /// Returns a short user-facing note only when something couldn't be
+    /// auto-applied (team not found) — empty string on full success, so
+    /// callers can silently append it to their own success message.
+    /// </summary>
+    private async Task<string> ApplyTeamMembershipAsync(int userId, string? newSalesTeam, string? newOpTeam, string? oldSalesTeam, string? oldOpTeam)
+    {
+        var notes = new List<string>();
+        var salesNote = await ApplyOneTeamTypeAsync(userId, "Sales", newSalesTeam, oldSalesTeam);
+        if (salesNote != null) notes.Add(salesNote);
+        var opNote = await ApplyOneTeamTypeAsync(userId, "Login", newOpTeam, oldOpTeam);
+        if (opNote != null) notes.Add(opNote);
+        return string.Join(" ", notes);
+    }
+
+    private async Task<string?> ApplyOneTeamTypeAsync(int userId, string teamType, string? newTeamName, string? oldTeamName)
+    {
+        newTeamName = string.IsNullOrWhiteSpace(newTeamName) ? null : newTeamName.Trim();
+        oldTeamName = string.IsNullOrWhiteSpace(oldTeamName) ? null : oldTeamName.Trim();
+        if (string.Equals(newTeamName, oldTeamName, StringComparison.OrdinalIgnoreCase))
+            return null; // No change for this team type — nothing to do (also covers "still no team selected").
+
+        try
+        {
+            // Remove the previous membership this field tracked, if any —
+            // same soft-delete convention as TeamsController.RemoveMember.
+            if (oldTeamName != null)
+            {
+                var oldTeam = await _db.Teams.FirstOrDefaultAsync(t => t.Type == teamType && t.Name == oldTeamName && !t.IsDeleted);
+                if (oldTeam != null)
+                {
+                    var oldMember = await _db.TeamMembers.FirstOrDefaultAsync(m => m.TeamId == oldTeam.Id && m.UserId == userId && !m.IsDeleted);
+                    if (oldMember != null) { oldMember.IsDeleted = true; oldMember.UpdatedAt = DateTime.UtcNow; }
+                }
+            }
+
+            // Add the newly-selected team's membership, same add-if-not-
+            // already-present convention as TeamsController.AddMember.
+            if (newTeamName != null)
+            {
+                var newTeam = await _db.Teams.FirstOrDefaultAsync(t => t.Type == teamType && t.Name == newTeamName && !t.IsDeleted);
+                if (newTeam == null)
+                    return $"({teamType} team \"{newTeamName}\" not found — assign it manually from the Teams page.)";
+
+                var already = await _db.TeamMembers.AnyAsync(m => m.TeamId == newTeam.Id && m.UserId == userId && !m.IsDeleted);
+                if (!already)
+                    _db.TeamMembers.Add(new TeamMember { TeamId = newTeam.Id, UserId = userId, CreatedAt = DateTime.UtcNow });
+            }
+
+            await _db.SaveChangesAsync();
+            return null;
+        }
+        catch (Exception)
+        {
+            // Non-fatal by design (see ApplyTeamMembershipAsync's doc
+            // comment) — the user record itself is already safely saved;
+            // surface this as a note rather than failing the whole request.
+            return $"({teamType} team mapping could not be completed automatically — assign it manually from the Teams page.)";
+        }
     }
 
     /// <summary>Delete user [Admin only]</summary>
