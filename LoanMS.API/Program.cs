@@ -590,7 +590,20 @@ try
 
             foreach (var u in defaultUsers)
             {
-                var existing = db.Users.FirstOrDefault(x => x.Email == u.Email);
+                // BUGFIX (confirmed via live CloudWatch logs — "duplicate key
+                // value violates unique constraint IX_Users_Email" crashing
+                // startup on every restart): User has a global query filter
+                // (!IsDeleted), but Email's unique index is NOT filtered — a
+                // soft-deleted default user (e.g. someone previously used
+                // Delete User on admin@efin.com) becomes invisible to this
+                // FirstOrDefault() lookup while STILL physically occupying
+                // that email at the database level. Seed logic then tried to
+                // INSERT a fresh row with the same email → unique-constraint
+                // violation → unhandled exception → the whole app failed to
+                // start, every single time, until this is fixed. Ignoring
+                // the query filter here finds a soft-deleted row too, and
+                // reactivates it instead of colliding with it.
+                var existing = db.Users.IgnoreQueryFilters().FirstOrDefault(x => x.Email == u.Email);
                 if (existing == null)
                 {
                     db.Users.Add(new LoanMS.Domain.Entities.User
@@ -607,6 +620,11 @@ try
                 else
                 {
                     existing.IsActive = true; // never leave a default account locked out
+                    if (existing.IsDeleted)
+                    {
+                        existing.IsDeleted = false; // reactivate — see BUGFIX note above
+                        logger.LogWarning("Default user {Email} was soft-deleted — reactivated on startup.", u.Email);
+                    }
 
                     if (forcePasswordReset)
                     {
