@@ -403,6 +403,66 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   }
 
   /* ══════════════════════════════════════════════════════════
+     twSaveUserDetail — the OTHER "Edit User" panel (Users page's inline
+     tw-user-detail card, distinct from the tw-user-modal popup twSaveUser()
+     already handles above). Was entirely unpatched — 100% local-only, same
+     "looks saved, isn't" class of bug as the Team-members issue found
+     alongside this one. Reuses the SAME PUT /api/users/{id} endpoint (and
+     therefore the same server-side TeamMember auto-mapping already built
+     for Create/Update) rather than adding a second save path. NOTE — this
+     panel lets an admin add MULTIPLE Location/Sales-Team/Ops-Team tags, but
+     the backend's User.SalesTeam/OpTeam model (and the Create User modal)
+     only support ONE of each — this patch follows the SAME convention this
+     panel's own original code already used locally (u.loc=_twUdLocs[0],
+     u.st=_twUdSales[0], u.ot=_twUdOps[0] — first tag treated as the
+     primary one) rather than guessing at true multi-team support, which
+     isn't represented anywhere in the current data model.
+  ══════════════════════════════════════════════════════════ */
+  function _patchTwSaveUserDetail() {
+    if (window._bridgeTwSaveUserDetailPatched) return;
+    window._bridgeTwSaveUserDetailPatched = true;
+    var _orig = window.twSaveUserDetail;
+    if (typeof _orig !== 'function') return;
+    window.twSaveUserDetail = function() {
+      var nameEl  = document.getElementById('tw-ud-name');
+      var emailEl = document.getElementById('tw-ud-email');
+      var roleEl  = document.getElementById('tw-ud-role');
+      var editingUser = (typeof window._twEditUserId === 'number' && window.twUsers && window.twUsers[window._twEditUserId])
+        ? window.twUsers[window._twEditUserId] : null;
+      var locVal   = (window._twUdLocs  || [])[0] || '';
+      var stVal    = (window._twUdSales || [])[0] || '';
+      var otVal    = (window._twUdOps   || [])[0] || '';
+
+      var result = _orig.apply(this, arguments);
+
+      if (!editingUser || !editingUser._apiId || !nameEl || !nameEl.value.trim() || !emailEl || !emailEl.value.trim()) {
+        _syncUsers();
+        return result;
+      }
+      var payload = {
+        fullName: nameEl.value.trim(),
+        email: emailEl.value.trim().toLowerCase(),
+        role: ROLE_KEY_TO_ENUM[roleEl ? roleEl.value : ''] || 'Sales',
+        phoneNumber: editingUser.mobile || '',
+        locationName: locVal,
+        salesTeam: stVal,
+        opTeam: otVal,
+        isActive: editingUser.status !== 'inactive' && editingUser.status !== 'suspended'
+      };
+      apiReq('PUT', '/users/' + editingUser._apiId, payload).then(function(r) {
+        if (r && r.success) {
+          if (typeof window.showToast === 'function') window.showToast('User saved to database ✓', 'success');
+          setTimeout(_syncUsers, 500);
+        } else if (typeof window.showToast === 'function') {
+          var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+          window.showToast('⚠ User saved locally, but database sync failed: ' + msg, 'warn');
+        }
+      });
+      return result;
+    };
+  }
+
+  /* ══════════════════════════════════════════════════════════
      3. TEAMS — Sync from API into twSalesTeams / twLoginTeams
   ══════════════════════════════════════════════════════════ */
   function _syncTeams() {
@@ -478,11 +538,31 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         var locVal    = locEl ? locEl.value : '';
         var wasValid  = !!nameVal;
 
+        // BUGFIX (Members not persisting — confirmed): "Save Team" showed
+        // "Team saved to database ✓" and DID successfully save Name/
+        // Location/Leader, but Members were never included in that PUT/POST
+        // payload at all (TeamCreateDto has no Members field) — the "+ Add
+        // Member" flow inside the team-detail view only ever mutated a DOM
+        // element, then twSaveSalesTeamDetail()/twSaveLoginTeamDetail()
+        // (the ORIGINAL, unpatched functions) read that DOM back into
+        // team.members and stopped there. Nothing about member changes ever
+        // reached the server — hence "looks saved, isn't". Fixed by
+        // reconciling against the server using the SAME existing
+        // POST/DELETE .../members endpoints TeamsController already
+        // exposes (used elsewhere for the manual Add/Remove Member flow) —
+        // no new endpoint, no new architecture. Old member list captured
+        // here, BEFORE _orig overwrites team.members with the new one.
+        var store = window[c.store];
+        var oldMemberNames = [];
+        if (editId && Array.isArray(store)) {
+          var existingTeam = store.find(function(t){ return String(t.id) === String(editId); });
+          if (existingTeam && Array.isArray(existingTeam.members)) oldMemberNames = existingTeam.members.slice();
+        }
+
         var result = _orig.apply(this, arguments);
         if (!wasValid) return result; // original already showed its own validation toast
 
         setTimeout(function() {
-          var store = window[c.store];
           if (!Array.isArray(store)) return;
           var team = editId
             // Same type-agnostic comparison as _twFindTeamById in
@@ -494,6 +574,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             ? store.find(function(t){ return String(t.id) === String(editId); })
             : store.find(function(t){ return t.name === nameVal && !t._apiId; });
           if (!team) return;
+          var newMemberNames = Array.isArray(team.members) ? team.members.slice() : [];
 
           var locRec    = (window.twLocations || []).find(function(l){ return l.name === locVal; });
           var leaderRec = (window.twUsers || []).find(function(u){ return u.name === leaderVal; });
@@ -509,9 +590,16 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           req.then(function(r) {
             if (r && r.success) {
               if (!apiId && r.data && r.data.id) team._apiId = r.data.id;
-              if (typeof window.showToast === 'function') window.showToast('Team saved to database ✓', 'success');
-              if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
-              setTimeout(_syncTeams, 300);
+              var finalApiId = team._apiId;
+              _reconcileTeamMembers(finalApiId, oldMemberNames, newMemberNames).then(function(memberIssues) {
+                if (typeof window.showToast === 'function') {
+                  window.showToast(memberIssues
+                    ? 'Team saved to database ✓ (' + memberIssues + ')'
+                    : 'Team saved to database ✓', memberIssues ? 'warn' : 'success');
+                }
+                if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
+                setTimeout(_syncTeams, 300);
+              });
             } else if (typeof window.showToast === 'function') {
               var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
               window.showToast('⚠ Team saved locally, but database sync failed: ' + msg, 'warn');
@@ -520,6 +608,40 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         }, 200);
         return result;
       };
+    });
+  }
+
+  // Diff oldMemberNames → newMemberNames and push the difference to the
+  // server via the SAME POST/DELETE .../members endpoints the manual
+  // "Add Member" flow already uses (TeamsController.AddMember/RemoveMember)
+  // — reused, not duplicated. Names are resolved to user ids via twUsers
+  // (the same lookup _patchTeamSave already does for the team leader).
+  // Best-effort: one member failing to resolve/save doesn't block the
+  // others or the team save itself, matching the non-fatal pattern already
+  // used for User→Team auto-mapping — returns a short note (or null) for
+  // the caller to optionally surface, same convention as that fix's
+  // mappingNote pattern.
+  function _reconcileTeamMembers(teamApiId, oldNames, newNames) {
+    if (!teamApiId) return Promise.resolve('members not saved — team is not yet synced to the server');
+    var users = window.twUsers || [];
+    var toAdd    = newNames.filter(function(n){ return oldNames.indexOf(n) === -1; });
+    var toRemove = oldNames.filter(function(n){ return newNames.indexOf(n) === -1; });
+    if (!toAdd.length && !toRemove.length) return Promise.resolve(null);
+
+    var failures = [];
+    var ops = [];
+    toAdd.forEach(function(name) {
+      var u = users.find(function(x){ return x.name === name; });
+      if (!u || !u._apiId) { failures.push(name); return; }
+      ops.push(apiReq('POST', '/teams/' + teamApiId + '/members', { userId: u._apiId }).catch(function(){ failures.push(name); }));
+    });
+    toRemove.forEach(function(name) {
+      var u = users.find(function(x){ return x.name === name; });
+      if (!u || !u._apiId) return; // nothing to remove server-side if we can't resolve who it was
+      ops.push(apiReq('DELETE', '/teams/' + teamApiId + '/members/' + u._apiId).catch(function(){ failures.push(name); }));
+    });
+    return Promise.all(ops).then(function() {
+      return failures.length ? (failures.length + ' member(s) could not be saved — resync and retry from the team page') : null;
     });
   }
 
@@ -589,7 +711,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     var _orig = window.twRenameLocation;
     if (typeof _orig !== 'function') return;
     window.twRenameLocation = function(id) {
-      var loc = (window.twLocations || []).find(function(l){ return l.id === id; });
+      var loc = (window.twLocations || []).find(function(l){ return String(l.id) === String(id); });
       var apiId = loc && loc._apiId;
       var result = _orig.apply(this, arguments);
       if (!apiId || !loc) return result;
@@ -615,7 +737,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     var _orig = window.twDeleteLocation;
     if (typeof _orig !== 'function') return;
     window.twDeleteLocation = function(id) {
-      var loc = (window.twLocations || []).find(function(l){ return l.id === id; });
+      var loc = (window.twLocations || []).find(function(l){ return String(l.id) === String(id); });
       var apiId = loc && loc._apiId;
       var result = _orig.apply(this, arguments);
       if (!apiId) return result;
@@ -2483,6 +2605,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     setTimeout(function() {
       _patchStatusChange();
       _patchTwSaveUser();
+      _patchTwSaveUserDetail();
       _patchTeamSave();
       _patchLocationSave();
       _patchLocationRename();

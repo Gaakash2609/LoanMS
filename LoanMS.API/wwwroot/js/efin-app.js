@@ -23951,14 +23951,19 @@ ${printContent}
 
     function twLocMenu(btn, id) {
       closeAllRowMenus();
-      const l = twLocations.find(x => x.id === id); if (!l) return;
+      // Same type-agnostic id comparison as _twFindTeamById (see that
+      // helper's comment in the Teams section above for the full
+      // reasoning) — Locations use the identical id:'API'+loc.id /
+      // Date.now() dual-format convention as Teams, and had the exact same
+      // unquoted-onclick-interpolation bug.
+      const l = twLocations.find(x => String(x.id) === String(id)); if (!l) return;
       const wrap = btn.closest('.row-menu-wrap');
       const dropdown = document.createElement('div');
       dropdown.className = 'row-menu-dropdown';
       const canManage = (typeof twCanManageUsers === 'function') ? twCanManageUsers() : true;
       dropdown.innerHTML = canManage ? `
-        <button class="row-menu-item" onclick="closeAllRowMenus();twRenameLocation(${id})">✏️ Rename Location</button>
-        <button class="row-menu-item danger" onclick="closeAllRowMenus();twDeleteLocation(${id})">🗑 Delete Location</button>` :
+        <button class="row-menu-item" onclick="closeAllRowMenus();twRenameLocation('${id}')">✏️ Rename Location</button>
+        <button class="row-menu-item danger" onclick="closeAllRowMenus();twDeleteLocation('${id}')">🗑 Delete Location</button>` :
         `<button class="row-menu-item" disabled style="opacity:.5;cursor:not-allowed">View only</button>`;
       document.body.appendChild(dropdown);
       positionDropdownFixed(btn, dropdown, wrap);
@@ -24018,12 +24023,12 @@ ${printContent}
         const usr=twUsers.filter(u=>(u.locs||[]).includes(l.name));
         return `<tr>
           <td style="color:var(--text3);font-family:monospace;font-size:12px">${i+1}</td>
-          <td><input value="${l.name}" onblur="twUpdateLocation(${l.id},this.value)" style="background:transparent;border:none;border-bottom:1px solid transparent;color:var(--text);font-family:var(--font-body);font-size:13px;font-weight:600;outline:none;width:100%;max-width:160px" onfocus="this.style.borderBottomColor='var(--accent)'"/></td>
+          <td><input value="${l.name}" onblur="twUpdateLocation('${l.id}',this.value)" style="background:transparent;border:none;border-bottom:1px solid transparent;color:var(--text);font-family:var(--font-body);font-size:13px;font-weight:600;outline:none;width:100%;max-width:160px" onfocus="this.style.borderBottomColor='var(--accent)'"/></td>
           <td>${st.length?twPillCell(st.map(t=>t.name),'rgba(26,79,163,.1)','var(--accent)',2):'<span style="color:var(--text3)">—</span>'}</td>
           <td>${lt.length?twPillCell(lt.map(t=>t.name),'rgba(16,185,129,.1)','#10b981',2):'<span style="color:var(--text3)">—</span>'}</td>
           <td>${usr.length?twPillCell(usr.map(u=>u.name),'rgba(255,179,71,.12)','#f59e0b',2):'<span style="color:var(--text3)">—</span>'}</td>
           <td style="width:100px;text-align:right"><div class="row-menu-wrap">
-            <button class="row-menu-btn" onclick="twLocMenu(this,${l.id})">Actions <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+            <button class="row-menu-btn" onclick="twLocMenu(this,'${l.id}')">Actions <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
           </div></td>
         </tr>`;
       }).join('');
@@ -24033,9 +24038,9 @@ ${printContent}
     }
     function twUpdateLocation(id, val) {
       if (typeof twCanManageUsers === 'function' && !twCanManageUsers()) { twRenderLocations(); return; }
-      const l=twLocations.find(x=>x.id===id); const nv=(val||'').trim();
+      const l=twLocations.find(x=>String(x.id)===String(id)); const nv=(val||'').trim();
       if(!l||!nv||nv===l.name) return;
-      if(twLocations.some(x=>x.id!==id && x.name.toLowerCase()===nv.toLowerCase())){ showToast('A location with that name already exists','warn'); twRenderLocations(); return; }
+      if(twLocations.some(x=>String(x.id)!==String(id) && x.name.toLowerCase()===nv.toLowerCase())){ showToast('A location with that name already exists','warn'); twRenderLocations(); return; }
       const old=l.name; l.name=nv;
       twSalesTeams.forEach(t=>{ if(t.location===old) t.location=nv; });
       twLoginTeams.forEach(t=>{ if(t.location===old) t.location=nv; });
@@ -24045,7 +24050,7 @@ ${printContent}
     }
     function twDeleteLocation(id) {
       if (typeof twCanManageUsers === 'function' && !twCanManageUsers()) { showToast('Only Admin or Product Team can delete locations','error'); return; }
-      const l = twLocations.find(x=>x.id===id); if(!l) return;
+      const l = twLocations.find(x=>String(x.id)===String(id)); if(!l) return;
       const inUse = twSalesTeams.filter(t=>t.location===l.name).length
                   + twLoginTeams.filter(t=>t.location===l.name).length
                   + twUsers.filter(u=>(u.locs||[]).includes(l.name)).length;
@@ -24056,10 +24061,10 @@ ${printContent}
     }
     function twRenameLocation(id) {
       if (typeof twCanManageUsers === 'function' && !twCanManageUsers()) { showToast('Only Admin or Product Team can rename locations','error'); return; }
-      const l = twLocations.find(x=>x.id===id); if(!l) return;
+      const l = twLocations.find(x=>String(x.id)===String(id)); if(!l) return;
       const nv = (prompt('Rename location:', l.name)||'').trim();
       if(!nv || nv===l.name) return;
-      if(twLocations.some(x=>x.id!==id && x.name.toLowerCase()===nv.toLowerCase())){ showToast('A location with that name already exists','warn'); return; }
+      if(twLocations.some(x=>String(x.id)!==String(id) && x.name.toLowerCase()===nv.toLowerCase())){ showToast('A location with that name already exists','warn'); return; }
       const old = l.name; l.name = nv;
       // Keep references in teams/users consistent.
       twSalesTeams.forEach(t=>{ if(t.location===old) t.location=nv; });
