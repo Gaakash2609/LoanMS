@@ -6874,14 +6874,33 @@
 
     // When Location changes → re-populate Sales Person dropdown filtered to that location
     // mirrors create_new_loan.py get_assigned_user_domain (Sales Executive group, no team yet)
+    // Trim + case-insensitive location-name comparison — reused everywhere
+    // a Team/User's stored Location is compared against an application's
+    // selected Location, since both should reference the same canonical
+    // Locations-table name but a stray whitespace/case difference anywhere
+    // upstream would otherwise silently produce zero matches with no error.
+    // See wLocationChange()/wSalesPersonChange() above for the two places
+    // this was first found and fixed.
+    function _locEq(a, b) {
+      return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+    }
+
     function wLocationChange() {
       const loc = document.getElementById('w-location')?.value || '';
       const salesSel = document.getElementById('w-sales');
       if (!salesSel) return;
 
-      // Sales executives for this location (from twUsers filtered by Sales Person / Sales Executive role)
+      // Sales executives for this location (from twUsers filtered by Sales Person / Sales Executive role).
+      // BUGFIX: exact === comparison was fragile against any stray whitespace
+      // or case difference between the Location dropdown's value and a
+      // User record's LocationName (both ultimately come from the same
+      // Locations table, so this should rarely trigger, but a case/space
+      // mismatch anywhere upstream would silently produce zero matches with
+      // no error — trimmed + case-insensitive comparison is strictly safer
+      // and can't match something it shouldn't).
+      const locNorm = loc.trim().toLowerCase();
       const salesUsers = (typeof twUsers !== 'undefined' ? twUsers : [])
-        .filter(u => u.loc === loc && (u.role === 'Sales Person' || u.role === 'Team Leader'));
+        .filter(u => (u.loc || '').trim().toLowerCase() === locNorm && (u.role === 'Sales Person' || u.role === 'Team Leader'));
 
       salesSel.innerHTML = '<option value="">— Select Sales Person —</option>' +
         salesUsers.map(u => `<option value="${u.name}">${u.name} (${u.role})</option>`).join('');
@@ -6889,7 +6908,9 @@
       // Clear previous auto-assign
       const hint = document.getElementById('w-sales-hint');
       const loginGroup = null; // w-login-user-group removed
-      if (hint) hint.textContent = '';
+      if (hint) hint.textContent = salesUsers.length === 0 && loc
+        ? 'No Sales Person or Team Leader found for this location yet — add one under Users, or pick a different location.'
+        : '';
       if (loginGroup) loginGroup.style.display = 'none';
     }
 
@@ -7049,9 +7070,14 @@
 
       if (!salesName || !loc) return;
 
-      // 1. Find Sales Team — team at this location that has this person as member/leader
+      // 1. Find Sales Team — team at this location that has this person as member/leader.
+      // Same trim/case-insensitive fix as wLocationChange() above, for the
+      // same reason — this only affects the informational "Sales Team: X"
+      // hint text (doesn't block anything), but was silently blank on the
+      // same class of whitespace/case mismatch.
+      const locNorm2 = loc.trim().toLowerCase();
       const salesTeam = (typeof twSalesTeams !== 'undefined' ? twSalesTeams : [])
-        .find(t => t.location === loc && (t.leader === salesName || (t.members || []).includes(salesName)));
+        .find(t => (t.location || '').trim().toLowerCase() === locNorm2 && (t.leader === salesName || (t.members || []).includes(salesName)));
       if (hint) hint.textContent = salesTeam ? `Sales Team: ${salesTeam.name}` : '';
 
       // 2. Preview the Login User the engine would auto-assign (least workload,
@@ -7168,7 +7194,7 @@
 
       // ── SALES TEAM CELL ──
       const salesTeams = (typeof twSalesTeams !== 'undefined' ? twSalesTeams : [])
-        .filter(t => !app.location || t.location === app.location)
+        .filter(t => !app.location || _locEq(t.location, app.location))
         .map(t => t.name);
       const salesTeamCell = canEditFields
         ? `<select onchange="updateSalesTeam('${app.id}',this.value)"
@@ -7192,7 +7218,7 @@
       // ── LOGIN USER CELL ──
       // FIX: Show all login-team/ops users; if location not set yet, show all eligible users
       const loginTeam = (typeof twLoginTeams !== 'undefined' ? twLoginTeams : [])
-        .find(t => t.location === app.location && (t.members||[]).includes(app.loginUser));
+        .find(t => _locEq(t.location, app.location) && (t.members||[]).includes(app.loginUser));
       const canEditLoginUser = canChangeLoginUser(app);
       const loginUserOptions = (typeof twUsers !== 'undefined' ? twUsers : [])
         .filter(u => {
@@ -7217,7 +7243,7 @@
       // ── OPERATIONS MANAGER CELL ──
       // FIX: Show dropdown even when opsManagerId is empty so admin can assign one
       const opsManagers = (typeof twLoginTeams !== 'undefined' ? twLoginTeams : [])
-        .filter(t => !app.location || t.location === app.location)
+        .filter(t => !app.location || _locEq(t.location, app.location))
         .map(t => t.leader)
         .filter((v, i, a) => v && a.indexOf(v) === i);
       const opsManagerCell = canEditFields
@@ -7533,7 +7559,7 @@
       app.assignmentStatus = userName ? 'assigned' : 'unassigned';
       // Re-compute login team from twLoginTeams
       const opTeam = (typeof twLoginTeams !== 'undefined' ? twLoginTeams : [])
-        .find(t => t.location === app.location && (t.members||[]).includes(userName));
+        .find(t => _locEq(t.location, app.location) && (t.members||[]).includes(userName));
       // Log to tracking
       addTrackingEntry(app, 'Login User Changed', 'System Comments',
         `Login User updated to: ${userName}${opTeam ? ' (Team: '+opTeam.name+')' : ''}`, '');
@@ -7630,7 +7656,7 @@
       const oldManager = app.opsManagerId;
       app.opsManagerId = managerName;
       const team = (typeof twLoginTeams !== 'undefined' ? twLoginTeams : [])
-        .find(t => t.location === app.location && t.leader === managerName);
+        .find(t => _locEq(t.location, app.location) && t.leader === managerName);
       addTrackingEntry(app, 'Operations Manager Changed', 'System Comments',
         `Operations Manager updated from: ${oldManager || '—'} to: ${managerName}${team ? ' (Team: ' + team.name + ')' : ''}`, '');
       showToast(`Operations Manager updated to ${managerName}`, 'success');
@@ -15500,70 +15526,12 @@ ${printContent}
     }
     window.renderActionQueue = renderActionQueue;
 
-    // 🟡 Global Search (productivity audit, P1) — searches across Loans/
-    // Customers/DSA/Partners via GET /api/search, which reuses each
-    // module's own existing role-based visibility rule (not a new one) —
-    // see SearchController.cs. Debounced to avoid a request per keystroke.
-    let _globalSearchTimer = null;
-    function globalSearchOpen() {
-      const panel = document.getElementById('global-search-panel');
-      if (!panel) return;
-      const opening = panel.style.display === 'none';
-      panel.style.display = opening ? 'block' : 'none';
-      if (opening) {
-        const input = document.getElementById('global-search-input');
-        if (input) { input.value = ''; input.focus(); }
-        var r = document.getElementById('global-search-results');
-        if (r) r.innerHTML = '<div style="color:var(--text3);padding:8px">Type at least 2 characters…</div>';
-      }
-    }
-
-    function globalSearchDebounced(q) {
-      if (_globalSearchTimer) clearTimeout(_globalSearchTimer);
-      _globalSearchTimer = setTimeout(function() { globalSearchRun(q); }, 350);
-    }
-
-    async function globalSearchRun(q) {
-      const results = document.getElementById('global-search-results');
-      if (!results) return;
-      if (!q || q.trim().length < 2) { results.innerHTML = '<div style="color:var(--text3);padding:8px">Type at least 2 characters…</div>'; return; }
-      if (typeof apiReq !== 'function') return;
-      results.innerHTML = '<div style="color:var(--text3);padding:8px">Searching…</div>';
-      try {
-        const res = await apiReq('GET', '/search?q=' + encodeURIComponent(q.trim()));
-        if (!res || !res.success || !res.data) { results.innerHTML = '<div style="color:var(--text3);padding:8px">No results</div>'; return; }
-        const d = res.data;
-        let html = '';
-        (d.loans || []).forEach(function(l) {
-          html += '<div onclick="globalSearchGoTo(\'' + l.loanNumber + '\')" style="padding:7px 8px;border-radius:7px;cursor:pointer" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'\'">' +
-            '📄 <strong>' + l.loanNumber + '</strong> — ' + (l.customerName||'') + ' <span style="color:var(--text3)">(' + l.status + ')</span></div>';
-        });
-        (d.customers || []).forEach(function(c) {
-          html += '<div style="padding:7px 8px;border-radius:7px">👤 <strong>' + (c.fullName||'') + '</strong> — ' + (c.phone||'') + '</div>';
-        });
-        (d.dsaPartners || []).forEach(function(p) {
-          html += '<div style="padding:7px 8px;border-radius:7px">🤝 <strong>' + (p.name||'') + '</strong> (' + (p.partnerType||'') + (p.code?' — '+p.code:'') + ')</div>';
-        });
-        results.innerHTML = html || '<div style="color:var(--text3);padding:8px">No results</div>';
-      } catch (e) {
-        results.innerHTML = '<div style="color:var(--text3);padding:8px">Search failed</div>';
-      }
-    }
-
-    function globalSearchGoTo(loanNumber) {
-      var panel = document.getElementById('global-search-panel');
-      if (panel) panel.style.display = 'none';
-      if (typeof showPage === 'function') showPage('applications', null);
-      if (typeof openDetail === 'function') setTimeout(function() { openDetail(loanNumber); }, 200);
-    }
-
-    // Close the panel on outside click — same convention as other dropdowns.
-    document.addEventListener('click', function(e) {
-      const panel = document.getElementById('global-search-panel');
-      const btn = document.getElementById('global-search-btn');
-      if (!panel || panel.style.display === 'none') return;
-      if (!panel.contains(e.target) && e.target !== btn) panel.style.display = 'none';
-    });
+    // Global Search icon-button + its handlers removed per business owner —
+    // was perceived as a duplicate/confusing second search interface sitting
+    // right next to the intended "All Fields + Search applications" topbar
+    // box (see index.html for the removal note). GET /api/search backend
+    // endpoint is left in place, unused for now — not deleted just because
+    // its one UI trigger was removed.
 
     function updateDashboardStats() {
       // Expert Export button visibility — re-checked (cheaply, cached) on every
@@ -20326,7 +20294,7 @@ ${printContent}
           // An app passes if at least one matching team either has no loanType restriction
           // or explicitly includes the app's loanType
           var productMatch = leaderOpTeams.some(function(t) {
-            var locOk = !t.location || t.location === a.location;
+            var locOk = !t.location || (t.location || '').trim().toLowerCase() === (a.location || '').trim().toLowerCase();
             if (!locOk) return false;
             if (!Array.isArray(t.loanTypes) || !t.loanTypes.length) return true; // no restriction
             return t.loanTypes.includes(a.loanType || '');
@@ -20678,10 +20646,6 @@ ${printContent}
     window.toggleBulkSelectAll = toggleBulkSelectAll;
     window.bulkApplyStatus = bulkApplyStatus;
     window.renderBulkActionsBar = renderBulkActionsBar;
-    window.globalSearchOpen = globalSearchOpen;
-    window.globalSearchDebounced = globalSearchDebounced;
-    window.globalSearchRun = globalSearchRun;
-    window.globalSearchGoTo = globalSearchGoTo;
     window.calcCompare = calcCompare;
     window.calcPrepay = calcPrepay;
     window.renderPipeline = renderPipeline;

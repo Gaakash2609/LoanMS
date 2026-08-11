@@ -593,20 +593,13 @@
           onfocus="this.parentElement.querySelector('select').style.borderColor='var(--accent)'"
           onblur="this.parentElement.querySelector('select').style.borderColor='var(--border)'">
       </div>
-      <!-- 🟡 Global Search (productivity audit, P1) — searches Loans/
-           Customers/DSA/Partners in one call (GET /api/search), instead of
-           the box above which only filters the currently-loaded
-           Applications table. See globalSearchOpen()/globalSearchRun() in
-           efin-app.js. -->
-      <div style="position:relative">
-        <button onclick="globalSearchOpen()" title="Search everything (applications, customers, DSA, partners)"
-          style="height:36px;padding:0 12px;border-radius:9px;border:1.5px solid var(--border2);background:var(--surface);color:var(--text2);cursor:pointer;font-size:15px" id="global-search-btn">🔎</button>
-        <div id="global-search-panel" style="display:none;position:absolute;top:42px;right:0;width:340px;max-height:420px;overflow-y:auto;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.15);z-index:600;padding:10px">
-          <input id="global-search-input" type="text" placeholder="Search applications, customers, DSA, partners…" oninput="globalSearchDebounced(this.value)"
-            style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border2);margin-bottom:8px;font-size:13px">
-          <div id="global-search-results" style="font-size:12.5px"></div>
-        </div>
-      </div>
+      <!-- Global Search icon-button removed per business owner — it sat
+           immediately next to the intended topbar search box and was
+           perceived as a confusing/duplicate second search interface.
+           The backend endpoint (GET /api/search) is left in place —
+           removing a UI trigger is not a reason to delete a working API
+           that cost nothing to keep and could be wired up differently
+           later if wanted. -->
       <button class="topbar-icon-btn" title="Notifications" onclick="toggleNotifPanel()" style="flex-shrink:0"><span>🔔</span><span
           class="topbar-notif-dot"></span></button>
 
