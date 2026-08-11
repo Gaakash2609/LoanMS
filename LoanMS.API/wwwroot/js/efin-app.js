@@ -271,9 +271,9 @@
         ]
       },
       sales_executive: {
-        label: 'Sales Executive', key: 'group_sales_executive_manager',
+        label: 'Sales Person', key: 'group_sales_executive_manager',
         icon: '💼', color: 'rgba(255,107,53,.12)', textColor: 'var(--accent3)',
-        badgeClass: 'role-badge-sales', dept: 'Sales Exe. Dep',
+        badgeClass: 'role-badge-sales', dept: 'Sales Dep',
         canCreateApp: true, canChangeStatus: false,
         canRejectApp: false, canHoldApp: false, canDisburse: false, canDeviation: false,
         canViewOverview: true,
@@ -296,7 +296,7 @@
         canNavBanks: false, canNavIncred: false, canNavDSA: false, canNavPartner: false,
         canNavTeamOverview: false, canNavSalesTeams: false, canNavLoginTeams: false, canNavLocations: false, canNavUsers: false,
         canNavReports: false, canNavTickets: true,
-        desc: 'Sales Executive — field / branch sales team that originates applications, collects applicant KYC and income documents, and hands off to Operations. Focused on customer acquisition, not processing.',
+        desc: 'Sales Person — field / branch sales team that originates applications, collects applicant KYC and income documents, and hands off to Operations. Focused on customer acquisition, not processing.',
         scope: 'Their own book of originated applications',
         teamSize: 'Large team (typically 20–100+ per region)',
         responsibilities: [
@@ -745,7 +745,7 @@
     //
     // Master list: {id, label, icon, section, canHide, defaultRoles}
     // defaultRoles: array of roles that see this item by default (admin-controlled items only)
-    const ALL_ROLES = ['admin','team_leader','login_team','sales_executive','partner','accounts','product_team'];
+    const ALL_ROLES = ['admin','manager','team_leader','login_team','operation_manager','location_head','sales_executive','dsa_user','partner','accounts','product_team'];
 
     const ALL_MENU_ITEMS = [
       // ── LOCKED CORE (visible to everyone always) ──
@@ -790,9 +790,13 @@
     // ── Role display config for the Menu Manager UI ──
     const ROLE_DISPLAY = {
       admin:           { label: 'Admin',        color: '#7c3aed', bg: 'rgba(124,58,237,.1)' },
+      manager:         { label: 'Manager',      color: '#1a4fa3', bg: 'rgba(26,79,163,.1)'  },
       team_leader:     { label: 'Team Lead',    color: '#0369a1', bg: 'rgba(3,105,161,.1)'  },
       login_team:      { label: 'Login Team',   color: '#0f766e', bg: 'rgba(15,118,110,.1)' },
+      operation_manager:{ label: 'Ops Manager', color: '#0f766e', bg: 'rgba(15,118,110,.1)' },
+      location_head:   { label: 'Location Head',color: '#7c3aed', bg: 'rgba(124,58,237,.1)' },
       sales_executive: { label: 'Sales',        color: '#b45309', bg: 'rgba(180,83,9,.1)'   },
+      dsa_user:        { label: 'DSA',          color: '#be185d', bg: 'rgba(190,24,93,.1)'  },
       partner:         { label: 'Partner',      color: '#be185d', bg: 'rgba(190,24,93,.1)'  },
       accounts:        { label: 'Accounts',     color: '#059669', bg: 'rgba(5,150,105,.1)'  },
       product_team:    { label: 'Product Team', color: '#db2777', bg: 'rgba(236,72,153,.1)' },
@@ -5833,7 +5837,7 @@
 
       // ── Full permission matrix ──
       const matrixBody = document.getElementById('perm-matrix-body');
-      const roleOrder = ['admin', 'login_team', 'team_leader', 'sales_executive', 'partner', 'accounts', 'product_team'];
+      const roleOrder = ['admin', 'manager', 'login_team', 'operation_manager', 'team_leader', 'location_head', 'sales_executive', 'dsa_user', 'partner', 'accounts', 'product_team'];
 
       const allPerms = [
         ['── APPLICATION DETAIL TABS ──', null],
@@ -6873,7 +6877,7 @@
     })();
 
     // When Location changes → re-populate Sales Person dropdown filtered to that location
-    // mirrors create_new_loan.py get_assigned_user_domain (Sales Executive group, no team yet)
+    // mirrors create_new_loan.py get_assigned_user_domain (Sales Person group, no team yet)
     // Trim + case-insensitive location-name comparison — reused everywhere
     // a Team/User's stored Location is compared against an application's
     // selected Location, since both should reference the same canonical
@@ -6890,7 +6894,7 @@
       const salesSel = document.getElementById('w-sales');
       if (!salesSel) return;
 
-      // Sales executives for this location (from twUsers filtered by Sales Person / Sales Executive role).
+      // Sales Person users for this location (role label is always 'Sales Person' now — see ROLES.sales_executive.label).
       // BUGFIX: exact === comparison was fragile against any stray whitespace
       // or case difference between the Location dropdown's value and a
       // User record's LocationName (both ultimately come from the same
@@ -7805,7 +7809,7 @@
           if (!opt) {
             const newOpt = document.createElement('option');
             newOpt.value = currentUser.name;
-            newOpt.text  = currentUser.name + ' (Sales Executive)';
+            newOpt.text  = currentUser.name + ' (Sales Person)';
             salesSel.appendChild(newOpt);
           }
           salesSel.value = currentUser.name;
@@ -7825,6 +7829,14 @@
         const salesSel = document.getElementById('w-sales');
         if (salesSel && typeof twUsers !== 'undefined') {
           const curLoc = document.getElementById('w-location')?.value || '';
+          // Sales Executive → Sales Person normalization: u.role is always
+          // live-computed as "Sales Person" now (see ROLES.sales_executive.
+          // label in the config above, and _syncUsers() in api-bridge.js,
+          // which derives it fresh from that config on every sync — nothing
+          // is ever stored as literal role-label text, so there's no old
+          // data to migrate). The "Sales Executive" check below is kept
+          // only as a defensive fallback for any cached/offline state that
+          // predates this rename — intentional, not an oversight.
           const salesUsers = twUsers.filter(u =>
             u.role === 'Sales Person' || u.role === 'Sales Executive' || u.role === 'Team Leader'
           );
@@ -20212,7 +20224,7 @@ ${printContent}
         return getPartnerScopedApps();
       }
 
-      // ── SALES EXECUTIVE: own assigned apps + unassigned apps in their location ──
+      // ── SALES PERSON: own assigned apps + unassigned apps in their location ──
       if (role === 'sales_executive') {
         var myApps = apps.filter(function(a) { return (a.sales || '') === uname; });
         var seRec  = (typeof twUsers !== 'undefined' ? twUsers : [])
@@ -22744,7 +22756,7 @@ ${printContent}
         </tfoot>
       </table>
     </div>
-    ${!canEdit ? `<div style="font-size:11.5px;color:var(--text3);padding:6px 2px;display:flex;align-items:center;gap:6px">🔒 <span>Obligation editing is restricted for Partner and Sales Executive roles.</span></div>` : ''}`}
+    ${!canEdit ? `<div style="font-size:11.5px;color:var(--text3);padding:6px 2px;display:flex;align-items:center;gap:6px">🔒 <span>Obligation editing is restricted for Partner and Sales Person roles.</span></div>` : ''}`}
   `;
 
       // Render FOIR panel (always, above obligations)
@@ -24687,7 +24699,7 @@ ${printContent}
         label: 'Sales Person',
         icon: '👤',
         wizardId: 'w-sales',
-        desc: 'Step 1 — sales executives available for assignment',
+        desc: 'Step 1 — sales persons available for assignment',
         // Hardcoded sample names removed — not actually used to populate the
         // live wizard's Sales Person select (that comes from twUsers via
         // wLocationChange(), see comment on mlPopulateWizardSelects below),
@@ -25978,7 +25990,7 @@ ${printContent}
     //  Blocked stages: rejected · hold · disbursed
     // ═══════════════════════════════════════════════════════════════
 
-    // EAV-allowed sections for Sales Executive with EAV task
+    // EAV-allowed sections for Sales Person with EAV task
     var EAV_ALLOWED_SECTIONS = ['overview', 'personal', 'address', 'employment', 'references'];
 
     function switchEditTab(name, el) {
@@ -36489,7 +36501,7 @@ function stgMacRender() {
   const headerEl = document.getElementById('stg-mac-role-header');
   if (headerEl) {
     const roleLabels = typeof ROLE_DISPLAY !== 'undefined' ? ROLE_DISPLAY : {};
-    const roles = typeof ALL_ROLES !== 'undefined' ? ALL_ROLES : ['admin','team_leader','login_team','sales_executive','partner','accounts','product_team'];
+    const roles = typeof ALL_ROLES !== 'undefined' ? ALL_ROLES : ['admin','manager','team_leader','login_team','operation_manager','location_head','sales_executive','dsa_user','partner','accounts','product_team'];
     headerEl.innerHTML =
       `<span style="flex:1;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Menu Item</span>` +
       roles.map(r => {
@@ -36501,7 +36513,7 @@ function stgMacRender() {
   // Item rows grouped by section
   const rowsEl = document.getElementById('stg-mac-rows');
   if (!rowsEl) return;
-  const roles = typeof ALL_ROLES !== 'undefined' ? ALL_ROLES : ['admin','team_leader','login_team','sales_executive','partner','accounts','product_team'];
+  const roles = typeof ALL_ROLES !== 'undefined' ? ALL_ROLES : ['admin','manager','team_leader','login_team','operation_manager','location_head','sales_executive','dsa_user','partner','accounts','product_team'];
   const roleLabels = typeof ROLE_DISPLAY !== 'undefined' ? ROLE_DISPLAY : {};
 
   const sections = {};
