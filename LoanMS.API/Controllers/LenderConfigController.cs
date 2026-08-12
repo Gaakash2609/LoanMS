@@ -22,7 +22,8 @@ namespace LoanMS.API.Controllers;
 public class LenderConfigController : BaseController
 {
     private readonly AppDbContext _db;
-    public LenderConfigController(AppDbContext db) => _db = db;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
+    public LenderConfigController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
     // ── Companies ─────────────────────────────────────────────────────────────
 
@@ -39,6 +40,17 @@ public class LenderConfigController : BaseController
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> CreateCompany([FromBody] AnalyticCompanyDto dto)
     {
+        // Menu Access Control — only reachable by Admin/ProductTeam already
+        // (see [Authorize] above); this only lets Admin further restrict
+        // ProductTeam specifically, via the "Policy & Product" menu toggle.
+        // Deliberately NOT applied to GetCompanies()/other READ endpoints in
+        // this controller — the wizard's eligibility matching reads this
+        // same data for every role that can start a wizard, and blocking
+        // reads here would break the wizard for any role missing this menu
+        // item, which is a real regression, not a permission fix.
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+
         if (string.IsNullOrWhiteSpace(dto.Name))
             return BadRequest(ApiResponseDto<object>.Fail("Company name is required."));
 
@@ -58,6 +70,9 @@ public class LenderConfigController : BaseController
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> UpdateCompany(int id, [FromBody] AnalyticCompanyDto dto)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+
         var company = await _db.AnalyticCompanies.FindAsync(id);
         if (company == null) return NotFound(ApiResponseDto<bool>.Fail("Company not found."));
         if (string.IsNullOrWhiteSpace(dto.Name))
@@ -75,6 +90,9 @@ public class LenderConfigController : BaseController
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> DeleteCompany(int id)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+
         var company = await _db.AnalyticCompanies.FindAsync(id);
         if (company == null) return NotFound(ApiResponseDto<bool>.Fail("Company not found."));
         company.IsDeleted = true;
@@ -98,6 +116,9 @@ public class LenderConfigController : BaseController
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> CreateCategory([FromBody] AnalyticCategoryDto dto)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+
         if (string.IsNullOrWhiteSpace(dto.Name))
             return BadRequest(ApiResponseDto<object>.Fail("Category name is required."));
 
@@ -116,6 +137,9 @@ public class LenderConfigController : BaseController
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> UpdateCategory(int id, [FromBody] AnalyticCategoryDto dto)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+
         var category = await _db.AnalyticCategories.FindAsync(id);
         if (category == null) return NotFound(ApiResponseDto<bool>.Fail("Category not found."));
         if (string.IsNullOrWhiteSpace(dto.Name))
@@ -132,6 +156,9 @@ public class LenderConfigController : BaseController
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> DeleteCategory(int id)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+
         var category = await _db.AnalyticCategories.FindAsync(id);
         if (category == null) return NotFound(ApiResponseDto<bool>.Fail("Category not found."));
         category.IsDeleted = true;
@@ -150,6 +177,9 @@ public class LenderConfigController : BaseController
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> CreateLine([FromBody] BankEligibilityLineDto dto)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+
         var bankExists = await _db.Banks.AnyAsync(b => b.Id == dto.BankId);
         if (!bankExists) return BadRequest(ApiResponseDto<object>.Fail("Bank not found."));
         var companyExists = await _db.AnalyticCompanies.AnyAsync(c => c.Id == dto.CompanyId);
@@ -175,6 +205,9 @@ public class LenderConfigController : BaseController
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> DeleteLine(int id)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+
         var line = await _db.BankEligibilityLines.FindAsync(id);
         if (line == null) return NotFound(ApiResponseDto<bool>.Fail("Line not found."));
         line.IsDeleted = true;

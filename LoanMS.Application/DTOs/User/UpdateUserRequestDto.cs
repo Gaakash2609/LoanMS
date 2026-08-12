@@ -12,4 +12,15 @@ public class UpdateUserRequestDto
     public string? LocationName { get; set; }
     public string? SalesTeam { get; set; }
     public string? OpTeam { get; set; }
+    public string? PhotoData { get; set; }
+}
+
+public class SetUserPhotoRequestDto
+{
+    public string? PhotoData { get; set; }
+}
+
+public class SetUserStatusRequestDto
+{
+    public bool IsActive { get; set; }
 }

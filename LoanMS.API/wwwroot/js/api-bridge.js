@@ -170,6 +170,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     });
     return {
       id: loan.loanNumber || ('EFIN' + String(loan.id).padStart(6,'0')), _apiId:loan.id, loanNumber:loan.loanNumber,
+      _customerApiId: c.id,
       name:c.fullName||'—', fname:(names[0]||'').toUpperCase(), lname:(names.slice(1).join(' ')||'').toUpperCase(),
       mobile:c.phone||'', email:c.email||'',
       pan:c.panNumber?'XXXXX'+c.panNumber.slice(-4)+'X':'XXXXX0000X',
@@ -189,6 +190,58 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       tenure:String(loan.tenureMonths||24), purpose:(loan.purpose||'personal_use').toLowerCase().replace(/\s+/g,'_'),
       bank:'InCred', status:status,
       sales:loan.createdBy?loan.createdBy.fullName:'System', rm:loan.assignedTo?loan.assignedTo.fullName:'',
+      // BUGFIX (linked-users visibility check): loginUser was never mapped
+      // here at all, even though the backend has correctly returned it
+      // (LoanDto.LoginUser) since the AutoMapper fix earlier — every place
+      // that reads app.loginUser (the "Login User" cell on the Team &
+      // Assignment panel, claims detection, workload counting) was always
+      // reading undefined regardless of what was actually assigned in the
+      // database. location is added the same way — LoanDto now exposes it
+      // (see MappingProfile.cs) so it round-trips correctly too.
+      loginUser: loan.loginUser ? loan.loginUser.fullName : '',
+      location: loan.locationName || '',
+      // Sales Team / Ops Manager persistence fix — see updateSalesTeam()/
+      // updateOpsManager() in efin-app.js for the write side.
+      salesTeam: loan.salesTeamName || '',
+      opsManagerId: loan.opsManager ? loan.opsManager.fullName : '',
+      // Channel Overview display fix — same read-back gap as location: the
+      // wizard already correctly saves DsaId/PartnerId on submit, this was
+      // just never mapped back for display.
+      channelDSA: loan.dsaName || '',
+      channelPartner: loan.partnerName || '',
+      // Same sync gap — LoanBankLine now round-trips through the backend
+      // (see MappingProfile.cs's LoanBankLine→LoanBankLineDto map), just
+      // needed reading into the frontend's own field-name convention here
+      // (tempAppNo, not the DTO's TempApplicationNumber).
+      bankLines: (loan.bankLines || []).map(function(l) {
+        return {
+          id: l.id,
+          bankName: l.bankName || '',
+          tempAppNo: l.tempApplicationNumber || '',
+          applicationNumber: l.applicationNumber || '',
+          approvedLoan: l.approvedLoan || 0,
+          remarks: l.remarks || 'IN PROCESS'
+        };
+      }),
+      // Sanction/Approval Details — see approvalFieldSave() in efin-app.js
+      // for the write side.
+      sanctionStamp: loan.sanctionDetail ? (loan.sanctionDetail.stampDuty || '') : '',
+      sanctionGST: loan.sanctionDetail ? loan.sanctionDetail.gst : undefined,
+      sanctionInsurance: loan.sanctionDetail ? loan.sanctionDetail.insurance : undefined,
+      sanctionPFPct: loan.sanctionDetail ? loan.sanctionDetail.pfPercent : undefined,
+      sanctionInsInBundled: loan.sanctionDetail ? !!loan.sanctionDetail.insuranceInBundled : false,
+      sanctionPFInBundled: loan.sanctionDetail ? !!loan.sanctionDetail.pfInBundled : false,
+      sanctionBundled: loan.sanctionDetail ? !!loan.sanctionDetail.isBundled : false,
+      sanctionBT: loan.sanctionDetail ? !!loan.sanctionDetail.isBt : false,
+      sanctionFlatRate: loan.sanctionDetail ? loan.sanctionDetail.flatRate : undefined,
+      sanctionEMIDate: loan.sanctionDetail ? loan.sanctionDetail.emiDate : undefined,
+      // Product-specific fields (Insurance/Property/Vehicle/Education) —
+      // parse the JSON blob back into the individual flat fields the rest
+      // of the app already expects (app.insXxx/propXxx/carXxx/eduXxx).
+      ...(function() {
+        if (!loan.productDataJson) return {};
+        try { return JSON.parse(loan.productDataJson) || {}; } catch (e) { return {}; }
+      })(),
       date:_fmtDate(loan.createdAt), source:'Direct', leadsrc:'reference', channel:'direct',
       r1name:'', r1no:'', r1rel:'', r2name:'', r2no:'', r2rel:'', incred_app_id:'', incred_offer:'',
       document_checked:isApproved, incom_check:isApproved, bank_check:isDisbursed, ecs_return:isDisbursed, final_report:isDisbursed,
@@ -1295,12 +1348,31 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
      BanksController.GetAll; GET /api/lenderconfig/companies|categories).
      Same "wholesale replace on sync" convention as _syncBanks/_syncTeams. */
   function _analyticBankToLocal(b) {
-    var empTypes = [], compTypes = [];
+    var empTypes = [], compTypes = [], loanTypes = [], servicePins = [], homeTypes = [];
     try { empTypes = JSON.parse(b.empTypesJson || '[]'); } catch (e) {}
     try { compTypes = JSON.parse(b.compTypesJson || '[]'); } catch (e) {}
+    try { loanTypes = JSON.parse(b.loanTypesJson || '[]'); } catch (e) {}
+    try { servicePins = JSON.parse(b.serviceablePinsJson || '[]'); } catch (e) {}
+    try { homeTypes = JSON.parse(b.homeTypesJson || '[]'); } catch (e) {}
+    var productRules = {};
+    (b.productRules || []).forEach(function(r) {
+      var et = [], ct = [], ht = [];
+      try { et = JSON.parse(r.empTypesJson || '[]'); } catch (e) {}
+      try { ct = JSON.parse(r.compTypesJson || '[]'); } catch (e) {}
+      try { ht = JSON.parse(r.homeTypesJson || '[]'); } catch (e) {}
+      productRules[r.productKey] = {
+        minCibil: r.minCibil, acceptNTC: !!r.acceptNtc, maxLoanAmt: r.maxLoanAmt,
+        minTenure: r.minTenure, maxTenure: r.maxTenure, foirLimit: r.foirLimit,
+        pfRequired: !!r.pfRequired, minAge: r.minAge, maxAge: r.maxAge,
+        minExpMonths: r.minExpMonths, empTypes: et, compTypes: ct, homeTypes: ht
+      };
+    });
     return {
       id: b.id, _apiId: b.id, name: b.bankName,
       isIncred: !!b.isIncred, isElite: !!b.isElite,
+      loanTypes: loanTypes.length ? loanTypes : null,
+      serviceablePins: servicePins,
+      productRules: productRules,
       lines: (b.lines || []).map(function(l) {
         return { id: l.id, _apiId: l.id, companyId: l.companyId, categoryId: l.categoryId, pinCode: l.pinCode || '', pf: !!l.pf };
       }),
@@ -1309,7 +1381,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         minTenure: b.minTenure, maxTenure: b.maxTenure, foirLimit: b.foirLimit,
         pfRequired: !!b.pfRequired, minAge: b.minAge, maxAge: b.maxAge,
         minExpMonths: b.minExpMonths, empTypes: empTypes, compTypes: compTypes,
-        acceptedCategories: []
+        homeTypes: homeTypes, acceptedCategories: []
       }
     };
   }
@@ -2636,6 +2708,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       _patchPayoutPreview();
       _patchReportsToApi();
       _patchOpenDetailCibil();
+      _patchOpenDetailPerfios();
       _patchStatusNotify();
       _patchOpenDetailObligations();
       _patchObligationSave();
@@ -2828,7 +2901,21 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       // the application object (see newApp construction, efin-app.js).
       dsaId:       _stripApiPrefixId(app.dsaId),
       partnerId:   _stripApiPrefixId(app.partnerId),
-      locationId:  _resolveLocationIdByName(app.location)
+      locationId:  _resolveLocationIdByName(app.location),
+      // Product-specific fields (Insurance/Property/Vehicle/Education) —
+      // confirmed real gap, never sent at all before. Only include keys
+      // that are actually set, so this stays empty (and ApplyMapping's
+      // Count>0 check skips it) for loan types that don't use any of these.
+      productData: (function() {
+        var keys = ['insType','insInsurer','insPremium','insPayFreq','insNomineeName','insNomineeRel',
+          'insNomineeDob','insExistingCov','insExistingPol','insExistingNo',
+          'propType','propOwnership','propUnderConstruct','propBuilder','propCity','propValue',
+          'carMake','carModel','carYear','carPrice','carKm','carDealer',
+          'eduInstitution','eduCourse','eduDuration','eduAdmissionStatus','eduStudyLocation','eduCoApplicant'];
+        var out = {};
+        keys.forEach(function(k) { if (app[k] !== undefined && app[k] !== null && app[k] !== '') out[k] = app[k]; });
+        return out;
+      })()
     };
   }
 
@@ -3108,7 +3195,34 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       channel:     draft['w-channel'] || '',
       dsaId:       _stripApiPrefixId(draft['w-dsa-name-val']),
       partnerId:   _stripApiPrefixId(draft['w-partner-name-val']),
-      locationId:  _resolveLocationIdByName(draft['w-location'])
+      locationId:  _resolveLocationIdByName(draft['w-location']),
+      // Product-specific fields — verified against the actual DOM ids in
+      // index.html before wiring (not guessed): unlike most wizard fields,
+      // these aren't consistently "w-<camelCaseField>", e.g. w-builder not
+      // w-prop-builder, w-nominee-name not w-ins-nominee-name.
+      productData: (function() {
+        var idMap = {
+          insType: 'w-ins-type', insInsurer: 'w-ins-insurer', insPremium: 'w-ins-premium',
+          insPayFreq: 'w-ins-payment-freq', insNomineeName: 'w-nominee-name',
+          insNomineeRel: 'w-nominee-relation', insNomineeDob: 'w-nominee-dob',
+          insExistingCov: 'w-existing-coverage', insExistingPol: 'w-existing-policy',
+          insExistingNo: 'w-existing-policy-no',
+          propType: 'w-prop-type', propOwnership: 'w-ownership',
+          propUnderConstruct: 'w-under-construction', propBuilder: 'w-builder',
+          propCity: 'w-prop-city', propValue: 'w-prop-value',
+          carMake: 'w-car-make', carModel: 'w-car-model', carYear: 'w-car-year',
+          carPrice: 'w-car-price', carKm: 'w-car-km', carDealer: 'w-dealer',
+          eduInstitution: 'w-institution', eduCourse: 'w-course',
+          eduDuration: 'w-course-duration', eduAdmissionStatus: 'w-admission-status',
+          eduStudyLocation: 'w-study-location'
+        };
+        var out = {};
+        Object.keys(idMap).forEach(function(k) {
+          var v = draft[idMap[k]];
+          if (v !== undefined && v !== null && v !== '') out[k] = v;
+        });
+        return out;
+      })()
     };
   }
 
@@ -3362,7 +3476,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             var parent = amtEl.closest('.form-group') || amtEl.parentNode;
             if (parent) parent.appendChild(preview);
           }
-          preview.innerHTML = '💰 Estimated payout: <strong>₹' + Number(r.data.payoutAmount).toLocaleString('en-IN') + '</strong> (' + r.data.formula + ')';
+          preview.innerHTML = '💰 Estimated payout: <strong>₹' + Number(r.data.payoutAmount).toLocaleString('en-IN') + '</strong> (' + (window.escapeHtml ? window.escapeHtml(r.data.formula) : r.data.formula) + ')';
         });
     }
 
@@ -3446,6 +3560,38 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     };
   }
 
+  /* Load any previously-saved Perfios report when app-detail opens — see
+     PerfiosController/perfios-renderer.js's save-side for the full "why".
+     Best-effort, matching _patchOpenDetailCibil's own pattern — a fetch
+     failure here just leaves the Perfios tab in its normal empty state. */
+  function _patchOpenDetailPerfios() {
+    if (window._bridgeOdPerfiosPatched) return;
+    window._bridgeOdPerfiosPatched = true;
+    var _orig = window.openDetail;
+    if (typeof _orig !== 'function') return;
+    window.openDetail = function(id) {
+      var result = _orig.apply(this, arguments);
+      setTimeout(function() {
+        var app = window.currentDetail;
+        if (!app || !app._apiId || typeof apiReq !== 'function') return;
+        apiReq('GET', '/loans/' + app._apiId + '/perfios-report').then(function(r) {
+          if (!r || !r.success || !r.data) return;
+          var d = r.data;
+          var restored = {
+            abb: d.averageBankBalance, span: d.span, totalTxns: d.totalTransactions,
+            hasSalary: d.hasSalary, valid: d.isValid,
+            firstDate: d.firstTransactionDate, lastDate: d.lastTransactionDate,
+            manualReviewRequired: d.manualReviewRequired, staledays: d.staleDays,
+            perFileData: [{ fileName: d.fileName }]
+          };
+          window._lastPerfiosData = restored;
+          if (typeof window.renderPerfiosReport === 'function') window.renderPerfiosReport(restored);
+        }).catch(function() {});
+      }, 250);
+      return result;
+    };
+  }
+
   /* Notification API — POST /api/notifications (webhook to Slack/Teams/email) */
   window.apiSendNotification = function(type, payload) {
     // Fires webhook configured in Settings → Webhooks
@@ -3484,7 +3630,45 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
 
   // Expose sync functions for manual refresh
-  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); _syncRmEmails(); _syncBanks(); _syncAnalyticBanks(); _syncAnalyticCompanies(); _syncAnalyticCategories(); _syncReportTargets(); _syncAssignmentAuditLog(); _syncRejectionReasons(); _syncEmailTemplates(); _syncProductOfferMatrix(); _syncWizardDrafts(); _syncNotifications(); if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer(); if (typeof window._pullProfileFromServer === 'function') window._pullProfileFromServer(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
+  window._apiSyncAll    = function() { _syncLoans(); _syncUsers(); _syncTeams(); _syncLocations(); _syncTasks(); _syncTickets(); _syncDsaPartners(); _syncRmEmails(); _syncBanks(); _syncAnalyticBanks(); _syncAnalyticCompanies(); _syncAnalyticCategories(); _syncReportTargets(); _syncAssignmentAuditLog(); _syncRejectionReasons(); _syncEmailTemplates(); _syncProductOfferMatrix(); _syncWizardDrafts(); _syncNotifications(); _syncCamMatrix(); _syncIcCommentTemplates(); if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer(); if (typeof window._pullProfileFromServer === 'function') window._pullProfileFromServer(); setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 500); };
+
+  /* Load InCred comment templates from the server — see _ictSaveToServer
+     in efin-app.js for the write side. Same generic Admin-only Settings
+     endpoint as CAM_MATRIX. */
+  function _syncIcCommentTemplates() {
+    var tok = _lsGet('loanms_token');
+    var headers = tok ? { 'Authorization': 'Bearer ' + tok } : {};
+    fetch('/api/settings/efin_incred_comment_templates', { headers: headers })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(res) {
+        var raw = res && res.data ? res.data.value : null;
+        if (!raw) return;
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && typeof window !== 'undefined') {
+          window.IC_COMMENT_TEMPLATES = parsed;
+          if (typeof window.ictRender === 'function') window.ictRender();
+        }
+      }).catch(function() { /* not Admin, or not saved yet — keep local defaults */ });
+  }
+
+  /* Load CAM_MATRIX (global salary-band config) from the server — see
+     camAdminSave() in efin-app.js for the write side. Same Admin-only
+     generic Settings endpoint as Roles & Permissions/Menu Access Control. */
+  function _syncCamMatrix() {
+    var tok = _lsGet('loanms_token');
+    var headers = tok ? { 'Authorization': 'Bearer ' + tok } : {};
+    fetch('/api/settings/efin_cam_matrix', { headers: headers })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(res) {
+        var raw = res && res.data ? res.data.value : null;
+        if (!raw) return;
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && typeof window !== 'undefined') {
+          window.CAM_MATRIX = parsed;
+          if (typeof window.camAdminRender === 'function') window.camAdminRender();
+        }
+      }).catch(function() { /* not Admin, or not saved yet — keep local defaults */ });
+  }
   window._syncPayoutClaimsFromServer = _syncPayoutClaimsFromServer;
   window._apiSyncLoans  = _syncLoans;
   window._apiSyncUsers  = _syncUsers;

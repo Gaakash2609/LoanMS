@@ -1602,6 +1602,13 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<string>("SelectedLenderNames")
                         .HasColumnType("text");
 
+                    b.Property<string>("SalesTeamName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int?>("OpsManagerId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Purpose")
                         .HasColumnType("text");
 
@@ -1644,6 +1651,8 @@ namespace LoanMS.Infrastructure.Migrations
                     b.HasIndex("LocationId");
 
                     b.HasIndex("LoginUserId");
+
+                    b.HasIndex("OpsManagerId");
 
                     b.HasIndex("PartnerId");
 
@@ -2402,6 +2411,119 @@ namespace LoanMS.Infrastructure.Migrations
                     b.ToTable("TeamMembers");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.LoanBankLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ApplicationNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal?>("ApprovedLoan")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("BankName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("LoanId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Remarks")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("TempApplicationNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LoanId");
+
+                    b.ToTable("LoanBankLines");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.PerfiosReport", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AverageBankBalance")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("FirstTransactionDate")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<bool>("HasSalary")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsValid")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LastTransactionDate")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("LoanId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("ManualReviewRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Span")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("StaleDays")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TotalTransactions")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LoanId");
+
+                    b.ToTable("PerfiosReports");
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.Ticket", b =>
                 {
                     b.Property<int>("Id")
@@ -2817,6 +2939,11 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasForeignKey("LoginUserId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("LoanMS.Domain.Entities.User", "OpsManager")
+                        .WithMany()
+                        .HasForeignKey("OpsManagerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("LoanMS.Domain.Entities.DsaPartner", "Partner")
                         .WithMany()
                         .HasForeignKey("PartnerId")
@@ -2833,6 +2960,8 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Navigation("Location");
 
                     b.Navigation("LoginUser");
+
+                    b.Navigation("OpsManager");
 
                     b.Navigation("Partner");
                 });

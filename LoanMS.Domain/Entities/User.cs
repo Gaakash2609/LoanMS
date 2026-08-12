@@ -37,12 +37,36 @@ public class User : BaseEntity
     // base64 image strings can run to hundreds of KB.
     public string? PhotoData { get; set; }
 
+    // Self-service profile: Address + Bank Details tabs on the User
+    // Profile page. Same class of gap as PhoneNumber/PhotoData above —
+    // previously localStorage-only (USER_PROFILES), never synced across
+    // devices. Kept as plain optional fields (not a child table) since
+    // each user has exactly one of each, no history/versioning needed.
+    public string? AddressLine1 { get; set; }
+    public string? AddressLine2 { get; set; }
+    public string? AddressCity { get; set; }
+    public string? AddressState { get; set; }
+    public string? AddressPostalCode { get; set; }
+    public string? BankAccountHolderName { get; set; }
+    public string? BankName { get; set; }
+    public string? BankAccountType { get; set; }
+    public string? BankAccountNumber { get; set; }
+    public string? BankIfscCode { get; set; }
+
     // Security fields
     /// <summary>Forces password change on next login (set true for all seeded users).</summary>
     public bool MustChangePassword { get; set; } = false;
-    /// <summary>Consecutive failed login attempts — reset to 0 on success.</summary>
+    /// <summary>LEGACY/DEAD FIELD (security audit, confirmed) — not read or
+    /// written by the active brute-force-protection mechanism, which uses
+    /// the separate LoginAttempt table (per-email + per-IP, see
+    /// AuthController.Login) instead. Left in place rather than removed —
+    /// not confirmed safe to drop from an existing production schema
+    /// without a full reference/migration sweep, and removing it carries
+    /// real risk for zero security benefit (it's already inert). Do not
+    /// build new logic on this field; use LoginAttempt.</summary>
     public int FailedLoginAttempts { get; set; } = 0;
-    /// <summary>Account locked until this UTC time after too many failures.</summary>
+    /// <summary>LEGACY/DEAD FIELD — see FailedLoginAttempts above for the
+    /// same reasoning; superseded by the same LoginAttempt-based mechanism.</summary>
     public DateTime? LockedUntil { get; set; }
 
     // Navigation

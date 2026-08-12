@@ -29,11 +29,13 @@ public class DsaController : BaseController
 {
     private readonly AppDbContext _db;
     private readonly LoanMS.Application.Interfaces.IFileStorageService _fileStorage;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
 
-    public DsaController(AppDbContext db, LoanMS.Application.Interfaces.IFileStorageService fileStorage)
+    public DsaController(AppDbContext db, LoanMS.Application.Interfaces.IFileStorageService fileStorage, LoanMS.API.Services.IRolePermissionService rolePerm)
     {
         _db = db;
         _fileStorage = fileStorage;
+        _rolePerm = rolePerm;
     }
 
     /// <summary>
@@ -52,6 +54,14 @@ public class DsaController : BaseController
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
+        // Menu Access Control — this one endpoint feeds BOTH the DSA
+        // Management and Partner Management pages (frontend filters by
+        // PartnerType client-side), so access is allowed if EITHER menu
+        // permission is on for this role, not both.
+        var dsaOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "dsa-mgmt");
+        var partnerOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "partner-mgmt");
+        if (!dsaOk && !partnerOk) return Forbid();
+
         var query = _db.DsaPartners.AsQueryable();
 
         if (string.Equals(CurrentUserRole, "Partner", StringComparison.OrdinalIgnoreCase))

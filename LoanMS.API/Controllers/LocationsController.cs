@@ -11,11 +11,15 @@ namespace LoanMS.API.Controllers;
 public class LocationsController : BaseController
 {
     private readonly AppDbContext _db;
-    public LocationsController(AppDbContext db) => _db = db;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
+    public LocationsController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "locations-mgmt"))
+            return Forbid();
+
         var locs = await _db.Locations.OrderBy(l => l.Name)
             .Select(l => new { l.Id, l.Name, l.City, l.State, l.PinCode, l.IsActive })
             .ToListAsync();

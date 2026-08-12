@@ -177,6 +177,7 @@ public class PayoutController : BaseController
         claim.Status            = dto.Status;
         claim.UpdatedAt         = DateTime.UtcNow;
         claim.ProcessedByUserId = CurrentUserId;
+        if (dto.Notes != null) claim.Notes = dto.Notes;
 
         if (dto.Status == "Verified") claim.VerifiedAt = DateTime.UtcNow;
         else if (dto.Status == "Paid") claim.PaidAt    = DateTime.UtcNow;
@@ -267,4 +268,5 @@ public class ClaimCreateDto {
 
 public class ClaimStatusDto {
     public string Status { get; set; } = string.Empty;
+    public string? Notes { get; set; }
 }

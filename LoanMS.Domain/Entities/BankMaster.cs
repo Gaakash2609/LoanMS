@@ -46,6 +46,13 @@ public class BankMaster : BaseEntity
     public string  EmpTypesJson    { get; set; } = "[]";
     /// <summary>JSON string array, e.g. ["plcc","plc","llp"] — same values the frontend already uses.</summary>
     public string  CompTypesJson   { get; set; } = "[]";
+    /// <summary>JSON string array of loan-product keys this bank is assigned to (e.g. ["personal_loan","business_loan"]) — frontend's bank.loanTypes, confirmed previously local-only.</summary>
+    public string? LoanTypesJson   { get; set; }
+    /// <summary>JSON string array of 6-digit PIN codes this bank services bank-wide (empty/null = no restriction, serves all) — frontend's bank.serviceablePins, confirmed previously local-only.</summary>
+    public string? ServiceablePinsJson { get; set; }
+    /// <summary>JSON string array of accepted home-type keys (e.g. ["OWNED_SELF_SPOUSE","RENTED_SELF_WITH_FAMILY"]) — frontend's Home Type rules, confirmed previously local-only.</summary>
+    public string? HomeTypesJson   { get; set; }
 
     public ICollection<BankEligibilityLine> Lines { get; set; } = new List<BankEligibilityLine>();
+    public ICollection<BankProductRule> ProductRules { get; set; } = new List<BankProductRule>();
 }

@@ -58,4 +58,12 @@ public class WizardSubmitDto
     public int? DsaId          { get; set; }
     public int? PartnerId      { get; set; }
     public int? LocationId     { get; set; }
+
+    /// <summary>Product-specific fields (Insurance/Property/Vehicle/
+    /// Education) — confirmed never captured server-side at all. Generic
+    /// dictionary rather than ~28 named properties, since only one
+    /// product-category's fields are ever relevant per submission; the
+    /// frontend already sends these as a flat key/value object, so this
+    /// binds directly without needing per-field DTO properties.</summary>
+    public Dictionary<string, object>? ProductData { get; set; }
 }

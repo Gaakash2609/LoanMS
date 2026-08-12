@@ -16,4 +16,14 @@ public class UserDto
     public string? SalesTeam { get; set; }
     public string? OpTeam { get; set; }
     public string? PhotoData { get; set; }
+    public string? AddressLine1 { get; set; }
+    public string? AddressLine2 { get; set; }
+    public string? AddressCity { get; set; }
+    public string? AddressState { get; set; }
+    public string? AddressPostalCode { get; set; }
+    public string? BankAccountHolderName { get; set; }
+    public string? BankName { get; set; }
+    public string? BankAccountType { get; set; }
+    public string? BankAccountNumber { get; set; }
+    public string? BankIfscCode { get; set; }
 }

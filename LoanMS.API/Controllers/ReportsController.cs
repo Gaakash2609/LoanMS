@@ -11,7 +11,8 @@ namespace LoanMS.API.Controllers;
 public class ReportsController : BaseController
 {
     private readonly AppDbContext _db;
-    public ReportsController(AppDbContext db) => _db = db;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
+    public ReportsController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
     // ── Phase 5C — RPT Targets ────────────────────────────────────────────────
     // Reuses the existing AppSettings key-value table (already in production
@@ -255,6 +256,9 @@ public class ReportsController : BaseController
     [HttpGet("summary")]
     public async Task<IActionResult> Summary([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "reports"))
+            return Forbid();
+
         var now   = DateTime.UtcNow;
         var month = new DateTime(now.Year, now.Month, 1);
 

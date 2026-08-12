@@ -2,6 +2,11 @@
   //  GLOBAL TASKS PAGE
   // ═══════════════════════════════════════════════════════
 
+  // Security fix — this file loads separately from efin-app.js (where the
+  // real escapeHtml() lives); defensive fallback in case load order ever
+  // changes, same reasoning as the api-bridge.js fix.
+  function eh(v) { return window.escapeHtml ? window.escapeHtml(v) : String(v == null ? '' : v); }
+
   // Seed tasks derived from existing applications
   var _TASKS_PAGE_DATA = [
   ];
@@ -37,10 +42,10 @@
       <div class="task-card ${t.done ? 'done' : ''} ${isOverdue ? 'overdue' : ''}" id="task-card-${t.id}">
         <div class="task-check ${t.done ? 'checked' : ''}" onclick="toggleGlobalTask('${t.id}')"></div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:5px;${t.done ? 'text-decoration:line-through;color:var(--text3)' : ''}">${t.title}</div>
+          <div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:5px;${t.done ? 'text-decoration:line-through;color:var(--text3)' : ''}">${eh(t.title)}</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-            <span style="font-size:11.5px;color:var(--text3);background:var(--surface2);border-radius:6px;padding:2px 8px;cursor:pointer" onclick="showPage('applications',null)">#${t.appId} — ${t.appName}</span>
-            <span class="task-priority ${t.priority}">${t.priority}</span>
+            <span style="font-size:11.5px;color:var(--text3);background:var(--surface2);border-radius:6px;padding:2px 8px;cursor:pointer" onclick="showPage('applications',null)">#${eh(t.appId)} — ${eh(t.appName)}</span>
+            <span class="task-priority ${t.priority}">${eh(t.priority)}</span>
             <span style="font-size:11.5px;color:${isOverdue ? 'var(--accent2)' : 'var(--text3)'}">
               ${isOverdue ? '⚠ Overdue · ' : '📅 Due: '}${dueFmt}
             </span>

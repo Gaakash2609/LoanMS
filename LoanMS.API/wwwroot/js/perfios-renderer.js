@@ -567,6 +567,31 @@
     if (!data) { console.warn('[pfv9] No pending Perfios data to confirm'); return; }
     window._lastPerfiosData = data;  // keep a backup
 
+    // BUGFIX (Perfios persistence — confirmed via audit): the entire
+    // module was 100% client-side, this result never reached the server —
+    // it lived only in window._perfiosBankDoc/_lastPerfiosData and vanished
+    // on refresh or when viewed from a different device/session. Best-
+    // effort save (doesn't block the rest of this function, which is all
+    // local UI updates that should proceed regardless of network state).
+    (function() {
+      var app = window.currentDetail;
+      if (!app || !app._apiId || typeof window.apiReq !== 'function') return;
+      var perFiles = data.perFileData || [];
+      var fileName = perFiles.length ? perFiles[0].fileName : (window._pfv9DocName || 'Bank Statement.pdf');
+      window.apiReq('POST', '/loans/' + app._apiId + '/perfios-report', {
+        fileName: fileName,
+        averageBankBalance: data.abb != null ? String(data.abb) : null,
+        span: data.span != null ? String(data.span) : null,
+        totalTransactions: data.totalTxns || null,
+        hasSalary: !!data.hasSalary,
+        isValid: !!data.valid,
+        firstTransactionDate: data.firstDate || null,
+        lastTransactionDate: data.lastDate || null,
+        manualReviewRequired: !!data.manualReviewRequired,
+        staleDays: data.staledays || null
+      }).catch(function(e) { console.warn('[Perfios] Report save failed (kept locally only):', e); });
+    })();
+
     // 1. Populate Perfios Report section (if function exists)
     if (typeof renderPerfiosReport === 'function') renderPerfiosReport(data);
 

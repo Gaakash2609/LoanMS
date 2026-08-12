@@ -19,6 +19,13 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
             .Include(l => l.CreatedBy)
             .Include(l => l.AssignedTo)
             .Include(l => l.LoginUser)
+            .Include(l => l.OpsManager)
+            .Include(l => l.Location)
+            .Include(l => l.Dsa)
+            .Include(l => l.Partner)
+            .Include(l => l.BankLines.OrderBy(b => b.Id))
+            .Include(l => l.References.OrderBy(r => r.RefNumber))
+            .Include(l => l.SanctionDetail)
             .Include(l => l.StatusHistory.OrderByDescending(h => h.CreatedAt))
                 .ThenInclude(h => h.ChangedBy)
             .Include(l => l.Documents)
@@ -206,6 +213,49 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
     {
         var query = ApplyVisibilityScope(_ctx, _set.AsQueryable(), currentUserId, currentUserRole);
         return await query.AnyAsync(l => l.Id == loanId);
+    }
+
+    public async Task<bool> LocationExistsAsync(int locationId)
+    {
+        return await _ctx.Set<LoanMS.Domain.Entities.Location>().AnyAsync(l => l.Id == locationId && !l.IsDeleted);
+    }
+
+    public async Task ReplaceBankLinesAsync(int loanId, List<LoanBankLine> newLines)
+    {
+        var existing = await _ctx.Set<LoanBankLine>().Where(b => b.LoanId == loanId && !b.IsDeleted).ToListAsync();
+        foreach (var line in existing)
+        {
+            line.IsDeleted = true;
+            line.UpdatedAt = DateTime.UtcNow;
+        }
+        foreach (var line in newLines)
+        {
+            line.LoanId = loanId;
+            line.CreatedAt = DateTime.UtcNow;
+            _ctx.Set<LoanBankLine>().Add(line);
+        }
+        await _ctx.SaveChangesAsync();
+    }
+
+    public async Task ReplaceReferencesAsync(int loanId, List<LoanReference> newRefs)
+    {
+        // Same whole-table-replace convention as ReplaceBankLinesAsync —
+        // simpler and safer than diffing individual row ids for a small,
+        // always-fully-resubmitted set (2 references, edited together as
+        // one form section in saveEditDetail()).
+        var existing = await _ctx.Set<LoanReference>().Where(r => r.LoanId == loanId && !r.IsDeleted).ToListAsync();
+        foreach (var r in existing)
+        {
+            r.IsDeleted = true;
+            r.UpdatedAt = DateTime.UtcNow;
+        }
+        foreach (var r in newRefs)
+        {
+            r.LoanId = loanId;
+            r.CreatedAt = DateTime.UtcNow;
+            _ctx.Set<LoanReference>().Add(r);
+        }
+        await _ctx.SaveChangesAsync();
     }
 
     public async Task<PagedResultDto<LoanListDto>> GetPagedAsync(LoanFilterDto filter, int? currentUserId = null, string? currentUserRole = null)

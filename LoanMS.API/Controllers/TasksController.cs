@@ -11,11 +11,15 @@ namespace LoanMS.API.Controllers;
 public class TasksController : BaseController
 {
     private readonly AppDbContext _db;
-    public TasksController(AppDbContext db) => _db = db;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
+    public TasksController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] int? loanId, [FromQuery] bool? completed)
     {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canViewTasks"))
+            return Forbid();
+
         var q = _db.Tasks
             .Include(t => t.AssignedTo)
             .Include(t => t.CreatedBy)
@@ -42,6 +46,9 @@ public class TasksController : BaseController
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] TaskCreateDto dto)
     {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canManageTasks"))
+            return Forbid();
+
         // Validate that the assigned user exists — prevents FK violation
         var assigneeExists = await _db.Users.AnyAsync(u => u.Id == dto.AssignedToUserId);
         if (!assigneeExists)
@@ -82,6 +89,9 @@ public class TasksController : BaseController
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canManageTasks"))
+            return Forbid();
+
         var task = await _db.Tasks.FindAsync(id);
         if (task == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
         task.IsDeleted = true; task.UpdatedAt = DateTime.UtcNow;

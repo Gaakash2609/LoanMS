@@ -29,4 +29,20 @@ public interface ILoanRepository : IGenericRepository<Loan>
     // user see/act on this loan", now also used to gate Update/UpdateStatus/
     // Submit/Approve/Reject/Delete before any write happens.
     Task<bool> HasAccessAsync(int loanId, int currentUserId, string? currentUserRole);
+
+    // Lightweight existence check for the Team & Assignment panel's Location
+    // dropdown (UpdateAssignmentAsync) — Locations isn't its own repository
+    // on IUnitOfWork, and adding one just for this single check would be
+    // more than this needs; LoanRepository already has AppDbContext access
+    // via the GenericRepository base.
+    Task<bool> LocationExistsAsync(int locationId);
+
+    // Whole-table replace for a loan's Bank Lines (see
+    // UpdateLoanBankLinesRequestDto's own comment for why replace, not
+    // diff). Soft-deletes every existing line for this loan and inserts
+    // the new set, all in one call — same reasoning as putting this on
+    // ILoanRepository as LocationExistsAsync above, rather than adding a
+    // whole new repository for one bounded, loan-scoped collection.
+    Task ReplaceBankLinesAsync(int loanId, List<LoanBankLine> newLines);
+    Task ReplaceReferencesAsync(int loanId, List<LoanReference> newRefs);
 }

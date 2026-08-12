@@ -142,6 +142,48 @@ public class UsersController : BaseController
     }
 
     /// <summary>
+    /// Set another user's profile photo [Admin only]. Dedicated, minimal
+    /// endpoint rather than reusing Update() above — Update()'s
+    /// UpdateUserRequestDto requires FullName/Role/IsActive, and an Admin
+    /// invitation-flow caller only ever has this one field to set safely,
+    /// with no reliable local source for the others (frontend display-label
+    /// vs backend enum mismatch risk for Role specifically). Touches only
+    /// PhotoData, nothing else.
+    /// </summary>
+    [HttpPatch("{id:int}/photo")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> SetPhoto(int id, [FromBody] SetUserPhotoRequestDto request)
+    {
+        var user = await _db.Users.FindAsync(id);
+        if (user == null) return NotFound(ApiResponseDto<bool>.Fail("User not found."));
+        user.PhotoData = string.IsNullOrWhiteSpace(request.PhotoData) ? null : request.PhotoData;
+        user.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Photo updated."));
+    }
+
+    /// <summary>
+    /// Activate/Deactivate a user [Admin only]. Same reasoning as SetPhoto
+    /// above — dedicated, minimal endpoint rather than reusing Update(),
+    /// which requires FullName/Role and carries the same frontend
+    /// display-label vs backend-enum Role risk. Touches only IsActive.
+    /// A deactivated user's IsActive being local-only (confirmed real gap)
+    /// meant they could still log in — this was a genuine security gap,
+    /// not just a display inconsistency.
+    /// </summary>
+    [HttpPatch("{id:int}/status")]
+    [Authorize(Roles = "Admin,ProductTeam")]
+    public async Task<IActionResult> SetStatus(int id, [FromBody] SetUserStatusRequestDto request)
+    {
+        var user = await _db.Users.FindAsync(id);
+        if (user == null) return NotFound(ApiResponseDto<bool>.Fail("User not found."));
+        user.IsActive = request.IsActive;
+        user.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Status updated."));
+    }
+
+    /// <summary>
     /// User Creation + Mapping simplification (analysis approved — see
     /// prior forensic report). Reconciles ONE team-type (Sales or Login)
     /// between an old and new team NAME (User.SalesTeam/OpTeam are already

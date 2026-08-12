@@ -11,7 +11,8 @@ namespace LoanMS.API.Controllers;
 public class TeamsController : BaseController
 {
     private readonly AppDbContext _db;
-    public TeamsController(AppDbContext db) => _db = db;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
+    public TeamsController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
     /// <summary>
     /// Phase 4 — Manager team-scope. Admin sees all teams, unchanged. For
@@ -25,6 +26,18 @@ public class TeamsController : BaseController
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? type)
     {
+        // Menu Access Control (Settings screen) — additional, Admin-
+        // configurable restriction on TOP of the class-level [Authorize]
+        // above (which already excludes every role except Admin/Manager;
+        // this only lets Admin further narrow Manager's access if wanted,
+        // it can never grant access to a role the Authorize list already
+        // excludes — see RolePermissionService's fail-open default).
+        var menuId = string.Equals(type, "Sales", StringComparison.OrdinalIgnoreCase) ? "sales-teams"
+                    : string.Equals(type, "Login", StringComparison.OrdinalIgnoreCase) ? "login-teams"
+                    : "team-overview";
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, menuId))
+            return Forbid();
+
         var q = _db.Teams.Include(t => t.TeamLead).Include(t => t.Members).ThenInclude(m => m.User).AsQueryable();
         if (!string.IsNullOrEmpty(type)) q = q.Where(t => t.Type == type);
 

@@ -19,7 +19,7 @@ namespace LoanMS.Infrastructure.Migrations
     /// migration failure to fail startup fast, and the plain AddColumn
     /// form throws "column already exists" if one of these 4 columns was
     /// ever added by hand directly on the production DB (the same class of
-    /// out-of-band change described in docs/DATABASE_SCHEMA_FIX.md for the
+    /// out-of-band change described in docs/troubleshooting/DATABASE_SCHEMA_FIX.md for the
     /// Customers table). That exception was crash-looping every new ECS
     /// task on this deploy — the container never got PostgreSQL migrations
     /// applied, so the previous task (which never had this migration)

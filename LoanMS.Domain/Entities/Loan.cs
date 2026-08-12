@@ -15,6 +15,15 @@ public class Loan : BaseEntity
     public decimal? MonthlyEmi { get; set; }
     public string? Purpose { get; set; }
     public string? Remarks { get; set; }
+    /// <summary>JSON blob for product-specific wizard fields (Insurance:
+    /// nominee/insurer/premium; Property: builder/city/value; Vehicle:
+    /// make/model/dealer; Education: institution/course) — confirmed
+    /// never reaching WizardSubmitDto at all, so a flexible JSON column
+    /// rather than ~28 rigid typed ones (most NULL for any given loan,
+    /// since only one product-category's fields are ever relevant per
+    /// loan). Same JSON-blob convention already used for
+    /// BankMaster.EmpTypesJson etc.</summary>
+    public string? ProductDataJson { get; set; }
     public DateTime? ApprovedAt { get; set; }
     public DateTime? DisbursedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
@@ -67,6 +76,31 @@ public class Loan : BaseEntity
     public int? PartnerId { get; set; }
     public int? LocationId { get; set; }
 
+    // ── Sales Team / Operations Manager (linked-users visibility fix) ────────
+    // Was frontend-only (never persisted) — the UI's Team & Assignment panel
+    // let an Admin/Manager pick and "save" a Sales Team and Operations
+    // Manager for an application, but nothing about that selection reached
+    // the database, so it silently reverted on refresh or a different
+    // device. SalesTeamName mirrors User.SalesTeam's own string-name
+    // convention (Teams aren't referenced by FK anywhere else in this
+    // model either); OpsManagerId mirrors LoginUserId's User-reference
+    // pattern above.
+    public string? SalesTeamName { get; set; }
+    public int? OpsManagerId { get; set; }
+
+    // ── Bank Lines (linked-users/flow persistence sweep) — per-bank lender
+    // processing details, previously frontend-only. See LoanBankLine.cs. ──
+    public ICollection<LoanBankLine> BankLines { get; set; } = new List<LoanBankLine>();
+    // References tab — data has existed since the wizard submit flow
+    // (WizardController writes LoanReference rows on submit), but was
+    // never exposed through LoanDto/GetById at all — this navigation
+    // property didn't even exist. Same class of "data exists, was never
+    // read back" gap as Location/DsaName/PartnerName before those were
+    // fixed.
+    public ICollection<LoanReference> References { get; set; } = new List<LoanReference>();
+    public ICollection<PerfiosReport> PerfiosReports { get; set; } = new List<PerfiosReport>();
+    public LoanSanctionDetail? SanctionDetail { get; set; }
+
     // ── InCred Integration (mirrors incred.integration.mixin) ────────────────────
     /// <summary>Set to "incred" once this loan has been pushed to InCred's digital-partner API.</summary>
     public string? ApplicationSource { get; set; }
@@ -88,6 +122,7 @@ public class Loan : BaseEntity
     public User CreatedBy { get; set; } = null!;
     public User? AssignedTo { get; set; }
     public User? LoginUser { get; set; }
+    public User? OpsManager { get; set; }
     public DsaPartner? Dsa { get; set; }
     public DsaPartner? Partner { get; set; }
     public Location? Location { get; set; }

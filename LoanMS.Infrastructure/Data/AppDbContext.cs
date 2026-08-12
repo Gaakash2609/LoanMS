@@ -12,6 +12,9 @@ public class AppDbContext : DbContext
     public DbSet<Customer>          Customers           => Set<Customer>();
     public DbSet<Loan>              Loans               => Set<Loan>();
     public DbSet<LoanDocument>      LoanDocuments       => Set<LoanDocument>();
+    public DbSet<LoanBankLine>      LoanBankLines       => Set<LoanBankLine>();
+    public DbSet<PerfiosReport>     PerfiosReports      => Set<PerfiosReport>();
+    public DbSet<LoanSanctionDetail> LoanSanctionDetails => Set<LoanSanctionDetail>();
     public DbSet<LoanObligation>    LoanObligations     => Set<LoanObligation>();
     public DbSet<LoanStatusHistory> LoanStatusHistories => Set<LoanStatusHistory>();
     public DbSet<LoanOffer>         LoanOffers          => Set<LoanOffer>();
@@ -35,6 +38,7 @@ public class AppDbContext : DbContext
     public DbSet<AnalyticCompany>       AnalyticCompanies      => Set<AnalyticCompany>();
     public DbSet<AnalyticCategory>      AnalyticCategories     => Set<AnalyticCategory>();
     public DbSet<BankEligibilityLine>   BankEligibilityLines   => Set<BankEligibilityLine>();
+    public DbSet<BankProductRule>       BankProductRules       => Set<BankProductRule>();
     public DbSet<IncredRmEmail>     IncredRmEmails      => Set<IncredRmEmail>();
     public DbSet<ReportTarget>      ReportTargets       => Set<ReportTarget>();
     public DbSet<AssignmentAuditLog> AssignmentAuditLogs => Set<AssignmentAuditLog>();
@@ -106,6 +110,7 @@ public class AppDbContext : DbContext
             e.HasIndex(l => l.PartnerId);
             e.HasIndex(l => l.LocationId);
             e.HasIndex(l => l.LoginUserId);
+            e.HasIndex(l => l.OpsManagerId);
             e.Property(l => l.LoanNumber).HasMaxLength(20).IsRequired();
             e.Property(l => l.LoanType).HasConversion<string>();
             e.Property(l => l.Status).HasConversion<string>();
@@ -127,6 +132,8 @@ public class AppDbContext : DbContext
             e.HasOne(l => l.Partner).WithMany().HasForeignKey(l => l.PartnerId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
             e.HasOne(l => l.Location).WithMany().HasForeignKey(l => l.LocationId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
             e.HasOne(l => l.LoginUser).WithMany().HasForeignKey(l => l.LoginUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(l => l.OpsManager).WithMany().HasForeignKey(l => l.OpsManagerId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            e.Property(l => l.SalesTeamName).HasMaxLength(200);
         });
 
         mb.Entity<LoanOffer>(e => {
@@ -153,6 +160,30 @@ public class AppDbContext : DbContext
             e.HasKey(d => d.Id);
             e.HasQueryFilter(d => !d.IsDeleted);
             e.HasOne(d => d.Loan).WithMany(l => l.Documents).HasForeignKey(d => d.LoanId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<LoanBankLine>(e => {
+            e.HasKey(b => b.Id);
+            e.HasQueryFilter(b => !b.IsDeleted);
+            e.Property(b => b.ApprovedLoan).HasColumnType("numeric(18,2)");
+            e.HasOne(b => b.Loan).WithMany(l => l.BankLines).HasForeignKey(b => b.LoanId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<PerfiosReport>(e => {
+            e.HasKey(p => p.Id);
+            e.HasQueryFilter(p => !p.IsDeleted);
+            e.HasOne(p => p.Loan).WithMany(l => l.PerfiosReports).HasForeignKey(p => p.LoanId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<LoanSanctionDetail>(e => {
+            e.HasKey(s => s.Id);
+            e.HasQueryFilter(s => !s.IsDeleted);
+            e.Property(s => s.Gst).HasColumnType("numeric(18,2)");
+            e.Property(s => s.Insurance).HasColumnType("numeric(18,2)");
+            e.Property(s => s.PfPercent).HasColumnType("numeric(5,2)");
+            e.Property(s => s.FlatRate).HasColumnType("numeric(5,2)");
+            e.HasOne(s => s.Loan).WithOne(l => l.SanctionDetail).HasForeignKey<LoanSanctionDetail>(s => s.LoanId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(s => s.LoanId).IsUnique();
         });
 
         mb.Entity<LoanObligation>(e => {
@@ -272,6 +303,15 @@ public class AppDbContext : DbContext
             e.HasIndex(l => l.BankId);
             e.HasIndex(l => l.CompanyId);
             e.HasIndex(l => l.CategoryId);
+        });
+
+        mb.Entity<BankProductRule>(e => {
+            e.HasKey(r => r.Id);
+            e.HasQueryFilter(r => !r.IsDeleted);
+            e.Property(r => r.ProductKey).HasMaxLength(50).IsRequired();
+            e.Property(r => r.MaxLoanAmt).HasColumnType("numeric(18,2)");
+            e.HasOne(r => r.Bank).WithMany(b => b.ProductRules).HasForeignKey(r => r.BankId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(r => new { r.BankId, r.ProductKey }).IsUnique();
         });
 
         mb.Entity<ReportTarget>(e => {

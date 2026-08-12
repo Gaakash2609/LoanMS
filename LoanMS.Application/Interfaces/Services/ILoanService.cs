@@ -8,7 +8,7 @@ public interface ILoanService
     // Phase 2B: currentUserId is required now (not defaulted) so every detail-by-id
     // lookup is checked against the caller's role-based visibility scope —
     // changing the loanId in the URL to someone else's loan must return "not found".
-    Task<ApiResponseDto<LoanDto>> GetByIdAsync(int id, int currentUserId, string callerRole = "Sales");
+    Task<ApiResponseDto<LoanDto>> GetByIdAsync(int id, int currentUserId, string callerRole = "Sales", HashSet<string>? deniedTabs = null);
     Task<ApiResponseDto<PagedResultDto<LoanListDto>>> GetAllAsync(LoanFilterDto filter, int currentUserId, string currentUserRole);
     // Applications → Export: same filters/visibility scope as GetAllAsync,
     // capped, unpaginated — see LoanRepository.GetForExportAsync.
@@ -19,6 +19,9 @@ public interface ILoanService
     // body) and verifies access via ILoanRepository.HasAccessAsync before acting.
     Task<ApiResponseDto<LoanDto>> UpdateAsync(int id, UpdateLoanRequestDto request, int currentUserId, string currentUserRole);
     Task<ApiResponseDto<LoanDto>> UpdateStatusAsync(int id, UpdateLoanStatusRequestDto request, int changedByUserId, string changedByUserRole);
+    Task<ApiResponseDto<LoanDto>> UpdateAssignmentAsync(int id, UpdateLoanAssignmentRequestDto request, int currentUserId, string currentUserRole);
+    Task<ApiResponseDto<LoanDto>> UpdateBankLinesAsync(int id, UpdateLoanBankLinesRequestDto request, int currentUserId, string currentUserRole);
+    Task<ApiResponseDto<LoanDto>> UpdateReferencesAsync(int id, List<UpdateLoanReferenceItemDto> request, int currentUserId, string currentUserRole);
     Task<ApiResponseDto<bool>> DeleteAsync(int id, int currentUserId, string currentUserRole);
     Task<ApiResponseDto<DashboardStatsDto>> GetDashboardStatsAsync(int userId, string role);
 }

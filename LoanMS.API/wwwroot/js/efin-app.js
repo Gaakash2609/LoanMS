@@ -131,7 +131,28 @@
     window.addEventListener('unhandledrejection', function(e) {
       console.error('[EFIN Promise]', e.reason);
     });
-  
+
+    // ═══════════════════════════════════════════════════════
+    //  XSS REMEDIATION (security audit fix) — centralized HTML-escaping
+    //  utility. Wraps any value that might contain user/API/database-
+    //  controlled text before it's interpolated into an innerHTML template
+    //  string, so a value like <img src=x onerror=...> renders as inert
+    //  visible text instead of executing. Native DOM API (no dependency
+    //  needed) — creates a text node and reads back its escaped HTML via
+    //  a throwaway element, the standard safe pattern for this. Used
+    //  specifically at the highest-risk interpolation points identified in
+    //  the audit (customer/applicant names, remarks, comments, addresses,
+    //  team/user names) — NOT a blanket rewrite of all 485 innerHTML call
+    //  sites, most of which build static/developer-controlled markup with
+    //  no user-controlled text in them at all.
+    // ═══════════════════════════════════════════════════════
+    function escapeHtml(value) {
+      if (value === null || value === undefined) return '';
+      var div = document.createElement('div');
+      div.textContent = String(value);
+      return div.innerHTML;
+    }
+    window.escapeHtml = escapeHtml;
 
     // ═══════════════════════════════════════════════════════
     //  ACCESS RIGHTS SYSTEM
@@ -1072,23 +1093,9 @@
     function _setLockState(s) {
       try { localStorage.setItem(_LOGIN_LOCK_KEY, JSON.stringify(s)); } catch(e) {}
     }
-    function _checkLoginLocked(errEl) {
-      const s = _getLockState();
-      if (s.count >= _LOGIN_MAX_TRIES) {
-        const remaining = _LOGIN_LOCK_MS - (Date.now() - s.ts);
-        if (remaining > 0) {
-          const mins = Math.ceil(remaining / 60000);
-          if (errEl) {
-            errEl.innerHTML = '🔒 Too many failed attempts. Please wait <strong>' + mins + ' minute' + (mins === 1 ? '' : 's') + '</strong> before trying again.';
-            errEl.style.display = 'block';
-          }
-          return true;
-        }
-        // Lock expired — reset
-        _setLockState({ count: 0, ts: 0 });
-      }
-      return false;
-    }
+    // (_checkLoginLocked dead-code removed — never called; the real,
+    // active brute-force protection is the backend's LoginAttempt table,
+    // confirmed working in the security audit.)
 
     // Phase 1 SECURITY: this function used to be a full local/offline login
     // path — it checked an entered password against a SHA-256 hash stored
@@ -2036,8 +2043,9 @@
       body.innerHTML = pageApps.map(a => {
         if (!a.is_draft) return `
     <tr onclick="openDetail('${a.id}')">
-      <td><span class="app-id">${a.id || a._tempAppNo || '—'}</span></td>
-      <td><strong>${a.name}</strong></td>
+      <td onclick="event.stopPropagation()"><input type="checkbox" class="bulk-select-row" data-app-id="${a.id}" onchange="toggleBulkSelect('${a.id}', this.checked)"></td>
+      <td><span class="app-id">${escapeHtml(a.id || a._tempAppNo || '—')}</span></td>
+      <td><strong>${escapeHtml(a.name)}</strong></td>
       <td>${loanTypeLabel(a.loanType)}</td>
       <td>₹${Number(a.amount).toLocaleString('en-IN')}</td>
       <td><span class="badge badge-${a.status}">${STATUSES[a.status] || a.status}</span></td>
@@ -2052,12 +2060,13 @@
   `;
         const isOwnDraft = a.draft_owner === _viewerDraftId;
         const ownerNote = (!isOwnDraft && a.draft_owner)
-          ? `<div style="font-size:11px;color:var(--text3);font-weight:500;margin-top:2px">Draft by ${a.draft_owner}</div>`
+          ? `<div style="font-size:11px;color:var(--text3);font-weight:500;margin-top:2px">Draft by ${escapeHtml(a.draft_owner)}</div>`
           : '';
         return `
     <tr onclick="resumeDraftFromList('${a.id}')" style="cursor:pointer">
-      <td><span class="app-id">${a.id || '—'}</span></td>
-      <td><strong>${a.name}</strong>${ownerNote}</td>
+      <td onclick="event.stopPropagation()"><input type="checkbox" class="bulk-select-row" data-app-id="${a.id}" onchange="toggleBulkSelect('${a.id}', this.checked)"></td>
+      <td><span class="app-id">${escapeHtml(a.id || '—')}</span></td>
+      <td><strong>${escapeHtml(a.name)}</strong>${ownerNote}</td>
       <td>${loanTypeLabel(a.loanType)}</td>
       <td>${a.loanamt ? '₹' + Number(a.loanamt).toLocaleString('en-IN') : '—'}</td>
       <td><span class="badge" style="background:rgba(230,126,0,.1);color:#b45309">Draft${!isOwnDraft && a.draft_owner ? ' (other)' : ''}</span></td>
@@ -2069,7 +2078,7 @@
       </td>
     </tr>
   `;
-      }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">No applications found</td></tr>';
+      }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:40px">No applications found</td></tr>';
     }
 
     function getActionBtn(a) {
@@ -2109,7 +2118,7 @@
     <div style="display:flex;align-items:center;gap:14px;padding:16px;background:var(--surface2);border-radius:var(--r-sm);border:1px solid var(--border);margin-bottom:12px">
       <div style="font-size:28px">📋</div>
       <div>
-        <div style="font-size:13.5px;font-weight:600;color:var(--text)">${app.name}</div>
+        <div style="font-size:13.5px;font-weight:600;color:var(--text)">${escapeHtml(app.name)}</div>
         <div style="font-size:12px;color:var(--text3);margin-top:2px">${app.id || app._tempAppNo || '—'} · ${loanTypeLabel(app.loanType)} · ₹${Number(app.amount).toLocaleString('en-IN')}</div>
       </div>
     </div>
@@ -2256,9 +2265,9 @@
       body.innerHTML = pageApps.length ? pageApps.map(a => `
     <tr onclick="openDetail('${a.id}')">
       <td onclick="event.stopPropagation()"><input type="checkbox" class="bulk-select-row" data-app-id="${a.id}" onchange="toggleBulkSelect('${a.id}', this.checked)"></td>
-      <td><span class="app-id">${a.id || a._tempAppNo || '—'}</span></td>
+      <td><span class="app-id">${escapeHtml(a.id || a._tempAppNo || '—')}</span></td>
       <td>
-        <strong>${a.name}</strong>${a.riskGrade ? ` <span title="Bureau risk grade" style="display:inline-block;margin-left:5px;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:800;background:${a.riskGrade==='A'?'rgba(26,115,64,.12);color:#1a7340':a.riskGrade==='D'?'rgba(212,43,43,.12);color:#d42b2b':'rgba(230,126,0,.12);color:#e67e00'}">${a.riskGrade}</span>` : ''}
+        <strong>${escapeHtml(a.name)}</strong>${a.riskGrade ? ` <span title="Bureau risk grade" style="display:inline-block;margin-left:5px;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:800;background:${a.riskGrade==='A'?'rgba(26,115,64,.12);color:#1a7340':a.riskGrade==='D'?'rgba(212,43,43,.12);color:#d42b2b':'rgba(230,126,0,.12);color:#e67e00'}">${escapeHtml(a.riskGrade)}</span>` : ''}
       </td>
       <td>${loanTypeLabel(a.loanType)}</td>
       <td>₹${Number(a.amount).toLocaleString('en-IN')}</td>
@@ -2468,21 +2477,21 @@
 
       // ── Overview tab ──
       document.getElementById('detail-overview-grid').innerHTML = fieldGrid([
-        ['Application ID', app.id],
-        ['Status', `<span class="badge badge-${app.status}">${STATUSES[app.status] || app.status}</span>`],
+        ['Application ID', escapeHtml(app.id)],
+        ['Status', `<span class="badge badge-${app.status}">${escapeHtml(STATUSES[app.status] || app.status)}</span>`],
         ['Loan Type', loanTypeLabel(app.loanType)],
-        ['Bank/NBFC', app.bank],
-        ['Sales Person', app.sales],
-        ['Created', app.date],
-        ['Loan Source', app.source || '—'],
-        ['Lead Source', (function(l){ return {facebook:'Facebook',whatsapp:'WhatsApp',instagram:'Instagram',google_ads:'Google Ads',reference:'Reference',walk_in:'Walk-In',cold_call:'Cold Call',partner:'Partner'}[l] || l || '—'; })(app.leadsrc)],
-        ['Channel', (function(c){ return {direct:'Direct',agent:'Partner / Agent',online:'Online',dsa:'DSA'}[c] || c || '—'; })(app.channel)],
-        ...(app.channel === 'dsa'   && app.channelDSA     ? [['DSA Name',     app.channelDSA]]     : []),
-        ...(app.channel === 'dsa'   && app.channelPartner ? [['Linked Partner',app.channelPartner]] : []),
-        ...(app.channel === 'agent' && app.channelPartner ? [['Partner / Agent',app.channelPartner]] : []),
-        ...(app.channel === 'direct'                      ? [['Sales Person (Direct)', app.sales || '—']] : []),
-        ['InCred RM', app.rm || '—'],
-        ['Analytic Bank', app.anaBank || '—'],
+        ['Bank/NBFC', escapeHtml(app.bank)],
+        ['Sales Person', escapeHtml(app.sales)],
+        ['Created', escapeHtml(app.date)],
+        ['Loan Source', escapeHtml(app.source || '—')],
+        ['Lead Source', (function(l){ return {facebook:'Facebook',whatsapp:'WhatsApp',instagram:'Instagram',google_ads:'Google Ads',reference:'Reference',walk_in:'Walk-In',cold_call:'Cold Call',partner:'Partner'}[l] || escapeHtml(l || '—'); })(app.leadsrc)],
+        ['Channel', (function(c){ return {direct:'Direct',agent:'Partner / Agent',online:'Online',dsa:'DSA'}[c] || escapeHtml(c || '—'); })(app.channel)],
+        ...(app.channel === 'dsa'   && app.channelDSA     ? [['DSA Name',     escapeHtml(app.channelDSA)]]     : []),
+        ...(app.channel === 'dsa'   && app.channelPartner ? [['Linked Partner',escapeHtml(app.channelPartner)]] : []),
+        ...(app.channel === 'agent' && app.channelPartner ? [['Partner / Agent',escapeHtml(app.channelPartner)]] : []),
+        ...(app.channel === 'direct'                      ? [['Sales Person (Direct)', escapeHtml(app.sales || '—')]] : []),
+        ['InCred RM', escapeHtml(app.rm || '—')],
+        ['Analytic Bank', escapeHtml(app.anaBank || '—')],
         ...(rd.canViewBanks ? [
           ['Doc Checked', checkBadge(app.document_checked)],
           ['Income Checked', checkBadge(app.incom_check)],
@@ -2526,16 +2535,16 @@
       if (rd.canViewPersonal) {
         const showSensitive = !rd.canMaskPersonal;
         document.getElementById('detail-personal-grid').innerHTML = fieldGrid([
-          ['Full Name', app.name],
-          ['PAN', mask(app.pan, showSensitive)],
-          ['Aadhar', mask(app.aadhar, showSensitive)],
-          ['Date of Birth', app.dob || '—'],
-          ['Gender', app.gender === 'M' ? 'Male' : app.gender === 'F' ? 'Female' : (app.gender === 'O' || app.gender === 'other') ? 'Other' : app.gender || '—'],
-          ['Mobile', showSensitive ? (app.mobile || '—') : mask(app.mobile, false)],
-          ['Alternate Phone', app.altPhone || '—'],
-          ['Email', app.email || '—'],
-          ['Mother Name', app.mname2 || '—'],
-          ['Father\'s Name', app.father || '—'],
+          ['Full Name', escapeHtml(app.name)],
+          ['PAN', escapeHtml(mask(app.pan, showSensitive))],
+          ['Aadhar', escapeHtml(mask(app.aadhar, showSensitive))],
+          ['Date of Birth', escapeHtml(app.dob || '—')],
+          ['Gender', app.gender === 'M' ? 'Male' : app.gender === 'F' ? 'Female' : (app.gender === 'O' || app.gender === 'other') ? 'Other' : escapeHtml(app.gender || '—')],
+          ['Mobile', escapeHtml(showSensitive ? (app.mobile || '—') : mask(app.mobile, false))],
+          ['Alternate Phone', escapeHtml(app.altPhone || '—')],
+          ['Email', escapeHtml(app.email || '—')],
+          ['Mother Name', escapeHtml(app.mname2 || '—')],
+          ['Father\'s Name', escapeHtml(app.father || '—')],
           ...(!showSensitive ? [['', `<div style="font-size:11px;color:var(--text3);padding:4px 0;display:flex;align-items:center;gap:5px">🔒 PAN, Aadhar &amp; Mobile are masked for Partner access</div>`]] : []),
         ]);
       } else {
@@ -2550,9 +2559,10 @@
         const fg = (label, val, full) => {
           const icon = {'House / Flat No.':'📍','Street & Locality':'📍','City':'🏙️','Pin Code':'📮','State':'🗺️','Home Type':'🏠','Perm. House / Flat No.':'📍','Perm. Street & Locality':'📍','Perm. City':'🏙️','Perm. Pin Code':'📮','Perm. State':'🗺️','Perm. Home Type':'🏠'}[label] || '';
           const empty = !val || val === '—';
+          const safeVal = escapeHtml(val || '—');
           return `<div class="form-group${full?' full':''}">`
             + `<label>${icon ? `<span style="font-size:11px">${icon}</span> ` : ''}${label}</label>`
-            + `<div class="field-val${empty?' empty':''}">${val||'—'}</div></div>`;
+            + `<div class="field-val${empty?' empty':''}">${safeVal}</div></div>`;
         };
         document.getElementById('detail-address-grid').innerHTML = `
           <div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
@@ -2599,53 +2609,53 @@
             ['Preferred Insurer',    app.insInsurer ? ({lic:'LIC of India',hdfc_life:'HDFC Life',icici_pru:'ICICI Prudential',sbi_life:'SBI Life',bajaj_allianz:'Bajaj Allianz',max_life:'Max Life',tata_aia:'Tata AIA',kotak_life:'Kotak Mahindra Life',new_india:'New India Assurance',united_india:'United India Insurance',star_health:'Star Health',niva_bupa:'Niva Bupa',care_health:'Care Health',other:'Other'}[app.insInsurer] || app.insInsurer) : '—'],
             ['Existing Policy',      app.insExistingPol === 'yes' ? (app.insExistingNo || 'Yes') : 'None'],
             ...(app.insExistingCov ? [['Existing Coverage', '₹' + Number(app.insExistingCov).toLocaleString('en-IN')]] : []),
-            ['Nominee Name',         app.insNomineeName || '—'],
-            ['Nominee Relationship', app.insNomineeRel  || '—'],
+            ['Nominee Name',         escapeHtml(app.insNomineeName || '—')],
+            ['Nominee Relationship', escapeHtml(app.insNomineeRel  || '—')],
             ['Nominee DOB',          app.insNomineeDob  || '—'],
           ]);
         } else {
           const _empBaseFields = [
             ['Employment Type',      app.empType === 'SALARIED' ? 'Salaried' : app.empType === 'SELFEMP' ? 'Self Employed' : app.empType === 'PROFESSIONAL' ? 'Professional' : app.empType || '—'],
             ['Net Monthly Salary',   '₹' + Number(app.salary || 0).toLocaleString('en-IN')],
-            ['Company Name',         (() => { const cx = (window.LA_DB?.companies || []).find(x => x.id === app.companyNameId); return cx ? cx.name : (app.compName || '—'); })()],
-            ['Designation',          app.desig ? (app.desig.charAt(0).toUpperCase() + app.desig.slice(1).toLowerCase()) : '—'],
+            ['Company Name',         escapeHtml((() => { const cx = (window.LA_DB?.companies || []).find(x => x.id === app.companyNameId); return cx ? cx.name : (app.compName || '—'); })())],
+            ['Designation',          escapeHtml(app.desig ? (app.desig.charAt(0).toUpperCase() + app.desig.slice(1).toLowerCase()) : '—')],
             ['Company Type',         (function(ct){ return {plcc:'Private Limited',plc:'Public Limited',cg:'Central Govt.',st_govt:'State Govt.',psu:'PSU',llp:'LLP',govt:'Govt / PSU',proprietorship:'Proprietorship',other:'Other'}[ct] || ct || '—'; })(app.compType)],
-            ['Official Email ID',    app.officeEmail || app.empCode || '—'],
-            ['Office Address',       [app.officeAddrL1, app.officeAddrL2, app.officeAddr].filter(Boolean).join(', ') || '—'],
-            ['Office PIN Code',      app.officeAddrPin || '—'],
+            ['Official Email ID',    escapeHtml(app.officeEmail || app.empCode || '—')],
+            ['Office Address',       escapeHtml([app.officeAddrL1, app.officeAddrL2, app.officeAddr].filter(Boolean).join(', ') || '—')],
+            ['Office PIN Code',      escapeHtml(app.officeAddrPin || '—')],
           ];
           // Property fields (Home Loan / LAP)
           const _propFields = (app.propType || app.propValue || app.propBuilder) ? [
             ['Property Type',      {residential:'Residential',commercial:'Commercial',plot:'Plot / Land',industrial:'Industrial'}[app.propType] || app.propType || '—'],
             ['Property Value',     app.propValue ? '₹' + Number(app.propValue).toLocaleString('en-IN') : '—'],
-            ['Builder / Society',  app.propBuilder || '—'],
-            ['Property City',      app.propCity || '—'],
+            ['Builder / Society',  escapeHtml(app.propBuilder || '—')],
+            ['Property City',      escapeHtml(app.propCity || '—')],
             ['Ownership Type',     {self:'Self Owned',joint:'Joint Ownership',inherited:'Inherited'}[app.propOwnership] || app.propOwnership || '—'],
             ['Under Construction', {yes:'Yes (Under Construction)',no:'No (Ready Possession)'}[app.propUnderConstruct] || app.propUnderConstruct || '—'],
           ] : [];
           // Co-Applicant fields (Home Loan / LAP / Business Loan)
           const _coAppFields = (app.coApplicantName || app.coApplicantPan) ? [
-            ['Co-Applicant Name',    app.coApplicantName    || '—'],
-            ['Co-Applicant PAN',     app.coApplicantPan     || '—'],
-            ['Co-Applicant Aadhaar', app.coApplicantAadhar  || '—'],
-            ['Co-Applicant Mobile',  app.coApplicantMobile  || '—'],
+            ['Co-Applicant Name',    escapeHtml(app.coApplicantName    || '—')],
+            ['Co-Applicant PAN',     escapeHtml(app.coApplicantPan     || '—')],
+            ['Co-Applicant Aadhaar', escapeHtml(app.coApplicantAadhar  || '—')],
+            ['Co-Applicant Mobile',  escapeHtml(app.coApplicantMobile  || '—')],
           ] : [];
           // Car fields (New / Used Car Loan)
           const _carFields = (app.carMake || app.carModel) ? [
-            ['Vehicle Make',       app.carMake  || '—'],
-            ['Vehicle Model',      app.carModel || '—'],
+            ['Vehicle Make',       escapeHtml(app.carMake  || '—')],
+            ['Vehicle Model',      escapeHtml(app.carModel || '—')],
             ['Manufacture Year',   app.carYear  || '—'],
             ['Ex-Showroom Price',  app.carPrice ? '₹' + Number(app.carPrice).toLocaleString('en-IN') : '—'],
             ...(app.carKm ? [['KMs Driven', Number(app.carKm).toLocaleString('en-IN') + ' km']] : []),
-            ['Dealer Name',        app.carDealer || '—'],
+            ['Dealer Name',        escapeHtml(app.carDealer || '—')],
           ] : [];
           // Education fields
           const _eduFields = (app.eduInstitution || app.eduCourse) ? [
-            ['Institution Name',  app.eduInstitution || '—'],
-            ['Course Name',       app.eduCourse      || '—'],
+            ['Institution Name',  escapeHtml(app.eduInstitution || '—')],
+            ['Course Name',       escapeHtml(app.eduCourse      || '—')],
             ['Course Duration',   app.eduDuration ? app.eduDuration + ' Year(s)' : '—'],
             ['Study Location',    {domestic:'India (Domestic)',abroad:'Abroad'}[app.eduStudyLocation] || app.eduStudyLocation || '—'],
-            ['Co-applicant',      app.eduCoApplicant || '—'],
+            ['Co-applicant',      escapeHtml(app.eduCoApplicant || '—')],
             ['Admission Status',  {confirmed:'Confirmed',provisional:'Provisional',applied:'Applied / Waiting'}[app.eduAdmissionStatus] || app.eduAdmissionStatus || '—'],
           ] : [];
           empGrid.innerHTML = fieldGrid([
@@ -3276,7 +3286,16 @@
         }
         const editableCell = (function() {
           // Detect comment type from prefix and render with badge + formatted body
-          const raw = commentDisplay || '';
+          // SECURITY FIX (audit): escape user-typed free text BEFORE any of
+          // the prefix-detection/formatting logic below runs — every marker
+          // this code matches on (📋/❓/✅ + fixed ASCII headers) is plain
+          // text with no <,>,&,",' characters, so escaping first doesn't
+          // change which branch matches or how the bullet/note extraction
+          // works; it just means any HTML an attacker typed into the
+          // comment itself renders as inert visible text instead of
+          // executing, while the badge <span>/<ul>/<li> markup this
+          // function constructs itself stays real HTML as intended.
+          const raw = escapeHtml(commentDisplay || '');
           let badge = '', body = raw;
           if (raw.startsWith('📋 PENDING DOCUMENTS REQUIRED')) {
             badge = '<span class="trk-type-tag trk-type-pending">📋 Pending Docs</span>';
@@ -3309,13 +3328,13 @@
             </td>`
           : '';
         html += `<tr data-track-id="${t.id}">
-      <td style="white-space:nowrap;font-size:11px;color:var(--text3)">${t.date || '—'}</td>
-      <td style="font-size:12.5px;font-weight:600;color:var(--text)">${t.name}</td>
-      <td><span class="stage-badge ${stageClass}">${t.current_stage || '—'}</span></td>
-      <td style="font-size:12px">${t.current_user || '—'}</td>
-      <td><span class="badge badge-${t.status}">${t.status || '—'}</span></td>
+      <td style="white-space:nowrap;font-size:11px;color:var(--text3)">${escapeHtml(t.date || '—')}</td>
+      <td style="font-size:12.5px;font-weight:600;color:var(--text)">${escapeHtml(t.name)}</td>
+      <td><span class="stage-badge ${stageClass}">${escapeHtml(t.current_stage || '—')}</span></td>
+      <td style="font-size:12px">${escapeHtml(t.current_user || '—')}</td>
+      <td><span class="badge badge-${t.status}">${escapeHtml(t.status || '—')}</span></td>
       ${editableCell}
-      <td><div class="tracking-subnote">${subNoteDisplay}</div></td>
+      <td><div class="tracking-subnote">${escapeHtml(subNoteDisplay)}</div></td>
       ${_trkActionsTd}
     </tr>`;
       });
@@ -3399,7 +3418,7 @@
       }, 40);
 
       showToast('Timeline entry updated ✓', 'success');
-      pushActivity('var(--accent)', `<strong>${appId}</strong> — timeline entry #${entryId} edited by Admin (${oldName} → ${entry.name})`);
+      pushActivity('var(--accent)', `<strong>${appId}</strong> — timeline entry #${entryId} edited by Admin (${escapeHtml(oldName)} → ${escapeHtml(entry.name)})`);
     }
 
     function deleteTrackingEntry(appId, entryId) {
@@ -3425,7 +3444,7 @@
       renderTrackingSection(app);
 
       showToast('Timeline entry deleted', 'info');
-      pushActivity('var(--danger)', `<strong>${appId}</strong> — timeline entry "${deletedEntry.name}" deleted by Admin`);
+      pushActivity('var(--danger)', `<strong>${appId}</strong> — timeline entry "${escapeHtml(deletedEntry.name)}" deleted by Admin`);
     }
 
     // ── Timeline Wizard ──
@@ -3500,9 +3519,11 @@
       openModal('modal-tracking');
     }
 
-    function onTaskTypeChange() {
-      // RCU type selector removed
-    }
+    // (onTaskTypeChange's real implementation lives further down in this
+    // file — see the second definition. This first one was an empty no-op
+    // left behind after the RCU type selector was removed; JS silently
+    // used whichever definition ran last, so this was dead code with zero
+    // functional effect — removed as part of a dead-code cleanup pass.)
 
     // ── Comment type selector ──
     function tmSelectType(btn, type) {
@@ -4052,7 +4073,7 @@
           `<strong>${app.id}</strong> — Payout claim auto-generated for ${names} · ₹${Number(app.amount).toLocaleString('en-IN')} disbursed`
         );
         // Notification
-        pushNotif('💰', `Payout claim created for ${names} — ${app.id} · ${app.name}`);
+        pushNotif('💰', `Payout claim created for ${escapeHtml(names)} — ${escapeHtml(app.id)} · ${escapeHtml(app.name)}`);
       }
     }
 
@@ -4349,7 +4370,7 @@
             <div style="font-weight:700;font-size:12.5px;font-family:monospace;color:var(--text)">${c.loanApac||'—'}</div>
             ${c.loanRefId && c.loanRefId !== c.loanApac ? `<div style="font-size:10.5px;color:var(--text3)">${c.loanRefId}</div>` : ''}
           </td>
-          <td style="font-size:13px">${c.customerName||'—'}</td>
+          <td style="font-size:13px">${escapeHtml(c.customerName||'—')}</td>
           <td><span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--surface2);color:var(--text2);white-space:nowrap">${loanLabel}</span></td>
           <td style="font-size:12px;color:var(--text2)">${c.bank||'—'}</td>
           <td style="font-weight:600;font-size:13px">${inrFmt(c.disbAmount)}</td>
@@ -4474,7 +4495,7 @@
       list.innerHTML = unclaimed.map(app => `
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px">
           <div style="min-width:0">
-            <div style="font-weight:700;font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${app.name}</div>
+            <div style="font-weight:700;font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(app.name)}</div>
             <div style="font-size:11px;color:var(--text3);margin-top:2px">${app.id} · ${inrFmt(app.amount)} · ${app.bank||'—'}</div>
           </div>
           <button class="btn btn-primary btn-sm" style="flex-shrink:0;font-size:11px;padding:5px 12px" onclick="mpQuickClaimApp('${app.id}')">＋ Claim</button>
@@ -4512,7 +4533,7 @@
         status:'pending', accountsRemark:'', createdAt: new Date().toLocaleDateString('en-IN'),
         isAuto: false,
       });
-      showToast(`Claim created for ${app.name} ✓`, 'success');
+      showToast(`Claim created for ${escapeHtml(app.name)} ✓`, 'success');
       updatePayoutNavBadge();
       if (typeof persistSave === 'function') persistSave();
       renderMyPayout();
@@ -5263,7 +5284,7 @@
             <div style="font-size:12px;font-family:monospace;color:var(--accent);font-weight:600">${c.loanApac||'—'}</div>
             ${c.loanRefId ? `<div style="font-size:10px;color:var(--text3);margin-top:1px">${c.loanRefId}</div>` : ''}
           </td>
-          <td style="font-size:13px;color:var(--text2)">${c.customerName||'—'}</td>
+          <td style="font-size:13px;color:var(--text2)">${escapeHtml(c.customerName||'—')}</td>
           <td><span style="font-size:11px;padding:3px 9px;border-radius:20px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);white-space:nowrap;font-weight:500">${loanLabel}</span></td>
           <td style="font-size:12.5px;color:var(--text2)">${c.bank||'—'}</td>
           <td style="font-weight:600;font-size:13px;color:var(--text)">${inrFmt(c.disbAmount)}</td>
@@ -5319,17 +5340,33 @@
       if (!ids.length) { showToast('No claims selected', 'error'); return; }
       if (newStatus === 'rejected' && !confirm('Reject ' + ids.length + ' selected claim(s)?')) return;
       const ts = new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+      const claims = [];
       ids.forEach(id => {
         const claim = PAYOUT_CLAIMS.find(c => c.id === id);
         if (!claim) return;
         claim.status = newStatus;
         if (!claim.history) claim.history = [];
         claim.history.push({ by: currentUser?.name || 'Admin', status: newStatus, ts, note: 'Bulk action' });
+        claims.push(claim);
       });
       const sm = PM_STATUS_META[newStatus] || PM_STATUS_META.pending;
       showToast(`${ids.length} claim(s) → ${sm.label}`, newStatus === 'approved' || newStatus === 'paid' ? 'success' : newStatus === 'rejected' ? 'error' : 'info');
       updatePayoutNavBadge();
       renderPayoutMgmt();
+      // BUGFIX (confirmed real gap, now fixed): this bulk action used to
+      // only mutate local PAYOUT_CLAIMS memory, same class of bug as
+      // approveClaim/rejectClaim/requestClaimInfo before those were fixed —
+      // reuses the same PATCH /api/payout/{id}/status endpoint per claim.
+      const apiStatusMap = { pending: 'Pending', approved: 'Verified', paid: 'Paid', rejected: 'Rejected' };
+      const apiStatus = apiStatusMap[newStatus];
+      if (apiStatus && typeof window.apiReq === 'function') {
+        Promise.all(claims.filter(c => c._apiId).map(c =>
+          window.apiReq('PATCH', '/payout/' + c._apiId + '/status', { status: apiStatus }).catch(function(){ return { success:false }; })
+        )).then(function(results) {
+          var failed = results.filter(r => !r || !r.success).length;
+          if (failed) showToast('⚠ ' + failed + ' claim(s) failed to sync to server', 'warn');
+        });
+      }
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
     }
 
@@ -5348,6 +5385,14 @@
       showToast(`${sm.icon} ${claim.customerName || claimId} → ${sm.label}`, newStatus === 'approved' || newStatus === 'paid' ? 'success' : newStatus === 'rejected' ? 'error' : 'info');
       updatePayoutNavBadge();
       renderPayoutMgmt();
+      // Same fix as bulkMgmtAction above.
+      const apiStatusMap2 = { pending: 'Pending', approved: 'Verified', paid: 'Paid', rejected: 'Rejected' };
+      const apiStatus2 = apiStatusMap2[newStatus];
+      if (apiStatus2 && claim._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('PATCH', '/payout/' + claim._apiId + '/status', { status: apiStatus2 })
+          .then(function(res) { if (!res || !res.success) showToast('⚠ Saved locally, but database sync failed', 'warn'); })
+          .catch(function() { showToast('⚠ Saved locally, but database sync failed', 'warn'); });
+      }
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
     }
 
@@ -6838,7 +6883,7 @@
         <div style="width:32px;height:32px;border-radius:8px;background:var(--accent-subtle);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:var(--accent);flex-shrink:0">${dsa.name.charAt(0)}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);margin-bottom:2px">Mapped DSA (auto-filled)</div>
-          <div style="font-size:13px;font-weight:700;color:var(--text)">${dsa.name}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--text)">${escapeHtml(dsa.name)}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:1px">${dsa.code}${dsa.mobile?' · '+dsa.mobile:''}</div>
         </div>
         <span style="font-size:10.5px;padding:3px 9px;border-radius:20px;font-weight:700;background:${dsa.status==='active'?'rgba(26,115,64,.12)':'rgba(138,150,180,.12)'};color:${dsa.status==='active'?'var(--success)':'var(--text3)'}">${dsa.status==='active'?'Active':'Inactive'}</span>`;
@@ -6907,7 +6952,7 @@
         .filter(u => (u.loc || '').trim().toLowerCase() === locNorm && (u.role === 'Sales Person' || u.role === 'Team Leader'));
 
       salesSel.innerHTML = '<option value="">— Select Sales Person —</option>' +
-        salesUsers.map(u => `<option value="${u.name}">${u.name} (${u.role})</option>`).join('');
+        salesUsers.map(u => `<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`).join('');
 
       // Clear previous auto-assign
       const hint = document.getElementById('w-sales-hint');
@@ -7145,7 +7190,7 @@
             if (stillPan !== pan) return;
             const d = res.data;
             alertEl.style.display = '';
-            if (msgEl) msgEl.innerHTML = `⚠ Customer has a recent <strong>${d.status}</strong> application (${d.loanNumber} — ${d.customerName || ''}). Created ${d.daysAgo} days ago.`;
+            if (msgEl) msgEl.innerHTML = `⚠ Customer has a recent <strong>${escapeHtml(d.status)}</strong> application (${escapeHtml(d.loanNumber)} — ${escapeHtml(d.customerName || '')}). Created ${escapeHtml(d.daysAgo)} days ago.`;
           }).catch(function() {});
         }
       }
@@ -7192,9 +7237,9 @@
         ? `<select onchange="updateSalesPerson('${app.id}',this.value)"
             style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;color:var(--text);font-family:var(--font-body)">
             <option value="">— Select Sales Person —</option>
-            ${salesPersons.map(u => `<option value="${u.name}" ${u.name===app.sales?'selected':''}>${u.name} (${u.role})</option>`).join('')}
+            ${salesPersons.map(u => `<option value="${escapeHtml(u.name)}" ${u.name===app.sales?'selected':''}>${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`).join('')}
            </select>`
-        : (app.sales || '—');
+        : escapeHtml(app.sales || '—');
 
       // ── SALES TEAM CELL ──
       const salesTeams = (typeof twSalesTeams !== 'undefined' ? twSalesTeams : [])
@@ -7206,7 +7251,7 @@
             <option value="">— Select Sales Team —</option>
             ${salesTeams.map(t => `<option value="${t}" ${t===app.salesTeam?'selected':''}>${t}</option>`).join('')}
            </select>`
-        : (app.salesTeam || '—');
+        : escapeHtml(app.salesTeam || '—');
 
       // ── LOCATION CELL ──
       const locations = (typeof twLocations !== 'undefined' ? twLocations : [])
@@ -7217,7 +7262,7 @@
             <option value="">— Select Location —</option>
             ${locations.map(l => `<option value="${l}" ${l===app.location?'selected':''}>${l}</option>`).join('')}
            </select>`
-        : (app.location || '—');
+        : escapeHtml(app.location || '—');
 
       // ── LOGIN USER CELL ──
       // FIX: Show all login-team/ops users; if location not set yet, show all eligible users
@@ -7236,11 +7281,11 @@
             <select onchange="updateLoginUser('${app.id}',this.value)"
               style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;color:var(--text);font-family:var(--font-body)">
               <option value="">— Select Login User —</option>
-              ${loginUserOptions.map(u => `<option value="${u.name}" ${u.name===app.loginUser?'selected':''}>${u.name} (${u.role})</option>`).join('')}
+              ${loginUserOptions.map(u => `<option value="${escapeHtml(u.name)}" ${u.name===app.loginUser?'selected':''}>${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`).join('')}
             </select>
-            <span style="font-size:10.5px;color:var(--text3)">is_change_login_user</span>
+            <span style="font-size:10.5px;color:var(--text3)">You can reassign this</span>
            </div>`
-        : (app.loginUser || (app.assignmentStatus === 'unassigned'
+        : (escapeHtml(app.loginUser) || (app.assignmentStatus === 'unassigned'
             ? '<span style="color:#d97706;font-weight:600">⏳ Unassigned — Assignment Queue</span>'
             : '—'));
 
@@ -7256,7 +7301,7 @@
             <option value="">— Select Operations Manager —</option>
             ${opsManagers.map(m => `<option value="${m}" ${m===app.opsManagerId?'selected':''}>${m}</option>`).join('')}
            </select>`
-        : (app.opsManagerId || '—');
+        : escapeHtml(app.opsManagerId || '—');
 
       grid.innerHTML = fieldGrid([
         ['Sales Person',        salesPersonCell],
@@ -7264,7 +7309,7 @@
         ['Location',            locationCell],
         ['Login User',          loginUserCell],
         ['Operations Manager',  opsManagerCell],
-        ['Login Team',          loginTeam ? loginTeam.name : '—'],
+        ['Login Team',          loginTeam ? escapeHtml(loginTeam.name) : '—'],
       ]);
     }
 
@@ -7450,9 +7495,31 @@
       if (!app) return;
       const val = type === 'number' ? (parseFloat(rawVal) || 0) : rawVal;
       app[field] = val;
-      // Debounced toast so it doesn't fire on every keystroke
+      // BUGFIX (confirmed real gap, now fixed): this used to only mutate
+      // browser memory (app[field]) — no field in the entire "Approval
+      // Details" panel (Stamp Duty, GST, Insurance, PF%, Bundled/BT flags,
+      // Flat Rate, EMI Date) ever reached the server. Debounced push to
+      // the new PUT /loans/{id}/sanction-detail endpoint, same debounce
+      // window as the original toast so this doesn't fire an API call per
+      // keystroke.
       clearTimeout(approvalFieldSave._t);
-      approvalFieldSave._t = setTimeout(() => showToast('Approval detail updated', 'success'), 900);
+      approvalFieldSave._t = setTimeout(() => {
+        showToast('Approval detail updated', 'success');
+        if (app._apiId && typeof window.apiReq === 'function') {
+          const fieldMap = {
+            sanctionStamp: 'stampDuty', sanctionGST: 'gst', sanctionInsurance: 'insurance',
+            sanctionPFPct: 'pfPercent', sanctionInsInBundled: 'insuranceInBundled',
+            sanctionPFInBundled: 'pfInBundled', sanctionBundled: 'isBundled', sanctionBT: 'isBt',
+            sanctionFlatRate: 'flatRate', sanctionEMIDate: 'emiDate'
+          };
+          const apiField = fieldMap[field];
+          if (apiField) {
+            window.apiReq('PUT', '/loans/' + app._apiId + '/sanction-detail', { [apiField]: val }).catch(function(e) {
+              console.warn('[Approval Detail] sync failed:', e);
+            });
+          }
+        }
+      }, 900);
     }
 
     // Auto-calc flat rate from ROI in detail view (partner/sales editable section)
@@ -7607,6 +7674,20 @@
       }
       if (typeof persistSave === 'function') { try { persistSave(); } catch (_) {} }
       showToast(`Login User updated to ${userName}`, 'success');
+      // BUGFIX (linked-users persistence): the audit-log push above records
+      // WHO changed WHAT, but never actually persisted the new LoginUserId
+      // onto the loan record itself — same "looks saved, isn't" gap as
+      // updateSalesTeam()/updateOpsManager(), fixed the same way.
+      if (app._apiId && typeof window.apiReq === 'function') {
+        const luUser = (typeof twUsers !== 'undefined' ? twUsers : []).find(u => u.name === userName);
+        if (userName && !luUser) {
+          showToast('⚠ Could not resolve "' + userName + '" to a user — not saved to the database.', 'warn');
+        } else {
+          window.apiReq('PATCH', '/loans/' + app._apiId + '/assignment', {
+            loginUserId: (luUser && luUser._apiId) || null, clearLoginUser: !userName
+          }).catch(function(e) { console.warn('[Assignment] Login User sync failed:', e); showToast('⚠ Login User saved locally, but database sync failed', 'warn'); });
+        }
+      }
     }
 
     // ══════════════════════════════════════════════════════════
@@ -7630,6 +7711,18 @@
         `Sales Person updated from: ${oldSales || '—'} to: ${personName}`, '');
       showToast(`Sales Person updated to ${personName}`, 'success');
       renderDetailOtherInfo(app);
+      // Same persistence fix as updateSalesTeam()/updateOpsManager() below —
+      // resolve the display name to the real user id the backend needs.
+      if (app._apiId && typeof window.apiReq === 'function') {
+        const spUser = (typeof twUsers !== 'undefined' ? twUsers : []).find(u => u.name === personName);
+        if (personName && !spUser) {
+          showToast('⚠ Could not resolve "' + personName + '" to a user — not saved to the database.', 'warn');
+        } else {
+          window.apiReq('PATCH', '/loans/' + app._apiId + '/assignment', {
+            assignedToUserId: (spUser && spUser._apiId) || null, clearAssignedTo: !personName
+          }).catch(function(e) { console.warn('[Assignment] Sales Person sync failed:', e); showToast('⚠ Sales Person saved locally, but database sync failed', 'warn'); });
+        }
+      }
     }
 
     function updateSalesTeam(appId, teamName) {
@@ -7641,6 +7734,19 @@
         `Sales Team updated from: ${oldTeam || '—'} to: ${teamName}`, '');
       showToast(`Sales Team updated to ${teamName}`, 'success');
       renderDetailOtherInfo(app);
+      // BUGFIX (linked-users persistence): this used to be local-only —
+      // it updated the on-screen row but nothing reached the database, so
+      // the change silently reverted on refresh or a different device.
+      // Now pushed via the dedicated PATCH /{id}/assignment endpoint (see
+      // LoansController.UpdateAssignment) — separate from the full loan
+      // Update endpoint since that one requires every core loan field and
+      // only allows Draft/Submitted status, but a team reassignment needs
+      // to work on a loan in any status.
+      if (app._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('PATCH', '/loans/' + app._apiId + '/assignment', {
+          salesTeamName: teamName || null, clearSalesTeam: !teamName
+        }).catch(function(e) { console.warn('[Assignment] Sales Team sync failed:', e); showToast('⚠ Sales Team saved locally, but database sync failed', 'warn'); });
+      }
     }
 
     function updateLocation(appId, locationName) {
@@ -7652,6 +7758,17 @@
         `Location updated from: ${oldLocation || '—'} to: ${locationName}`, '');
       showToast(`Location updated to ${locationName}`, 'success');
       renderDetailOtherInfo(app);
+      // Same persistence fix as updateSalesTeam()/updateOpsManager() above.
+      if (app._apiId && typeof window.apiReq === 'function') {
+        const locRec = (typeof twLocations !== 'undefined' ? twLocations : []).find(l => l.name === locationName);
+        if (locationName && !locRec) {
+          showToast('⚠ Could not resolve "' + locationName + '" to a location — not saved to the database.', 'warn');
+        } else {
+          window.apiReq('PATCH', '/loans/' + app._apiId + '/assignment', {
+            locationId: (locRec && locRec._apiId) || null, clearLocation: !locationName
+          }).catch(function(e) { console.warn('[Assignment] Location sync failed:', e); showToast('⚠ Location saved locally, but database sync failed', 'warn'); });
+        }
+      }
     }
 
     function updateOpsManager(appId, managerName) {
@@ -7665,6 +7782,19 @@
         `Operations Manager updated from: ${oldManager || '—'} to: ${managerName}${team ? ' (Team: ' + team.name + ')' : ''}`, '');
       showToast(`Operations Manager updated to ${managerName}`, 'success');
       renderDetailOtherInfo(app);
+      // Same persistence fix as updateSalesTeam() above — managerName is a
+      // display name (from twLoginTeams' leader field), resolved here to
+      // the real user id the backend needs.
+      if (app._apiId && typeof window.apiReq === 'function') {
+        const mgrUser = (typeof twUsers !== 'undefined' ? twUsers : []).find(u => u.name === managerName);
+        if (managerName && !mgrUser) {
+          showToast('⚠ Could not resolve "' + managerName + '" to a user — not saved to the database.', 'warn');
+        } else {
+          window.apiReq('PATCH', '/loans/' + app._apiId + '/assignment', {
+            opsManagerId: mgrUser ? mgrUser._apiId : null, clearOpsManager: !managerName
+          }).catch(function(e) { console.warn('[Assignment] Ops Manager sync failed:', e); showToast('⚠ Operations Manager saved locally, but database sync failed', 'warn'); });
+        }
+      }
     }
 
     // ══════════════════════════════════════════════════════════
@@ -7682,13 +7812,13 @@
       const desc = document.getElementById('tk-desc');
       const team = document.getElementById('tk-team');
 
-      if (subj) subj.value = `Ticket for Loan: ${appId} — ${app.name}`;
+      if (subj) subj.value = `Ticket for Loan: ${escapeHtml(appId)} — ${escapeHtml(app.name)}`;
       if (loan) {
         const opt = Array.from(loan.options).find(o => o.value === appId);
         if (!opt) {
           const newOpt = document.createElement('option');
           newOpt.value = appId;
-          newOpt.text  = `${appId} — ${app.name}`;
+          newOpt.text  = `${escapeHtml(appId)} — ${escapeHtml(app.name)}`;
           loan.appendChild(newOpt);
         }
         loan.value = appId;
@@ -7752,7 +7882,22 @@
       if ((field === 'applicationNumber' || field === 'approvedLoan') && value && app.status === 'wip') {
         const rd = ROLES[currentUser.role];
         if (rd && rd.canChangeStatus) {
-          app.status = 'login';
+          // BUGFIX (linked-users/flow persistence sweep): this used to set
+          // app.status directly — a raw local mutation that bypassed
+          // changeStatus() entirely, so this auto-advance (unlike a manual
+          // status change from the dropdown, which IS correctly wired —
+          // see _patchChangeStatus in api-bridge.js) never reached the
+          // server. Loan.bankLines itself still has no backend
+          // representation at all (flagged separately, needs a decision
+          // before building one), but the status transition this triggers
+          // is real and shouldn't silently revert on refresh — routing it
+          // through the same changeStatus() every other status change uses
+          // fixes that part now, independent of the bankLines gap.
+          if (typeof changeStatus === 'function') {
+            changeStatus(appId, 'login');
+          } else {
+            app.status = 'login';
+          }
           const dept = rd.dept || 'System';
           addTrackingEntry(app, 'EFIN-Assign Lender', dept, 'lender details Updated in DMS', ' ');
           renderTable();
@@ -7760,7 +7905,7 @@
           renderPipeline();
           showToast(appId + ' automatically advanced to Assign Lender 🏦', 'info');
           pushActivity('var(--accent)', `<strong>${appId}</strong> auto-advanced to Assign Lender`);
-          pushNotif('🏦', `${appId} — ${app.name} moved to Assign Lender (auto-mode)`);
+          pushNotif('🏦', `${escapeHtml(appId)} — ${escapeHtml(app.name)} moved to Assign Lender (auto-mode)`);
           // Refresh detail view to reflect new status badge and action buttons
           if (currentDetail && currentDetail.id === appId) openDetail(appId);
           return;
@@ -7841,7 +7986,7 @@
             u.role === 'Sales Person' || u.role === 'Sales Executive' || u.role === 'Team Leader'
           );
           salesSel.innerHTML = '<option value="">— Select Sales Person —</option>' +
-            salesUsers.map(u => `<option value="${u.name}">${u.name} (${u.role})</option>`).join('');
+            salesUsers.map(u => `<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`).join('');
         }
       }
     }
@@ -10280,7 +10425,7 @@
         addTrackingEntry(app, 'EFIN-PD Call', 'System Comments', 'Our credit team will contact you shortly.', ' ');
         // 🟡 Extend Notifications (item #10) — underwriting was one of the
         // status transitions with no topbar-bell entry at all before.
-        if (typeof pushNotif === 'function') pushNotif('🔍', `${id} — ${app.name} moved to Underwriting`);
+        if (typeof pushNotif === 'function') pushNotif('🔍', `${escapeHtml(id)} — ${escapeHtml(app.name)} moved to Underwriting`);
       }
       if (newStatus === 'disbursed') {
         const loanNo = 'E-LAN' + Math.floor(100000 + Math.random() * 900000);
@@ -10374,7 +10519,7 @@
       } else if (newStatus === 'login') {
         showToast(id + ' lender assigned — stage advanced automatically 🏦', 'info');
         pushActivity('var(--accent)', `<strong>${id}</strong> advanced to Assign Lender (auto-mode)`);
-        pushNotif('🏦', `${id} — ${app.name} moved to Assign Lender`);
+        pushNotif('🏦', `${escapeHtml(id)} — ${escapeHtml(app.name)} moved to Assign Lender`);
         // Highlight nav item briefly
         const loginNav = [...document.querySelectorAll('.nav-item')].find(el => el.textContent.includes('Applications'));
         if (loginNav) { loginNav.classList.add('nav-ping'); setTimeout(() => loginNav.classList.remove('nav-ping'), 600); }
@@ -10391,8 +10536,8 @@
           if (card) { card.classList.add('rejected-shake'); setTimeout(() => card.classList.remove('rejected-shake'), 600); }
         }
         showToast(id + ' has been rejected', 'error');
-        pushActivity('var(--danger)', `<strong>${id}</strong> — <strong>${app.name}</strong> rejected`);
-        pushNotif('🚫', `${id} — ${app.name} has been rejected`);
+        pushActivity('var(--danger)', `<strong>${escapeHtml(id)}</strong> — <strong>${escapeHtml(app.name)}</strong> rejected`);
+        pushNotif('🚫', `${escapeHtml(id)} — ${escapeHtml(app.name)} has been rejected`);
 
       } else {
         showToast(id + ' → ' + (STATUSES[newStatus] || newStatus), 'success');
@@ -10401,12 +10546,12 @@
 
       // Disbursal and approval activity hooks (run regardless of animation branch)
       if (newStatus === 'disbursed') {
-        pushActivity('var(--accent2)', `<strong>${id}</strong> — ₹${Number(app.amount).toLocaleString('en-IN')} <strong>DISBURSED</strong> to ${app.name}`);
-        pushNotif('💰', `${id} — ₹${Number(app.amount).toLocaleString('en-IN')} disbursed to ${app.name}`);
+        pushActivity('var(--accent2)', `<strong>${id}</strong> — ₹${Number(app.amount).toLocaleString('en-IN')} <strong>DISBURSED</strong> to ${escapeHtml(app.name)}`);
+        pushNotif('💰', `${id} — ₹${Number(app.amount).toLocaleString('en-IN')} disbursed to ${escapeHtml(app.name)}`);
       }
       if (newStatus === 'approved') {
-        pushActivity('var(--success)', `<strong>${id}</strong> — ${app.name} <strong>APPROVED</strong>`);
-        pushNotif('✅', `${id} — ${app.name} approved for ₹${Number(app.amount).toLocaleString('en-IN')}`);
+        pushActivity('var(--success)', `<strong>${id}</strong> — ${escapeHtml(app.name)} <strong>APPROVED</strong>`);
+        pushNotif('✅', `${escapeHtml(id)} — ${escapeHtml(app.name)} approved for ₹${Number(app.amount).toLocaleString('en-IN')}`);
       }
 
       // ── Change 3: Auto WhatsApp + Email notification to partner & salesperson ──
@@ -10470,7 +10615,7 @@
         <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:22px;padding:36px;max-width:480px;width:100%;box-shadow:0 40px 100px rgba(12,23,61,.3);max-height:90vh;overflow-y:auto">
           <div style="font-size:38px;text-align:center;margin-bottom:14px">🔄</div>
           <div style="font-family:var(--font-head);font-size:18px;font-weight:800;margin-bottom:6px;text-align:center">Re-open Application?</div>
-          <div style="font-size:12.5px;color:var(--text2);text-align:center;margin-bottom:4px"><strong>${app.name}</strong> · ${id}</div>
+          <div style="font-size:12.5px;color:var(--text2);text-align:center;margin-bottom:4px"><strong>${escapeHtml(app.name)}</strong> · ${escapeHtml(id)}</div>
           <div style="font-size:12px;color:var(--text3);text-align:center;margin-bottom:20px">
             Will resume processing from: <span style="font-weight:700;color:var(--accent)">${restoreLabel}</span>
           </div>
@@ -10812,7 +10957,7 @@
     <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:22px;padding:36px;max-width:400px;width:90%;text-align:center;box-shadow:0 40px 100px rgba(12,23,61,.3)">
       <div style="font-size:48px;margin-bottom:16px">🗑️</div>
       <div style="font-family:var(--font-head);font-size:18px;font-weight:800;margin-bottom:8px;color:var(--danger)">Delete Application?</div>
-      <div style="font-size:13px;color:var(--text2);margin-bottom:6px"><strong>${app.name}</strong></div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:6px"><strong>${escapeHtml(app.name)}</strong></div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:24px">${app.id} · ${loanTypeLabel(app.loanType)} · ₹${Number(app.amount).toLocaleString('en-IN')}</div>
       <div style="font-size:12.5px;color:var(--text3);background:rgba(192,57,43,.07);border:1px solid rgba(192,57,43,.18);border-radius:10px;padding:10px;margin-bottom:24px">⚠️ This action is permanent and cannot be undone.</div>
       <div style="display:flex;gap:10px;justify-content:center">
@@ -11669,7 +11814,7 @@
               <div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:6px;${t.done ? 'text-decoration:line-through;color:var(--text3)' : ''}">${t.title}</div>
               <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
                 <span class="task-priority ${t.priority}">${t.priority}</span>
-                ${app ? `<span style="font-size:11px;color:var(--accent);background:var(--accent-subtle);padding:2px 8px;border-radius:6px;cursor:pointer;font-weight:600" onclick="openDetail('${t.appId}')">${t.appId} — ${app.name}</span>` : ''}
+                ${app ? `<span style="font-size:11px;color:var(--accent);background:var(--accent-subtle);padding:2px 8px;border-radius:6px;cursor:pointer;font-weight:600" onclick="openDetail('${t.appId}')">${escapeHtml(t.appId)} — ${escapeHtml(app.name)}</span>` : ''}
                 <span style="font-size:11.5px;color:${overdue ? 'var(--accent2)' : 'var(--text3)'}">
                   ${overdue ? '⚠ Overdue · ' : '📅 '}${dueFmt}
                 </span>
@@ -11832,7 +11977,7 @@
       const today = new Date().toISOString().slice(0, 10);
 
       // Build app options for linking
-      const appOptions = APPLICATIONS.map(a => `<option value="${a.id}">${a.id} — ${a.name}</option>`).join('');
+      const appOptions = APPLICATIONS.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.id)} — ${escapeHtml(a.name)}</option>`).join('');
 
       const overlay = document.createElement('div');
       overlay.id = 'add-task-modal-overlay';
@@ -12664,16 +12809,16 @@
   <div class="stat"><div class="stat-label">Conversion Rate</div><div class="stat-val">${convRate}%</div></div>
 </div>
 <table>
-  <thead><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+  <thead><tr>${header.map(h=>`<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
   <tbody>
     ${rows.map((r,i) => `<tr>
       ${r.map((v,ci) => {
         if (ci === 5) {
           const sc = statusColor[v] || '#f3f4f6;color:#374151';
           const [bg,col] = sc.split(';color:');
-          return `<td><span class="badge" style="background:${bg};color:${col||'#374151'}">${v}</span></td>`;
+          return `<td><span class="badge" style="background:${bg};color:${col||'#374151'}">${escapeHtml(v)}</span></td>`;
         }
-        return `<td${ci===3?' style="text-align:right"':''}>${v}</td>`;
+        return `<td${ci===3?' style="text-align:right"':''}>${escapeHtml(v)}</td>`;
       }).join('')}
     </tr>`).join('')}
   </tbody>
@@ -13871,7 +14016,7 @@ ${printContent}
         return `
     <tr>
       <td><span class="app-id" style="cursor:pointer;color:var(--accent)" onclick="openDetail('${a.id}')">${a.id}</span></td>
-      <td><strong>${a.name}</strong></td>
+      <td><strong>${escapeHtml(a.name)}</strong></td>
       <td><span class="app-id">${a.incred_app_id || '—'}</span></td>
       <td>₹${Number(a.amount).toLocaleString('en-IN')}</td>
       <td><span class="badge ${statusBadge[st] || 'badge-hold'} badge-animate" id="incred-status-${a.id}">${statusLabel[st] || st}</span></td>
@@ -14119,11 +14264,11 @@ ${printContent}
         INCRED_OFFER_STATUS[appId] = { status: 'created', rejectionReason: '', offerAmt: 0 };
         addTrackingEntry(app, 'EFIN-InCred App Created', 'System Comments',
           `InCred App ID: ${newIncredId}${customerId ? ' | Customer ID: ' + customerId : ''} — application/init submitted`, '');
-        pushActivity('var(--accent)', `InCred application <strong>${newIncredId}</strong> created for <strong>${app.name}</strong>${customerId ? ' (Cust: ' + customerId + ')' : ''}`);
+        pushActivity('var(--accent)', `InCred application <strong>${newIncredId}</strong> created for <strong>${escapeHtml(app.name)}</strong>${customerId ? ' (Cust: ' + customerId + ')' : ''}`);
         persistSave();
         renderIncredPage();
         openDetail(appId);
-        eLoader.topbar.done(); showToast(`✓ InCred App ${newIncredId} created for ${app.name}`, 'success');
+        eLoader.topbar.done(); showToast(`✓ InCred App ${newIncredId} created for ${escapeHtml(app.name)}`, 'success');
       } catch(err) {
         // Real API only — no offline/demo fallback. Surface the actual error.
         const m = String(err.message || '');
@@ -14332,9 +14477,9 @@ ${printContent}
         }
         addTrackingEntry(app, 'EFIN-InCred Status Polled', 'System Comments', trackMsg, '');
         if (mapped === 'completed') {
-          pushActivity('var(--success)', `InCred offer <strong>COMPLETED</strong> for <strong>${app.name}</strong>${loanOffers.length ? ` — ${loanOffers.length} offer(s)` : ''}`);
+          pushActivity('var(--success)', `InCred offer <strong>COMPLETED</strong> for <strong>${escapeHtml(app.name)}</strong>${loanOffers.length ? ` — ${loanOffers.length} offer(s)` : ''}`);
         } else if (mapped === 'rejected') {
-          pushActivity('var(--danger)', `InCred offer <strong>REJECTED</strong> for <strong>${app.name}</strong>${app.incred_reject_reason ? ': ' + app.incred_reject_reason : ''}`);
+          pushActivity('var(--danger)', `InCred offer <strong>REJECTED</strong> for <strong>${escapeHtml(app.name)}</strong>${app.incred_reject_reason ? ': ' + app.incred_reject_reason : ''}`);
         }
         persistSave();
         renderIncredPage();
@@ -14375,7 +14520,7 @@ ${printContent}
     <div style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--surface2);border-radius:var(--r-sm);border:1px solid var(--border);margin-bottom:14px">
       <div style="font-size:26px">🚫</div>
       <div>
-        <div style="font-size:13.5px;font-weight:600">${app.name} — ${app.incred_app_id}</div>
+        <div style="font-size:13.5px;font-weight:600">${escapeHtml(app.name)} — ${escapeHtml(app.incred_app_id)}</div>
         <div style="font-size:12px;color:var(--text3);margin-top:2px">${app.id} · CIBIL ${app.cibil || '—'}</div>
       </div>
     </div>
@@ -14505,8 +14650,8 @@ ${printContent}
         persistSave();
         showToast(
           eligible
-            ? `✓ ${app.name} is eligible — up to ₹${(maxAmt / 100000).toFixed(1)}L`
-            : `✗ ${app.name} is not eligible: ${reason || 'Policy criteria not met'}`,
+            ? `✓ ${escapeHtml(app.name)} is eligible — up to ₹${(maxAmt / 100000).toFixed(1)}L`
+            : `✗ ${escapeHtml(app.name)} is not eligible: ${reason || 'Policy criteria not met'}`,
           eligible ? 'success' : 'warn'
         );
         return data;
@@ -14577,7 +14722,7 @@ ${printContent}
       if (!_incredConfigured()) { _showIncredNotConfigured(); return; }
 
       const cancelReason = reason || 'Cancelled by EFIN operator';
-      if (!confirm(`Cancel InCred application ${app.incred_app_id} for ${app.name}?\n\nReason: ${cancelReason}`)) return;
+      if (!confirm(`Cancel InCred application ${app.incred_app_id} for ${escapeHtml(app.name)}?\n\nReason: ${cancelReason}`)) return;
 
       const cfg = _getIncredConfig();
       try {
@@ -14595,7 +14740,7 @@ ${printContent}
         app.incred_offer = 'cancelled';
         addTrackingEntry(app, 'EFIN-InCred App Cancelled', 'System Comments',
           `InCred application ${app.incred_app_id} cancelled. Reason: ${cancelReason}`, '');
-        pushActivity('var(--warn)', `InCred application <strong>${app.incred_app_id}</strong> cancelled for <strong>${app.name}</strong>`);
+        pushActivity('var(--warn)', `InCred application <strong>${app.incred_app_id}</strong> cancelled for <strong>${escapeHtml(app.name)}</strong>`);
         persistSave();
         renderIncredPage();
         showToast(`InCred App ${app.incred_app_id} cancelled`, 'info');
@@ -15921,13 +16066,27 @@ ${printContent}
       const _r = (window.currentUser && window.currentUser.role) || '';
       if (_r !== 'admin' && _r !== 'product_team') { showToast('Only Admin or Product Team can change lender configuration', 'error'); return; }
       if (!_lcActiveProduct) return;
+      const changedBanks = [];
       LA_DB.banks.forEach(bank => {
         const assignedProducts = LC_PRODUCTS
           .filter(p => LA_DB.productBanks[p.key] && LA_DB.productBanks[p.key].has(bank.id))
           .map(p => p.key);
         bank.loanTypes = assignedProducts.length ? assignedProducts : null;
+        if (bank._apiId) changedBanks.push(bank);
       });
-      showToast('Bank assignment saved ✓', 'success');
+      // BUGFIX (confirmed real gap, now fixed): bank.loanTypes used to only
+      // ever be mutated in browser memory. Banks.LoanTypesJson now exists
+      // server-side for exactly this.
+      if (changedBanks.length && typeof window.apiReq === 'function') {
+        Promise.all(changedBanks.map(b =>
+          window.apiReq('PUT', '/banks/' + b._apiId, { loanTypes: b.loanTypes || [] }).catch(function(){ return { success:false }; })
+        )).then(function(results) {
+          var failed = results.filter(r => !r || !r.success).length;
+          showToast(failed ? ('⚠ ' + failed + ' bank(s) failed to sync to server') : 'Bank assignment saved ✓', failed ? 'warn' : 'success');
+        });
+      } else {
+        showToast('Bank assignment saved ✓', 'success');
+      }
     }
 
     // ── Add a company line to a bank directly from the Assigned Banks grid ──
@@ -16013,6 +16172,18 @@ ${printContent}
       laRenderBanks();
       const co  = LA_DB.companies.find(c => c.id === compId);
       const cat = LA_DB.categories.find(c => c.id === catId);
+      // BUGFIX (confirmed real gap, now fixed): only ever mutated
+      // bank.lines locally — POST /api/lenderconfig/lines already existed
+      // and was just never called from this specific add-line path.
+      const newLine = bank.lines[bank.lines.length - 1];
+      if (bank._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('POST', '/lenderconfig/lines', {
+          bankId: bank._apiId, companyId: compId, categoryId: catId, pinCode: pin, pf: pf
+        }).then(function(res) {
+          if (res && res.success && res.data) { newLine.id = res.data.id; newLine._apiId = res.data.id; }
+          else showToast('⚠ Line added locally, but database save failed', 'warn');
+        }).catch(function() { showToast('⚠ Line added locally, but database save failed', 'warn'); });
+      }
       showToast(`Line added: ${co?.name} · ${cat?.name} ✓`, 'success');
     }
 
@@ -16130,7 +16301,29 @@ ${printContent}
       lcRenderProductBanks(_lcActiveProduct);
       laRenderBanks();
       const lineMsg = lines.length ? ` with 1 company line` : '';
-      showToast(`${name} added${lineMsg} ✓`, 'success');
+      // BUGFIX (confirmed real gap, now fixed): this created the bank
+      // ENTIRELY locally — no API call at all, meaning it never actually
+      // existed for the wizard's eligibility engine on any other
+      // user/device, or after a refresh.
+      if (typeof window.apiReq === 'function') {
+        window.apiReq('POST', '/banks', {
+          bankName: name, isIncred: isIncred, isElite: isElite,
+          minCibil: newBank.rules.minCibil, acceptNtc: newBank.rules.acceptNTC,
+          maxLoanAmt: newBank.rules.maxLoanAmt, minTenure: newBank.rules.minTenure,
+          maxTenure: newBank.rules.maxTenure, foirLimit: newBank.rules.foirLimit,
+          pfRequired: newBank.rules.pfRequired, minAge: newBank.rules.minAge,
+          maxAge: newBank.rules.maxAge, minExpMonths: newBank.rules.minExpMonths
+        }).then(function(res) {
+          if (res && res.success && res.data) {
+            newBank.id = res.data.id; newBank._apiId = res.data.id;
+            showToast(`${name} added${lineMsg} ✓`, 'success');
+          } else {
+            showToast(`⚠ ${name} added locally, but database save failed`, 'warn');
+          }
+        }).catch(function() { showToast(`⚠ ${name} added locally, but database save failed`, 'warn'); });
+      } else {
+        showToast(`${name} added${lineMsg} ✓`, 'success');
+      }
     }
 
     // ── Edit bank inline (from assignment grid) ──
@@ -16200,7 +16393,20 @@ ${printContent}
       ov.remove();
       lcRenderProductBanks(productKey || _lcActiveProduct);
       laRenderBanks();
-      showToast(`${bank.name} updated ✓`, 'success');
+      // BUGFIX (confirmed real gap, now fixed): another separate,
+      // unpatched bank-edit path — reuses the same PUT /api/banks/{id}
+      // every other bank-edit function already saves to.
+      if (bank._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('PUT', '/banks/' + bank._apiId, {
+          bankName: bank.name, isIncred: bank.isIncred, isElite: bank.isElite,
+          maxLoanAmt: bank.rules.maxLoanAmt, foirLimit: bank.rules.foirLimit,
+          minCibil: bank.rules.minCibil, minExpMonths: bank.rules.minExpMonths
+        }).then(function(res) {
+          showToast(res && res.success ? `${bank.name} updated ✓` : '⚠ Updated locally, but database sync failed', res && res.success ? 'success' : 'warn');
+        }).catch(function() { showToast('⚠ Updated locally, but database sync failed', 'warn'); });
+      } else {
+        showToast(`${bank.name} updated ✓`, 'success');
+      }
     }
 
     // ── Delete bank (from assignment grid) ──
@@ -16227,6 +16433,7 @@ ${printContent}
     }
 
     function lcConfirmDeleteBank(bankId, ov) {
+      const bank = LA_DB.banks.find(b => b.id === bankId);
       LA_DB.banks = LA_DB.banks.filter(b => b.id !== bankId);
       LA_DB.wizardSelectedBanks = (LA_DB.wizardSelectedBanks||[]).filter(id => id !== bankId);
       // Remove from all product assignment sets
@@ -16234,7 +16441,19 @@ ${printContent}
       ov.remove();
       lcRenderProductBanks(_lcActiveProduct);
       laRenderBanks();
-      showToast('Bank deleted ✓', 'info');
+      // BUGFIX (confirmed real gap, now fixed): this used to only ever
+      // filter the bank out of local LA_DB.banks — nothing was deleted
+      // server-side, so it reappeared on refresh/other-device, and stayed
+      // selectable in the wizard's eligibility matching for every other
+      // user in the meantime.
+      if (bank && bank._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('DELETE', '/banks/' + bank._apiId).then(function(res) {
+          if (!res || !res.success) showToast('⚠ Bank deleted locally, but database delete failed', 'warn');
+          else showToast('Bank deleted ✓', 'info');
+        }).catch(function() { showToast('⚠ Bank deleted locally, but database delete failed', 'warn'); });
+      } else {
+        showToast('Bank deleted ✓', 'info');
+      }
     }
 
     // ── Unassign bank from the current product only (does NOT delete it from the system) ──
@@ -16947,7 +17166,18 @@ ${printContent}
       CAM_MATRIX[i].foir      = +g('foir') / 100;
       _camEditingRow = -1;
       camAdminRender();
-      showToast('✓ Band updated', 'success');
+      // BUGFIX (confirmed real gap, now fixed): this toast said "updated"
+      // but only mutated local CAM_MATRIX — nothing reached the server
+      // unless the user separately clicked the bottom "Save Matrix" button
+      // afterward. Reuses the same server-push camAdminSave() already does.
+      if (typeof window.apiReq === 'function') {
+        window.apiReq('POST', '/settings', { key: 'efin_cam_matrix', value: JSON.stringify(CAM_MATRIX), category: 'Configuration' })
+          .then(function(res) {
+            showToast(res && res.success ? '✓ Band updated' : '⚠ Updated locally, but database sync failed', res && res.success ? 'success' : 'warn');
+          }).catch(function() { showToast('⚠ Updated locally, but database sync failed', 'warn'); });
+      } else {
+        showToast('✓ Band updated (local only)', 'warn');
+      }
     }
     // camAdminRowChange removed — row edits committed via camAdminSaveRow
     function camAdminDeleteRow(i) {
@@ -16957,6 +17187,11 @@ ${printContent}
       if (_camEditingRow === i) _camEditingRow = -1;
       else if (_camEditingRow > i) _camEditingRow--;
       camAdminRender();
+      // Same fix as camAdminSaveRow above.
+      if (typeof window.apiReq === 'function') {
+        window.apiReq('POST', '/settings', { key: 'efin_cam_matrix', value: JSON.stringify(CAM_MATRIX), category: 'Configuration' })
+          .catch(function(e) { console.warn('[CAM Matrix] delete sync failed:', e); });
+      }
       showToast('Band removed', 'warn');
     }
     function camAdminAddRow() {
@@ -17076,7 +17311,17 @@ ${printContent}
       camAdminRender();
       const msg = document.getElementById('cam-admin-save-msg');
       if (msg) { msg.style.display='inline'; setTimeout(()=>msg.style.display='none',3000); }
-      showToast('✓ CAM Matrix saved', 'success');
+      // BUGFIX (confirmed real gap, now fixed): CAM_MATRIX is global config
+      // (not bank-specific), so this reuses the existing generic, Admin-only
+      // Settings endpoint (same one Roles & Permissions/Menu Access Control
+      // already save to) rather than needing a whole new table.
+      if (typeof window.apiReq === 'function') {
+        window.apiReq('POST', '/settings', { key: 'efin_cam_matrix', value: JSON.stringify(CAM_MATRIX), category: 'Configuration' }).then(function(res) {
+          showToast(res && res.success ? '✓ CAM Matrix saved' : '⚠ Saved locally, but database sync failed', res && res.success ? 'success' : 'warn');
+        }).catch(function() { showToast('⚠ Saved locally, but database sync failed', 'warn'); });
+      } else {
+        showToast('✓ CAM Matrix saved (local only)', 'warn');
+      }
     }
     function camAdminReset() {
       if (!confirm('Reset CAM Matrix to defaults?')) return;
@@ -17565,7 +17810,35 @@ ${printContent}
     function lcSaveBankRuleRow(bankId) {
       const _r = (window.currentUser && window.currentUser.role) || '';
       if (_r !== 'admin' && _r !== 'product_team') { showToast('Only Admin or Product Team can save lender rules', 'error'); return; }
-      showToast('Rules saved ✓', 'success');
+      // BUGFIX (confirmed real gap): this used to only mutate LA_DB.banks in
+      // browser memory (via lcSetBankRule above) and show "saved" — no API
+      // call at all. Reverted on refresh, meaning the wizard's own
+      // eligibility-matching (laLoadEligibility()) — which reads this exact
+      // bank.rules object — would keep using whatever rules happened to
+      // still be in memory, not what an Admin actually configured. Backend
+      // (BankMaster) already has every one of these fields; PUT /api/banks
+      // was just never called from this screen.
+      const bank = LA_DB.banks.find(b => b.id === bankId);
+      if (!bank || !bank._apiId || typeof window.apiReq !== 'function') {
+        showToast('Rules saved locally — not yet synced to server (bank not linked to database)', 'warn');
+        return;
+      }
+      const r = bank.rules || {};
+      window.apiReq('PUT', '/banks/' + bank._apiId, {
+        minCibil: r.minCibil, acceptNtc: !!r.acceptNTC, maxLoanAmt: r.maxLoanAmt,
+        minTenure: r.minTenure, maxTenure: r.maxTenure, foirLimit: r.foirLimit,
+        pfRequired: !!r.pfRequired, minAge: r.minAge, maxAge: r.maxAge,
+        minExpMonths: r.minExpMonths
+      }).then(function(res) {
+        if (res && res.success) {
+          showToast('Rules saved ✓', 'success');
+        } else {
+          var msg = (res && (res.message || (res.errors && res.errors[0]))) || 'Could not reach the server.';
+          showToast('⚠ Rules saved locally, but database sync failed: ' + msg, 'warn');
+        }
+      }).catch(function() {
+        showToast('⚠ Rules saved locally, but database sync failed (network error)', 'warn');
+      });
     }
 
     // ── CIBIL RULES ──
@@ -17725,20 +17998,41 @@ ${printContent}
       // Deduplicate
       bank.serviceablePins = [...new Set(pins)];
       lcRenderPinsConfig();
-      showToast(`${bank.name}: ${bank.serviceablePins.length} PIN${bank.serviceablePins.length!==1?'s':''} saved ✓`, 'success');
+      // BUGFIX (confirmed real gap, now fixed): was mutating browser memory
+      // only. Banks.ServiceablePinsJson now exists server-side.
+      if (bank._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('PUT', '/banks/' + bank._apiId, { serviceablePins: bank.serviceablePins }).then(function(res) {
+          showToast(`${bank.name}: ${bank.serviceablePins.length} PIN${bank.serviceablePins.length!==1?'s':''} ${res && res.success ? 'saved ✓' : 'saved locally, but sync failed'}`, res && res.success ? 'success' : 'warn');
+        }).catch(function() {
+          showToast(`${bank.name}: PINs saved locally, but sync failed`, 'warn');
+        });
+      } else {
+        showToast(`${bank.name}: ${bank.serviceablePins.length} PIN${bank.serviceablePins.length!==1?'s':''} saved ✓`, 'success');
+      }
     }
 
     function lcSaveAllPins() {
       let total = 0;
+      const changedBanks = [];
       LA_DB.banks.forEach(b => {
         const ta = document.getElementById('pins-' + b.id);
         if (!ta) return;
         const pins = ta.value.split(/[\s,;\n]+/).map(p => p.trim()).filter(p => /^\d{6}$/.test(p));
         b.serviceablePins = [...new Set(pins)];
         total += b.serviceablePins.length;
+        if (b._apiId) changedBanks.push(b);
       });
       lcRenderPinsConfig();
-      showToast(`All banks saved — ${total} total PIN${total!==1?'s':''} ✓`, 'success');
+      if (changedBanks.length && typeof window.apiReq === 'function') {
+        Promise.all(changedBanks.map(b =>
+          window.apiReq('PUT', '/banks/' + b._apiId, { serviceablePins: b.serviceablePins }).catch(function(){ return { success:false }; })
+        )).then(function(results) {
+          var failed = results.filter(r => !r || !r.success).length;
+          showToast(failed ? ('⚠ ' + failed + ' bank(s) failed to sync') : `All banks saved — ${total} total PIN${total!==1?'s':''} ✓`, failed ? 'warn' : 'success');
+        });
+      } else {
+        showToast(`All banks saved — ${total} total PIN${total!==1?'s':''} ✓`, 'success');
+      }
     }
 
     function lcPinsClearBank(bankId) {
@@ -18094,7 +18388,13 @@ ${printContent}
         bank.serviceablePins = [...new Set([...existing, ...tokens])];
         ov.remove();
         lcRenderPinsConfig();
-        showToast(`${bank.name}: ${bank.serviceablePins.length} PIN${bank.serviceablePins.length!==1?'s':''} saved ✓`, 'success');
+        if (bank._apiId && typeof window.apiReq === 'function') {
+          window.apiReq('PUT', '/banks/' + bank._apiId, { serviceablePins: bank.serviceablePins }).then(function(res) {
+            showToast(`${bank.name}: ${bank.serviceablePins.length} PIN${bank.serviceablePins.length!==1?'s':''} ${res && res.success ? 'saved ✓' : 'saved locally, sync failed'}`, res && res.success ? 'success' : 'warn');
+          }).catch(function() { showToast(`${bank.name}: PINs saved locally, sync failed`, 'warn'); });
+        } else {
+          showToast(`${bank.name}: ${bank.serviceablePins.length} PIN${bank.serviceablePins.length!==1?'s':''} saved ✓`, 'success');
+        }
       };
 
       if (useFile) {
@@ -18174,8 +18474,20 @@ ${printContent}
       bank.rules.empTypes  = LC_EMP_TYPES.map(et => et.key).filter(k => document.getElementById(`et-${bankId}-${k}`)?.checked);
       bank.rules.compTypes = Object.keys(LC_COMP_TYPES).filter(k => document.getElementById(`ct-${bankId}-${k}`)?.checked);
       overlay.remove();
-      showToast('Employment types saved ✓', 'success');
       lcRenderEmpTypes();
+      // Same persistence fix as lcSaveBankRuleRow() above.
+      if (bank._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('PUT', '/banks/' + bank._apiId, {
+          empTypesJson: JSON.stringify(bank.rules.empTypes || []),
+          compTypesJson: JSON.stringify(bank.rules.compTypes || [])
+        }).then(function(res) {
+          showToast(res && res.success ? 'Employment types saved ✓' : '⚠ Saved locally, but database sync failed', res && res.success ? 'success' : 'warn');
+        }).catch(function() {
+          showToast('⚠ Saved locally, but database sync failed', 'warn');
+        });
+      } else {
+        showToast('Employment types saved ✓ (local only)', 'warn');
+      }
     }
 
     // ════════════════════════════════════════════════════════
@@ -18495,6 +18807,16 @@ ${printContent}
       ov.remove();
       laDetailRenderCategories(bank);
       laRenderBanks();
+      // BUGFIX (confirmed real gap, now fixed): same separate/unpatched
+      // path as laDetailDeleteCategory above — reuses the same
+      // /lenderconfig/categories POST endpoint api-bridge.js's patch for
+      // laConfirmAddCategory already uses.
+      if (typeof window.apiReq === 'function') {
+        window.apiReq('POST', '/lenderconfig/categories', { name: newCat.name, salary: newCat.salary || 0 }).then(function(r) {
+          if (r && r.success && r.data) { newCat.id = r.data.id; newCat._apiId = r.data.id; }
+          else showToast('⚠ Category added locally, but database save failed.', 'warn');
+        }).catch(function() { showToast('⚠ Category added locally, but database save failed.', 'warn'); });
+      }
       showToast(`${name} added for ${bank?.name||'bank'} ✓`, 'success');
     }
 
@@ -18511,6 +18833,16 @@ ${printContent}
       const bank = LA_DB.banks.find(x => x.id === LA_DB.currentBankId);
       laDetailRenderCategories(bank);
       laRenderBanks();
+      // BUGFIX (confirmed real gap, now fixed): this is a SEPARATE delete
+      // path from laDeleteCategory (the one api-bridge.js already patches,
+      // "Categories" tab's own delete button) — this one, reachable from
+      // inside the bank-detail panel, never called the API at all. Reuses
+      // the same /lenderconfig/categories/{id} endpoint.
+      if (cat._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('DELETE', '/lenderconfig/categories/' + cat._apiId).then(function(r) {
+          if (!r || r.success === false) showToast('⚠ Category deleted locally, but database delete failed.', 'warn');
+        }).catch(function() { showToast('⚠ Category deleted locally, but database delete failed.', 'warn'); });
+      }
       showToast('Category deleted ✓', 'info');
     }
 
@@ -18540,7 +18872,33 @@ ${printContent}
       const raw = document.getElementById('la-detail-pins')?.value || '';
       bank.serviceablePins = [...new Set(raw.split(/[\s,;\n]+/).map(p => p.trim()).filter(p => /^\d{6}$/.test(p)))];
       laRenderBanks();
-      showToast(`${bank.name}: ${bank.serviceablePins.length} PIN${bank.serviceablePins.length!==1?'s':''} saved ✓`, 'success');
+      if (bank._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('PUT', '/banks/' + bank._apiId, { serviceablePins: bank.serviceablePins }).then(function(res) {
+          showToast(`${bank.name}: ${bank.serviceablePins.length} PIN${bank.serviceablePins.length!==1?'s':''} ${res && res.success ? 'saved ✓' : 'saved locally, sync failed'}`, res && res.success ? 'success' : 'warn');
+        }).catch(function() { showToast(`${bank.name}: PINs saved locally, sync failed`, 'warn'); });
+      } else {
+        showToast(`${bank.name}: ${bank.serviceablePins.length} PIN${bank.serviceablePins.length!==1?'s':''} saved ✓`, 'success');
+      }
+    }
+
+    // Shared helper — pushes the current flat bank.rules to the server.
+    // Used by laDetailSaveEmpTypes/laDetailSaveCategories/laDetailSaveCibil
+    // below, all of which edit different slices of the same flat record
+    // (same one lcSaveBankRuleRow already saves).
+    function _laSaveFlatRules(bank, successMsg) {
+      if (!bank._apiId || typeof window.apiReq !== 'function') {
+        showToast(successMsg + ' (local only)', 'warn');
+        return;
+      }
+      const r = bank.rules || {};
+      window.apiReq('PUT', '/banks/' + bank._apiId, {
+        minCibil: r.minCibil, acceptNtc: !!r.acceptNTC, maxLoanAmt: r.maxLoanAmt,
+        minTenure: r.minTenure, maxTenure: r.maxTenure, foirLimit: r.foirLimit,
+        pfRequired: !!r.pfRequired, minAge: r.minAge, maxAge: r.maxAge,
+        minExpMonths: r.minExpMonths, empTypes: r.empTypes || [], compTypes: r.compTypes || []
+      }).then(function(res) {
+        showToast(res && res.success ? successMsg : '⚠ Saved locally, but database sync failed', res && res.success ? 'success' : 'warn');
+      }).catch(function() { showToast('⚠ Saved locally, but database sync failed', 'warn'); });
     }
 
     function laDetailSaveEmpTypes() {
@@ -18551,7 +18909,7 @@ ${printContent}
         .map(id => document.getElementById(id).value);
       bank.rules.compTypes = [...document.querySelectorAll('.la-comptype-cb:checked')].map(cb => cb.value);
       laRenderBanks();
-      showToast('Employment settings saved ✓', 'success');
+      _laSaveFlatRules(bank, 'Employment settings saved ✓');
     }
 
     function laDetailSaveCategories() {
@@ -18570,7 +18928,7 @@ ${printContent}
       bank.rules.minCibil = parseInt(document.getElementById('la-detail-cibil-score')?.value) || 700;
       bank.rules.acceptNTC = document.getElementById('la-detail-ntc')?.checked || false;
       laRenderBanks(); lcRenderCibilRules();
-      showToast('CIBIL rules saved ✓', 'success');
+      _laSaveFlatRules(bank, 'CIBIL rules saved ✓');
     }
 
     function laDetailSaveBankRules() {
@@ -18583,7 +18941,7 @@ ${printContent}
       });
       bank.rules.pfRequired = document.getElementById('la-detail-pf')?.checked || false;
       laRenderBanks(); lcRenderBankRules();
-      showToast('Bank rules saved ✓', 'success');
+      _laSaveFlatRules(bank, 'Bank rules saved ✓');
     }
 
     // ── Bulk Upload (bank-level) ──
@@ -18780,6 +19138,7 @@ ${printContent}
       const createMissing = document.getElementById('bu-create-missing')?.checked;
       const updateExisting = document.getElementById('bu-update-existing')?.checked;
       let added = 0, updated = 0, skipped = 0;
+      const apiCalls = []; // queued (description, promiseFactory) pairs — run after local processing
       _buParsedRows.forEach(row => {
         const compName = (row['company name'] || row['company'] || '').trim();
         const salCatName = (row['salary category'] || row['category'] || '').trim();
@@ -18793,20 +19152,45 @@ ${printContent}
           const compTypeMap = {'pvt ltd':'plcc','public ltd':'plc','llp':'llp','government':'govt','psu':'psu','proprietorship':'proprietorship','partnership':'partnership'};
           comp = { id: LA_DB.nextId.company++, name: compName, empTypes: ['SALARIED'], compType: compTypeMap[compTypeName.toLowerCase()] || 'other' };
           LA_DB.companies.push(comp);
+          apiCalls.push(function() {
+            return window.apiReq('POST', '/lenderconfig/companies', { name: comp.name, salary: 0 })
+              .then(function(r) { if (r && r.success && r.data) { comp.id = r.data.id; comp._apiId = r.data.id; } });
+          });
         }
         let cat = LA_DB.categories.find(c => c.name.toLowerCase() === salCatName.toLowerCase());
         if (!cat && createMissing) {
           cat = { id: LA_DB.nextId.category++, name: salCatName, salary: 15000 };
           LA_DB.categories.push(cat);
+          apiCalls.push(function() {
+            return window.apiReq('POST', '/lenderconfig/categories', { name: cat.name, salary: cat.salary || 0 })
+              .then(function(r) { if (r && r.success && r.data) { cat.id = r.data.id; cat._apiId = r.data.id; } });
+          });
         }
         if (!comp || !cat) { skipped++; return; }
         const existing = bank.lines.find(l => l.companyId === comp.id && l.categoryId === cat.id);
         if (existing) {
-          if (updateExisting) { existing.pinCode = pin; existing.pf = pf; updated++; }
+          if (updateExisting) {
+            existing.pinCode = pin; existing.pf = pf; updated++;
+            // No PUT endpoint for individual lines — delete + recreate,
+            // same whole-replace convention used elsewhere in this file.
+            var oldApiId = existing._apiId;
+            apiCalls.push(function() {
+              var del = oldApiId ? window.apiReq('DELETE', '/lenderconfig/lines/' + oldApiId) : Promise.resolve();
+              return del.then(function() {
+                return window.apiReq('POST', '/lenderconfig/lines', { bankId: bank._apiId, companyId: comp._apiId || comp.id, categoryId: cat._apiId || cat.id, pinCode: pin, pf: pf })
+                  .then(function(r) { if (r && r.success && r.data) existing._apiId = r.data.id; });
+              });
+            });
+          }
           else { skipped++; }
         } else {
-          bank.lines.push({ id: LA_DB.nextId.line++, companyId: comp.id, categoryId: cat.id, pinCode: pin, pf });
+          const newLine = { id: LA_DB.nextId.line++, companyId: comp.id, categoryId: cat.id, pinCode: pin, pf };
+          bank.lines.push(newLine);
           added++;
+          apiCalls.push(function() {
+            return window.apiReq('POST', '/lenderconfig/lines', { bankId: bank._apiId, companyId: comp._apiId || comp.id, categoryId: cat._apiId || cat.id, pinCode: pin, pf: pf })
+              .then(function(r) { if (r && r.success && r.data) { newLine.id = r.data.id; newLine._apiId = r.data.id; } });
+          });
         }
       });
       const resultEl = document.getElementById('bu-result');
@@ -18823,7 +19207,23 @@ ${printContent}
         const b = LA_DB.banks.find(x => x.id === bid);
         if (b) laRenderLines(b);
       }
-      showToast(`Import done: ${added} added, ${updated} updated, ${skipped} skipped`, added > 0 ? 'success' : 'info');
+      // BUGFIX (confirmed real gap, now fixed): this entire bulk-import
+      // flow — creating companies/categories/lines, potentially dozens at
+      // once — never made a single API call before. Runs sequentially
+      // (not Promise.all) since a new company/category must get its real
+      // database id back BEFORE the line that references it is created.
+      if (bank._apiId && typeof window.apiReq === 'function' && apiCalls.length) {
+        (function runSequential(i) {
+          if (i >= apiCalls.length) {
+            showToast(`Import done: ${added} added, ${updated} updated, ${skipped} skipped ✓`, added > 0 ? 'success' : 'info');
+            return;
+          }
+          apiCalls[i]().catch(function(e) { console.warn('[Bulk Import] a row failed to sync:', e); })
+            .then(function() { runSequential(i + 1); });
+        })(0);
+      } else {
+        showToast(`Import done: ${added} added, ${updated} updated, ${skipped} skipped`, added > 0 ? 'success' : 'info');
+      }
     }
 
     function laOpenAddBankModal() {
@@ -18899,15 +19299,30 @@ ${printContent}
       if (document.getElementById("ab-emp-senp")?.checked) empTypes.push("SENP");
       const cibil = parseInt(document.getElementById("ab-cibil")?.value) || 700;
       const maxLoan = parseInt(document.getElementById("ab-maxloan")?.value) || 5000000;
-      LA_DB.banks.push({
+      const newBank = {
         id: LA_DB.nextId.bank++, name,
         isIncred: document.getElementById("ab-incred")?.checked||false,
         isElite: document.getElementById("ab-elite")?.checked||false,
         lines: [],
         serviceablePins: [],
         rules: { minCibil: cibil, acceptNTC: false, maxLoanAmt: maxLoan, minTenure: 12, maxTenure: 60, foirLimit: 50, pfRequired: false, minAge: 21, maxAge: 60, minExpMonths: 6, empTypes: empTypes.length ? empTypes : ["SALARIED"], compTypes: ["plcc","plc","llp","govt","psu"], acceptedCategories: [] }
-      });
-      ov.remove(); laRenderBanks(); showToast(name + " added ✓ — click ✏ Edit to configure eligibility filters", "success");
+      };
+      LA_DB.banks.push(newBank);
+      ov.remove(); laRenderBanks();
+      // BUGFIX (confirmed real gap, now fixed): same class of bug as
+      // lcConfirmAddBankAssignment — created entirely locally before.
+      if (typeof window.apiReq === 'function') {
+        window.apiReq('POST', '/banks', {
+          bankName: name, isIncred: newBank.isIncred, isElite: newBank.isElite,
+          minCibil: cibil, maxLoanAmt: maxLoan,
+          minTenure: 12, maxTenure: 60, foirLimit: 50, minAge: 21, maxAge: 60, minExpMonths: 6,
+          empTypes: newBank.rules.empTypes
+        }).then(function(res) {
+          if (res && res.success && res.data) { newBank.id = res.data.id; newBank._apiId = res.data.id; }
+          else showToast('⚠ Bank added locally, but database save failed', 'warn');
+        }).catch(function() { showToast('⚠ Bank added locally, but database save failed', 'warn'); });
+      }
+      showToast(name + " added ✓ — click ✏ Edit to configure eligibility filters", "success");
     }
 
     function laDeleteBank(id) {
@@ -18915,7 +19330,15 @@ ${printContent}
       if (!confirm(`Delete "${bank.name}" and its ${bank.lines.length} line(s)?`)) return;
       LA_DB.banks = LA_DB.banks.filter(b => b.id !== id);
       LA_DB.wizardSelectedBanks = LA_DB.wizardSelectedBanks.filter(bid => bid !== id);
-      laRenderBanks(); laLoadEligibility(); showToast("Bank deleted", "info");
+      laRenderBanks(); laLoadEligibility();
+      // BUGFIX (confirmed real gap, now fixed): same class of bug as
+      // lcConfirmDeleteBank — never actually deleted server-side before.
+      if (bank._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('DELETE', '/banks/' + bank._apiId).then(function(res) {
+          if (!res || !res.success) showToast('⚠ Bank deleted locally, but database delete failed', 'warn');
+        }).catch(function() { showToast('⚠ Bank deleted locally, but database delete failed', 'warn'); });
+      }
+      showToast("Bank deleted", "info");
     }
 
     function laOpenBankDetail(id) {
@@ -20451,8 +20874,10 @@ ${printContent}
       if (!app) return;
       const rd = ROLES[currentUser.role];
 
-      // Ensure bankLines array exists
-      if (!app.bankLines) {
+      // Ensure bankLines array exists — checks .length too (not just
+      // undefined/null), since server-synced loans now always have a real
+      // (possibly empty) array here rather than the field being absent.
+      if (!app.bankLines || !app.bankLines.length) {
         app.bankLines = [{
           id: 1,
           bankName: app.bank || '',
@@ -20595,8 +21020,39 @@ ${printContent}
       window._bankEditSnapshot = null;
       window._bankEditMode = false;
       if (typeof persistSave === 'function') persistSave();
-      if (typeof showToast === 'function') showToast('Bank Details saved ✓', 'success');
       renderBankBody(app);
+      // BUGFIX (Bank Lines had zero backend representation): now pushed to
+      // the server as a whole-table replace, matching the edit-mode UX
+      // (Edit → change any number of rows → one Save commits all of them).
+      // See LoanBankLine/UpdateLoanBankLinesRequestDto for the full
+      // reasoning. Local state (and the "saved" toast) still update
+      // immediately either way — this only adds the part that was missing.
+      if (app._apiId && typeof window.apiReq === 'function') {
+        const payload = {
+          bankLines: (app.bankLines || []).map(function(l) {
+            return {
+              bankName: l.bankName || '',
+              tempApplicationNumber: l.tempAppNo || '',
+              applicationNumber: l.applicationNumber || null,
+              approvedLoan: l.approvedLoan || null,
+              remarks: l.remarks || null
+            };
+          })
+        };
+        window.apiReq('PUT', '/loans/' + app._apiId + '/bank-lines', payload).then(function(res) {
+          if (res && res.success) {
+            if (typeof showToast === 'function') showToast('Bank Details saved ✓', 'success');
+          } else {
+            var msg = (res && (res.message || (res.errors && res.errors[0]))) || 'Could not reach the server.';
+            if (typeof showToast === 'function') showToast('⚠ Bank Details saved locally, but database sync failed: ' + msg, 'warn');
+          }
+        }).catch(function(e) {
+          console.warn('[Assignment] Bank Details sync failed:', e);
+          if (typeof showToast === 'function') showToast('⚠ Bank Details saved locally, but database sync failed', 'warn');
+        });
+      } else {
+        if (typeof showToast === 'function') showToast('Bank Details saved ✓', 'success');
+      }
     }
     window.bankDetailsSave = bankDetailsSave;
     // ───────────────────────────────────────────────────────────────────────
@@ -20846,6 +21302,16 @@ ${printContent}
     // authorized to read it — callers fall back to the localStorage cache
     // in every case, same as the existing signin-logo load path.
     async function brandingFetchSetting(key) {
+      // Skip entirely when there's no auth token yet (e.g. this runs on
+      // the sign-in screen before login) — GET /api/settings/{key}
+      // requires auth, so this always 401'd here, harmlessly (the
+      // localStorage fallback above already applied), but spammed 6
+      // failed requests into the console on every page load. Nothing
+      // about the fallback behaviour changes — this only skips the
+      // network call when we already know it can't succeed.
+      let tok = null;
+      try { tok = localStorage.getItem('loanms_token'); } catch (e) {}
+      if (!tok) return null;
       try {
         const res = await fetch('/api/settings/' + key, { headers: brandingAuthHeaders(false) });
         if (res.ok) {
@@ -21565,9 +22031,35 @@ ${printContent}
       else { r.compTypes = r.compTypes.filter(c => c !== compType); }
     }
 
+    // Shared helper — pushes the current per-product rule set (business
+    // logic already stored on bank.productRules[pk] via _prEnsureRules) to
+    // the server. Used by lcBlSaveEmpTypeRow/lcBlSaveRuleRow/
+    // lcBlSaveHomeTypeRow below — all three edit different slices of the
+    // same per-product record.
+    function _lcSaveProductRule(bankId, pk, successMsg) {
+      const bank = LA_DB.banks.find(b => b.id === bankId);
+      if (!bank || !bank._apiId || typeof window.apiReq !== 'function') {
+        showToast(successMsg + ' (local only)', 'warn');
+        return;
+      }
+      const r = _prEnsureRules(bank, pk);
+      window.apiReq('PUT', '/banks/' + bank._apiId + '/product-rules/' + encodeURIComponent(pk), {
+        minCibil: r.minCibil, acceptNtc: !!r.acceptNTC, maxLoanAmt: r.maxLoanAmt,
+        minTenure: r.minTenure, maxTenure: r.maxTenure, foirLimit: r.foirLimit,
+        pfRequired: !!r.pfRequired, minAge: r.minAge, maxAge: r.maxAge,
+        minExpMonths: r.minExpMonths, empTypes: r.empTypes || [], compTypes: r.compTypes || [],
+        homeTypes: r.homeTypes || []
+      }).then(function(res) {
+        showToast(res && res.success ? successMsg : '⚠ Saved locally, but database sync failed', res && res.success ? 'success' : 'warn');
+      }).catch(function() {
+        showToast('⚠ Saved locally, but database sync failed', 'warn');
+      });
+    }
+
     function lcBlSaveEmpTypeRow(bankId) {
-      showToast('Employment type settings saved ✓', 'success');
+      const pk = _lcActiveProduct || 'business_loan';
       lcBlRenderEmpTypes();
+      _lcSaveProductRule(bankId, pk, 'Employment type settings saved ✓');
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -21645,10 +22137,36 @@ ${printContent}
       else { r.homeTypes = r.homeTypes.filter(h => h !== htId); }
     }
 
-    function lcBlSaveHomeTypeRow(bankId) { showToast('Home type settings saved ✓', 'success'); }
+    function lcBlSaveHomeTypeRow(bankId) {
+      const pk = _lcActiveProduct || 'business_loan';
+      _lcSaveProductRule(bankId, pk, 'Home type settings saved ✓');
+    }
 
     function lcBlSaveAllHomeTypes() {
-      showToast('All home type settings saved ✓', 'success');
+      const pk = _lcActiveProduct || 'business_loan';
+      const banks = _prBanks(pk).filter(b => b._apiId);
+      if (!banks.length || typeof window.apiReq !== 'function') {
+        showToast('All home type settings saved ✓ (local only)', 'warn');
+        if (typeof persistSave === 'function') persistSave();
+        return;
+      }
+      // BUGFIX (confirmed real gap, now fixed): this "save all" button
+      // used to do nothing but show a toast — not even a local mutation,
+      // let alone a server call. Reuses the same per-product-rule endpoint
+      // lcBlSaveHomeTypeRow already saves to, once per assigned bank.
+      Promise.all(banks.map(b => {
+        const r = _prEnsureRules(b, pk);
+        return window.apiReq('PUT', '/banks/' + b._apiId + '/product-rules/' + encodeURIComponent(pk), {
+          minCibil: r.minCibil, acceptNtc: !!r.acceptNTC, maxLoanAmt: r.maxLoanAmt,
+          minTenure: r.minTenure, maxTenure: r.maxTenure, foirLimit: r.foirLimit,
+          pfRequired: !!r.pfRequired, minAge: r.minAge, maxAge: r.maxAge,
+          minExpMonths: r.minExpMonths, empTypes: r.empTypes || [], compTypes: r.compTypes || [],
+          homeTypes: r.homeTypes || []
+        }).catch(function() { return { success: false }; });
+      })).then(function(results) {
+        const failed = results.filter(r => !r || !r.success).length;
+        showToast(failed ? ('⚠ ' + failed + ' bank(s) failed to sync') : 'All home type settings saved ✓', failed ? 'warn' : 'success');
+      });
       if (typeof persistSave === 'function') persistSave();
     }
 
@@ -21695,12 +22213,16 @@ ${printContent}
       const pk   = _lcActiveProduct || 'business_loan';
       const bank = LA_DB.banks.find(b => b.id === bankId); if (!bank) return;
       const r = _prEnsureRules(bank,pk);
-      if (field === '_cibil_row') { showToast('CIBIL rules saved ✓', 'success'); if (typeof persistSave==='function') persistSave(); return; }
+      if (field === '_cibil_row') { _lcSaveProductRule(bankId, pk, 'CIBIL rules saved ✓'); return; }
       if (field === 'acceptNTC') r[field] = !!value;
       else r[field] = Number(value);
     }
 
-    function lcBlSaveRuleRow(bankId) { showToast('Bank rules saved ✓', 'success'); if (typeof persistSave==='function') persistSave(); }
+    function lcBlSaveRuleRow(bankId) {
+      const pk = _lcActiveProduct || 'business_loan';
+      if (typeof persistSave === 'function') persistSave();
+      _lcSaveProductRule(bankId, pk, 'Bank rules saved ✓');
+    }
 
     // ──────────────────────────────────────────────────────────────────────
     //  6. CATEGORIES
@@ -21872,7 +22394,28 @@ ${printContent}
     }
 
     function lcBlSaveAllCreditScores() {
-      showToast('All Banking/Credit Score rules saved ✓', 'success');
+      const pk = _lcActiveProduct || 'business_loan';
+      const banks = _prBanks(pk).filter(b => b._apiId);
+      if (!banks.length || typeof window.apiReq !== 'function') {
+        showToast('All Banking/Credit Score rules saved ✓ (local only)', 'warn');
+        if (typeof persistSave === 'function') persistSave();
+        return;
+      }
+      // BUGFIX (confirmed real gap, now fixed): same "does nothing but
+      // show a toast" bug as lcBlSaveAllHomeTypes above.
+      Promise.all(banks.map(b => {
+        const r = _prEnsureRules(b, pk);
+        return window.apiReq('PUT', '/banks/' + b._apiId + '/product-rules/' + encodeURIComponent(pk), {
+          minCibil: r.minCibil, acceptNtc: !!r.acceptNTC, maxLoanAmt: r.maxLoanAmt,
+          minTenure: r.minTenure, maxTenure: r.maxTenure, foirLimit: r.foirLimit,
+          pfRequired: !!r.pfRequired, minAge: r.minAge, maxAge: r.maxAge,
+          minExpMonths: r.minExpMonths, empTypes: r.empTypes || [], compTypes: r.compTypes || [],
+          homeTypes: r.homeTypes || []
+        }).catch(function() { return { success: false }; });
+      })).then(function(results) {
+        const failed = results.filter(r => !r || !r.success).length;
+        showToast(failed ? ('⚠ ' + failed + ' bank(s) failed to sync') : 'All Banking/Credit Score rules saved ✓', failed ? 'warn' : 'success');
+      });
       if (typeof persistSave === 'function') persistSave();
     }
 
@@ -23542,9 +24085,9 @@ ${printContent}
       const grid = document.getElementById('detail-overview-grid');
       if (grid) {
         const timeRow = `<div class="form-group"><label>Active Time</label><div class="field-val">${getActiveTimeDisplay(app)}</div></div>
-      <div class="form-group"><label>Hold Reason</label><div class="field-val ${app.hold_reason ? '' : 'empty'}">${app.hold_reason || 'None'}</div></div>
-      <div class="form-group"><label>Rejection Reason</label><div class="field-val ${app.rejection_reason ? '' : 'empty'}">${app.rejection_reason || 'None'}</div></div>
-      <div class="form-group"><label>Disbursement Date</label><div class="field-val ${app.disbursement_date ? '' : 'empty'}">${app.disbursement_date || '—'}</div></div>`;
+      <div class="form-group"><label>Hold Reason</label><div class="field-val ${app.hold_reason ? '' : 'empty'}">${escapeHtml(app.hold_reason || 'None')}</div></div>
+      <div class="form-group"><label>Rejection Reason</label><div class="field-val ${app.rejection_reason ? '' : 'empty'}">${escapeHtml(app.rejection_reason || 'None')}</div></div>
+      <div class="form-group"><label>Disbursement Date</label><div class="field-val ${app.disbursement_date ? '' : 'empty'}">${escapeHtml(app.disbursement_date || '—')}</div></div>`;
         grid.insertAdjacentHTML('beforeend', timeRow);
       }
       // Disburse button already uses openDisburseModal — no patch needed
@@ -23735,7 +24278,7 @@ ${printContent}
     }
     function twPopulateUserSelect(id, cur) {
       const s=document.getElementById(id); if(!s) return;
-      s.innerHTML='<option value="">— Select —</option>'+twUsers.map(u=>`<option value="${u.name}" ${u.name===cur?'selected':''}>${u.name} (${u.role})</option>`).join('');
+      s.innerHTML='<option value="">— Select —</option>'+twUsers.map(u=>`<option value="${escapeHtml(u.name)}" ${u.name===cur?'selected':''}>${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`).join('');
     }
 
     // ── SALES TEAMS (cus.sales.team) ──
@@ -24010,7 +24553,7 @@ ${printContent}
       const locVal=locSelectId?document.getElementById(locSelectId)?.value:'';
       const candidates=locVal?twUsers.filter(u=>u.locs.includes(locVal)):twUsers;
       const sel=document.getElementById('tw-mm-user'); if(!sel) return;
-      sel.innerHTML='<option value="">— Select user —</option>'+candidates.map(u=>`<option value="${u.name}">${u.name} (${u.role})</option>`).join('');
+      sel.innerHTML='<option value="">— Select user —</option>'+candidates.map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`).join('');
       openModal('tw-member-modal');
     }
     function twConfirmAddMember() {
@@ -24057,8 +24600,28 @@ ${printContent}
       twSalesTeams.forEach(t=>{ if(t.location===old) t.location=nv; });
       twLoginTeams.forEach(t=>{ if(t.location===old) t.location=nv; });
       twUsers.forEach(u=>{ if(u.locs) u.locs=u.locs.map(x=>x===old?nv:x); if(u.loc===old) u.loc=nv; });
-      twRenderLocations(); showToast('Location saved','success');
+      twRenderLocations();
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+      // BUGFIX (confirmed real gap): this is the inline-table-edit path for
+      // renaming a location (onblur on the name <input>) — a SEPARATE code
+      // path from the Actions-menu's twRenameLocation(), which api-bridge.js
+      // already patches to call the real PUT /api/locations/{id}. This one
+      // was missed and never called it at all — reusing the exact same
+      // endpoint/payload here.
+      if (l._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('PUT', '/locations/' + l._apiId, { name: l.name, city: l.city || '', state: l.state || '', pinCode: l.pin || '' }).then(function(r) {
+          if (r && r.success) {
+            showToast('Location saved ✓', 'success');
+          } else {
+            var msg = (r && (r.message || (r.errors && r.errors[0]))) || 'Could not reach the server.';
+            showToast('⚠ Location saved locally, but database sync failed: ' + msg, 'warn');
+          }
+        }).catch(function() {
+          showToast('⚠ Location saved locally, but database sync failed', 'warn');
+        });
+      } else {
+        showToast('Location saved', 'success');
+      }
     }
     function twDeleteLocation(id) {
       if (typeof twCanManageUsers === 'function' && !twCanManageUsers()) { showToast('Only Admin or Product Team can delete locations','error'); return; }
@@ -24203,7 +24766,7 @@ ${printContent}
              </div>`
           : '—';
         return `<tr>
-          <td><div style="display:flex;align-items:center;gap:9px"><div style="width:32px;height:32px;border-radius:50%;background:${twAvi(u.name)};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0">${twInitials(u.name)}</div><div style="min-width:0"><strong style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px">${u.name}</strong>${u.mobile?`<div style="font-size:10px;color:var(--text3)">${u.mobile}</div>`:''}</div></div></td>
+          <td><div style="display:flex;align-items:center;gap:9px"><div style="width:32px;height:32px;border-radius:50%;background:${twAvi(u.name)};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0">${twInitials(u.name)}</div><div style="min-width:0"><strong style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px">${escapeHtml(u.name)}</strong>${u.mobile?`<div style="font-size:10px;color:var(--text3)">${escapeHtml(u.mobile)}</div>`:''}</div></div></td>
           ${uidCol(u)}
           <td style="color:var(--text3);font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.email}</td>
           <td><span class="badge ${twRoleColor[u.role]||'badge-hold'}" style="white-space:nowrap">${u.role}</span></td>
@@ -24292,6 +24855,20 @@ ${printContent}
       twApplyUserFilters();
       showToast('User "' + u.name + '" is now ' + u.status, u.status === 'active' ? 'success' : 'info');
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
+      // BUGFIX (confirmed real security gap, now fixed): this used to only
+      // mutate local u.status — the backend's IsActive never changed, so a
+      // "deactivated" user could still log in for real. Dedicated minimal
+      // endpoint (same reasoning as SetPhoto) to avoid the Role
+      // display-label vs backend-enum risk that reusing the full Update
+      // endpoint would carry.
+      if (u._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('PATCH', '/users/' + u._apiId + '/status', { isActive: u.status === 'active' })
+          .then(function(res) {
+            if (!res || !res.success) showToast('⚠ Status changed locally, but database sync failed — user may still be able to log in', 'warn');
+          }).catch(function() {
+            showToast('⚠ Status changed locally, but database sync failed — user may still be able to log in', 'warn');
+          });
+      }
     }
 
     // Delete a user (Admin / Product Team only). Removes locally and, for DB-backed
@@ -24546,7 +25123,7 @@ ${printContent}
       _twTeamType=type;
       const title=document.getElementById('tw-team-modal-title'); if(title) title.textContent=type==='sales'?'New Sales Team':'New Login Team';
       const lSel=document.getElementById('tw-tm-loc'); if(lSel) lSel.innerHTML='<option value="">— Select Location —</option>'+twLocations.map(l=>`<option value="${l.name}">${l.name}</option>`).join('');
-      const ldSel=document.getElementById('tw-tm-leader'); if(ldSel) ldSel.innerHTML='<option value="">— Select Leader —</option>'+twUsers.map(u=>`<option value="${u.name}">${u.name} (${u.role})</option>`).join('');
+      const ldSel=document.getElementById('tw-tm-leader'); if(ldSel) ldSel.innerHTML='<option value="">— Select Leader —</option>'+twUsers.map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`).join('');
       openModal(id);
     }
     function twSaveTeamModal() {
@@ -24992,6 +25569,7 @@ ${printContent}
       const val = (inp?.value || '').trim();
       if (!val) { showToast('Comment cannot be empty', 'warn'); return; }
       window.IC_COMMENT_TEMPLATES[i] = val;
+      _ictSaveToServer();
       showToast('Template updated ✓', 'success');
       ictRender();
     }
@@ -25004,7 +25582,20 @@ ${printContent}
       window.IC_COMMENT_TEMPLATES.push(val);
       if (inp) inp.value = '';
       ictRender();
+      _ictSaveToServer();
       showToast('Template added ✓', 'success');
+    }
+
+    // BUGFIX (confirmed real gap, now fixed): IC_COMMENT_TEMPLATES was
+    // always initialized from a hardcoded default array and never once
+    // saved to or loaded from the server — any Admin customization (add/
+    // edit/delete/reset) was lost on refresh. Same generic, Admin-only
+    // Settings endpoint as CAM_MATRIX (camAdminSave) — no new table needed
+    // for a single list-of-strings config value.
+    function _ictSaveToServer() {
+      if (typeof window.apiReq !== 'function') return;
+      window.apiReq('POST', '/settings', { key: 'efin_incred_comment_templates', value: JSON.stringify(window.IC_COMMENT_TEMPLATES), category: 'Configuration' })
+        .catch(function(e) { console.warn('[IC templates] sync failed:', e); });
     }
 
     function ictDelete(i) {
@@ -25013,6 +25604,7 @@ ${printContent}
       if (!confirm(`Delete this template?\n\n"${t}"`)) return;
       window.IC_COMMENT_TEMPLATES.splice(i, 1);
       ictRender();
+      _ictSaveToServer();
       showToast('Template deleted', 'info');
     }
 
@@ -25742,12 +26334,12 @@ ${printContent}
       body.innerHTML = rows.map(t => `
     <tr>
       <td><span class="app-id">#${t.id}</span></td>
-      <td><strong>${t.subject}</strong>${t.desc ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</div>` : ''}</td>
-      <td>${t.loan ? `<span class="app-id" style="cursor:pointer;color:var(--accent)" onclick="openDetail('${t.loan}')">${t.loan}</span>` : '—'}</td>
-      <td>${t.customer || '—'}</td>
-      <td><span class="badge ${TK_PRIORITY_BADGE[t.priority] || 'badge-hold'}">${TK_PRIORITY_LABEL[t.priority] || t.priority}</span></td>
-      <td><span class="badge ${TK_STATUS_BADGE[t.status] || 'badge-hold'}">${TK_STATUS_LABEL[t.status] || t.status}</span></td>
-      <td style="font-size:12px;color:var(--text3)">${t.date}</td>
+      <td><strong>${escapeHtml(t.subject)}</strong>${t.desc ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.desc)}</div>` : ''}</td>
+      <td>${t.loan ? `<span class="app-id" style="cursor:pointer;color:var(--accent)" onclick="openDetail('${escapeHtml(t.loan)}')">${escapeHtml(t.loan)}</span>` : '—'}</td>
+      <td>${escapeHtml(t.customer || '—')}</td>
+      <td><span class="badge ${TK_PRIORITY_BADGE[t.priority] || 'badge-hold'}">${escapeHtml(TK_PRIORITY_LABEL[t.priority] || t.priority)}</span></td>
+      <td><span class="badge ${TK_STATUS_BADGE[t.status] || 'badge-hold'}">${escapeHtml(TK_STATUS_LABEL[t.status] || t.status)}</span></td>
+      <td style="font-size:12px;color:var(--text3)">${escapeHtml(t.date)}</td>
       <td onclick="event.stopPropagation()">
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="tkOpenDetail('${t.id}')">💬 Notes</button>
@@ -25771,7 +26363,7 @@ ${printContent}
       const sel = document.getElementById('tk-loan');
       if (!sel) return;
       sel.innerHTML = '<option value="">— None —</option>' +
-        APPLICATIONS.map(a => `<option value="${a.id}">${a.id} — ${a.name}</option>`).join('');
+        APPLICATIONS.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.id)} — ${escapeHtml(a.name)}</option>`).join('');
 
       // Dynamically populate assigned-to from USER_ACCOUNTS + twUsers (deduplicated by name)
       const assignSel = document.getElementById('tk-assigned');
@@ -25781,7 +26373,7 @@ ${printContent}
         (typeof twUsers !== 'undefined' ? twUsers : []).forEach(u => names.add(u.name));
         const currentVal = assignSel.value;
         assignSel.innerHTML = '<option value="">— Unassigned —</option>' +
-          [...names].sort().map(n => `<option value="${n}"${n === currentVal ? ' selected' : ''}>${n}</option>`).join('');
+          [...names].sort().map(n => `<option value="${escapeHtml(n)}"${n === currentVal ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('');
       }
     }
 
@@ -25902,9 +26494,9 @@ ${printContent}
       if (titleEl) titleEl.textContent = `#${t.id} — ${t.subject}`;
       const metaEl = document.getElementById('tk-detail-meta');
       if (metaEl) {
-        metaEl.innerHTML = `<span class="badge ${TK_STATUS_BADGE[t.status] || 'badge-hold'}">${TK_STATUS_LABEL[t.status] || t.status}</span>
-          <span class="badge ${TK_PRIORITY_BADGE[t.priority] || 'badge-hold'}">${TK_PRIORITY_LABEL[t.priority] || t.priority}</span>
-          ${t.desc ? `<div style="margin-top:8px;color:var(--text3);font-size:13px">${t.desc}</div>` : ''}`;
+        metaEl.innerHTML = `<span class="badge ${TK_STATUS_BADGE[t.status] || 'badge-hold'}">${escapeHtml(TK_STATUS_LABEL[t.status] || t.status)}</span>
+          <span class="badge ${TK_PRIORITY_BADGE[t.priority] || 'badge-hold'}">${escapeHtml(TK_PRIORITY_LABEL[t.priority] || t.priority)}</span>
+          ${t.desc ? `<div style="margin-top:8px;color:var(--text3);font-size:13px">${escapeHtml(t.desc)}</div>` : ''}`;
       }
       const listEl = document.getElementById('tk-detail-comments');
       if (listEl) listEl.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px 0">Loading…</div>';
@@ -25937,9 +26529,9 @@ ${printContent}
         const isActivity = c.type === 'Activity';
         const when = c.createdAt ? new Date(c.createdAt).toLocaleString('en-IN') : '';
         return `<div style="padding:8px 0;border-bottom:1px solid var(--border);${isActivity ? 'color:var(--text3);font-size:12px;font-style:italic' : ''}">
-          ${isActivity ? '' : `<strong style="font-size:13px">${c.user || ''}</strong> `}
-          <span>${c.content}</span>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px">${when}</div>
+          ${isActivity ? '' : `<strong style="font-size:13px">${escapeHtml(c.user || '')}</strong> `}
+          <span>${escapeHtml(c.content)}</span>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${escapeHtml(when)}</div>
         </div>`;
       }).join('');
     }
@@ -26294,6 +26886,45 @@ ${printContent}
         showToast('No changes detected.', 'info');
         closeModal('modal-edit-detail');
         return;
+      }
+
+      // BUGFIX (confirmed real gap, now fixed): this entire modal — Overview,
+      // Personal, Address, Employment, References — used to only ever
+      // mutate local `app` fields; the tracking-entry below was the ONLY
+      // thing that reached the server. Pushes the fields that map cleanly
+      // to existing backend structures now. Fields with no backend
+      // representation at all (mother's name, permanent/second address,
+      // designation, employee code, alt phone) are NOT silently dropped —
+      // they're simply not sent, same as before this fix, since inventing
+      // schema for them wasn't part of this pass.
+      if (app._apiId && typeof window.apiReq === 'function') {
+        // NOTE: Overview's amount/rate/tenure/purpose are deliberately NOT
+        // pushed here. PUT /loans/{id} (UpdateAsync) only accepts updates
+        // while status is Draft/Submitted, and always-overwrites LoanType
+        // with no partial-update guard — sending it from this modal (which
+        // is used at every stage, not just Draft/Submitted, and has no
+        // loan-type field of its own) risks silently failing post-Submitted
+        // or corrupting LoanType. Needs a dedicated, non-status-restricted
+        // endpoint (same reasoning as why Assignment/BankLines/References
+        // each got their own) rather than reusing this one — flagged, not
+        // guessed at.
+        if (app._customerApiId) {
+          window.apiReq('PUT', '/customers/' + app._customerApiId, {
+            fullName: app.name || '', email: app.email || '', phone: app.mobile || '',
+            panNumber: app.pan || null, aadhaarNumber: app.aadhar || null,
+            dateOfBirth: app.dob || null, gender: app.gender || null, fatherName: app.father || null,
+            address: app.street1 || null, city: app.city || null, state: app.state || null,
+            pinCode: app.zip || null, residenceType: app.homeType || null,
+            monthlyIncome: app.salary || null, employmentType: app.empType || null,
+            companyName: app.compName || null
+          }).catch(function(e) { console.warn('[Edit Details] customer sync failed:', e); });
+        }
+
+        var refs = [];
+        if (app.r1name) refs.push({ name: app.r1name, mobile: app.r1no || '', relation: app.r1rel || '', refNumber: 1 });
+        if (app.r2name) refs.push({ name: app.r2name, mobile: app.r2no || '', relation: app.r2rel || '', refNumber: 2 });
+        window.apiReq('PUT', '/loans/' + app._apiId + '/references', refs)
+          .catch(function(e) { console.warn('[Edit Details] references sync failed:', e); });
       }
 
       // ── Log changes to tracking ──
@@ -27227,10 +27858,8 @@ ${printContent}
       }
       window.deleteDraftById = deleteDraftById;
 
-      function deleteMyDraft() {
-        var d = findMyDraft();
-        if (d) deleteDraftById(d.id);
-      }
+      // (deleteMyDraft dead-code removed — never called; deleteDraftById
+      // itself, which it wrapped, remains in active use elsewhere.)
 
       function _restoreDraftIntoWizard(draft) {
         _isRestoringDraft = true;
@@ -28967,7 +29596,7 @@ async function kycExtractAll() {
       } catch(err2) {
         // Distinguish: AI not configured vs OCR genuinely failed.
         var notConfigured = /not configured|NOT_CONFIGURED|API key not configured/i.test(err.message || '');
-        var rawErr = (err && err.message) ? (' [' + err.message + ']') : '';
+        var rawErr = (err && err.message) ? (' [' + escapeHtml(err.message) + ']') : '';
         var friendly = notConfigured
           ? '⚙️ Gemini API key not set. Go to <strong>Settings → KYC</strong> and paste your free key from <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com/apikey</a> to enable auto-fill. Then re-upload the PAN image.'
           : '⚠ Could not read the PAN card automatically' + rawErr + '. Please enter the details manually below.';
@@ -29708,7 +30337,7 @@ function dsaRender(q) {
     return `<tr>
     <td><div style="display:flex;align-items:center;gap:10px">
       <div style="width:34px;height:34px;border-radius:8px;background:var(--accent-subtle);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--accent)">${d.name.charAt(0)}</div>
-      <strong>${d.name}</strong></div></td>
+      <strong>${escapeHtml(d.name)}</strong></div></td>
     <td><code style="font-size:11.5px;background:var(--surface2);padding:2px 8px;border-radius:6px">${d.code||'—'}</code></td>
     <td>${d.mobile||'—'}</td>
     <td style="font-size:12.5px;color:var(--text2)">${d.email||'—'}</td>
@@ -29748,6 +30377,15 @@ function dsaToggleStatus(id) {
   persistSave && persistSave();
   dsaRender(document.getElementById('dsa-search-input')?.value||'');
   showToast((newStatus==='active'?'✅ DSA activated':'⏸ DSA deactivated') + ' — ' + dsa.name, newStatus==='active'?'success':'warn');
+  // BUGFIX (confirmed real gap, now fixed): only ever mutated local
+  // dsa.status — DsaPartner.IsActive never changed server-side, so a
+  // "deactivated" DSA still showed up wherever the backend filters/reads
+  // that flag.
+  if (dsa._apiId && typeof window.apiReq === 'function') {
+    window.apiReq('PUT', '/dsa/' + dsa._apiId, { isActive: newStatus === 'active' })
+      .then(function(res) { if (!res || !res.success) showToast('⚠ Status changed locally, but database sync failed', 'warn'); })
+      .catch(function() { showToast('⚠ Status changed locally, but database sync failed', 'warn'); });
+  }
 }
 
 // ── DSA Document Upload helper ──
@@ -29908,7 +30546,7 @@ function pmRender(q) {
     return `<tr>
     <td><div style="display:flex;align-items:center;gap:10px">
       <div style="width:34px;height:34px;border-radius:8px;background:rgba(161,89,255,.1);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#a159ff">${p.name.charAt(0)}</div>
-      <strong>${p.name}</strong></div></td>
+      <strong>${escapeHtml(p.name)}</strong></div></td>
     <td><code style="font-size:11.5px;background:var(--surface2);padding:2px 8px;border-radius:6px">${p.code||'—'}</code></td>
     <td>${p.mobile||'—'}</td>
     <td style="font-size:12.5px;color:var(--text2)">${p.email||'—'}</td>
@@ -29941,6 +30579,13 @@ function pmToggleStatus(id) {
   persistSave && persistSave();
   pmRender(document.getElementById('pm-search-input')?.value||'');
   showToast((newStatus==='active'?'✅ Partner activated':'⏸ Partner deactivated') + ' — ' + partner.name, newStatus==='active'?'success':'warn');
+  // BUGFIX (confirmed real gap, now fixed): same as dsaToggleStatus above —
+  // Partners share the same DsaPartner table/endpoint as DSA records.
+  if (partner._apiId && typeof window.apiReq === 'function') {
+    window.apiReq('PUT', '/dsa/' + partner._apiId, { isActive: newStatus === 'active' })
+      .then(function(res) { if (!res || !res.success) showToast('⚠ Status changed locally, but database sync failed', 'warn'); })
+      .catch(function() { showToast('⚠ Status changed locally, but database sync failed', 'warn'); });
+  }
 }
 
 function pmOpenAdd() {
@@ -30115,7 +30760,7 @@ function renderDsaMappingOverview(q) {
       <div style="display:flex;align-items:center;gap:14px;padding:16px 20px;background:linear-gradient(135deg,rgba(26,79,163,.05),rgba(26,79,163,.02));border-bottom:1px solid var(--border)">
         <div style="width:44px;height:44px;border-radius:12px;background:var(--accent-subtle);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:var(--accent);flex-shrink:0">${dsa.name.charAt(0)}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-family:var(--font-head);font-size:15px;font-weight:800;color:var(--text)">${dsa.name}</div>
+          <div style="font-family:var(--font-head);font-size:15px;font-weight:800;color:var(--text)">${escapeHtml(dsa.name)}</div>
           <div style="display:flex;gap:12px;margin-top:3px;flex-wrap:wrap">
             <span style="font-size:11.5px;color:var(--text3)"><code style="background:var(--surface2);padding:1px 6px;border-radius:4px;font-size:11px">${dsa.code}</code></span>
             ${dsa.mobile?`<span style="font-size:11.5px;color:var(--text3)">📱 ${dsa.mobile}</span>`:''}
@@ -30146,7 +30791,7 @@ function renderDsaMappingOverview(q) {
                 return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;transition:all .15s;cursor:pointer" onclick="dsaViewPartnerApps('${dsa.id}','${p.id}')" onmouseover="this.style.borderColor='rgba(161,89,255,.4)';this.style.background='rgba(161,89,255,.06)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface2)'">
                   <div style="width:32px;height:32px;border-radius:8px;background:rgba(161,89,255,.1);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#a159ff;flex-shrink:0">${p.name.charAt(0)}</div>
                   <div style="flex:1;min-width:0">
-                    <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(p.name)}</div>
                     <div style="display:flex;gap:8px;margin-top:2px;flex-wrap:wrap">
                       <code style="font-size:10px;background:var(--surface3);padding:1px 5px;border-radius:4px">${p.code}</code>
                       <span style="font-size:10.5px;color:${typeColor[p.type]||'var(--text3)'};font-weight:600;text-transform:capitalize">${p.type}</span>
@@ -30847,44 +31492,9 @@ function laCheckDeviations() {
 // ── Skip deviation → go straight to Sanction ──
 
 // ── Raise deviation → post type+reason to Comment, save approver, move to Decision ──
-function laConfirmRaiseDeviation() {
-  const appId    = document.getElementById('la-app-id').value;
-  const app      = APPLICATIONS.find(a => a.id === appId);
-  if (!app) return;
-
-  const loanAmt  = parseFloat(document.getElementById('la-loan-amt').value)  || 0;
-  const devType  = document.getElementById('la-dev-type')?.value?.trim()    || '';
-  const approver = document.getElementById('la-dev-approver')?.value?.trim() || '';
-  const reason   = document.getElementById('la-dev-reason')?.value?.trim()  || '';
-
-  if (!loanAmt)  { showToast('Please enter the sanctioned Loan Amount', 'warn'); document.getElementById('la-loan-amt').focus(); return; }
-  if (!devType)  { showToast('Please select a Deviation Type', 'warn'); document.getElementById('la-dev-type').focus(); return; }
-  if (!reason)   { showToast('Please enter the Deviation Reason', 'warn'); document.getElementById('la-dev-reason').focus(); return; }
-
-  // Save sanction details so Approved Deviation modal can pre-fill them
-  laSaveSanctionToApp(app);
-  // Store approver so they can edit in Approved Deviation stage
-  app.deviationApprover = approver || currentUser.name;
-  app.deviationRaisedBy = currentUser.name;
-
-  const rd   = ROLES[currentUser.role] || {};
-  const dept = rd.dept || 'Admin';
-
-  // Deviation type + reason → Comment column (plain, easy to read)
-  const commentText = [
-    `Deviation Type: ${devType}`,
-    `Reason: ${reason}`,
-    approver ? `Approver: ${approver}` : null,
-  ].filter(Boolean).join('\n');
-
-  addTrackingEntry(app, 'EFIN-Deviation', dept, commentText, '');
-
-  app.status = 'decision';
-  closeLenderApprovalModal();
-  if (typeof renderTable === 'function') renderTable();
-  showToast(`Deviation raised — pending approval by ${approver || 'approver'}`, 'warn');
-  if (typeof openDetail === 'function') setTimeout(() => openDetail(appId), 300);
-}
+// (laConfirmRaiseDeviation dead-code removed — never called from anywhere;
+// consistent with the earlier finding that "Deviation" has no backend
+// support at all, so this frontend-only handler was orphaned.)
 
 // ── Helpers: save sanction fields to app object ──
 function laSaveSanctionToApp(app) {
@@ -31162,7 +31772,7 @@ function buildSanctionSummaryHTML(app) {
   return `
     <div style="display:flex;flex-direction:column;gap:0;width:100%">
       <div style="display:flex;flex-wrap:wrap;gap:10px 20px;padding-bottom:${hasSanction ? '10px' : '0'};border-bottom:${hasSanction ? '1px solid var(--border)' : 'none'};margin-bottom:${hasSanction ? '10px' : '0'}">
-        <div class="esm-info-item"><div class="esm-info-label">Applicant</div><div class="esm-info-val">${app.name}</div></div>
+        <div class="esm-info-item"><div class="esm-info-label">Applicant</div><div class="esm-info-val">${escapeHtml(app.name)}</div></div>
         <div class="esm-info-item"><div class="esm-info-label">Loan Type</div><div class="esm-info-val">${lbl}</div></div>
         <div class="esm-info-item"><div class="esm-info-label">Bank</div><div class="esm-info-val">${app.bank || '—'}</div></div>
         <div class="esm-info-item"><div class="esm-info-label">CIBIL</div><div class="esm-info-val">${app.cibil || '—'}</div></div>
@@ -32346,7 +32956,7 @@ function openIncomeCheckModal(appId) {
   const incomeLabel  = _icIsSelfEmp ? 'Declared Net Income' : 'Declared Salary';
 
   document.getElementById('ic-app-info').innerHTML = `
-    <div class="ic-info-item"><div class="ic-info-lbl">Applicant</div><div class="ic-info-val">${app.name}</div></div>
+    <div class="ic-info-item"><div class="ic-info-lbl">Applicant</div><div class="ic-info-val">${escapeHtml(app.name)}</div></div>
     <div class="ic-info-item"><div class="ic-info-lbl">${_icIsSelfEmp ? 'Business / Firm' : 'Company'}</div><div class="ic-info-val">${app.compName || '—'}</div></div>
     <div class="ic-info-item"><div class="ic-info-lbl">Emp Type</div><div class="ic-info-val">${empTypeLabel}</div></div>
     <div class="ic-info-item"><div class="ic-info-lbl">${incomeLabel}</div><div class="ic-info-val" style="color:var(--accent)">${fmt(app.salary)}</div></div>
@@ -32692,7 +33302,7 @@ function openBankCheckModal(appId) {
   // Applicant info
   const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN') : '—';
   document.getElementById('bk-app-info').innerHTML = `
-    <div class="bk-info-item"><div class="bk-info-lbl">Applicant</div><div class="bk-info-val">${app.name}</div></div>
+    <div class="bk-info-item"><div class="bk-info-lbl">Applicant</div><div class="bk-info-val">${escapeHtml(app.name)}</div></div>
     <div class="bk-info-item"><div class="bk-info-lbl">PAN</div><div class="bk-info-val" style="font-family:monospace">${app.pan || '—'}</div></div>
     <div class="bk-info-item"><div class="bk-info-lbl">Mobile</div><div class="bk-info-val">${app.mobile || '—'}</div></div>
     <div class="bk-info-item"><div class="bk-info-lbl">Loan Amount</div><div class="bk-info-val" style="color:var(--accent)">${fmt(app.sanctionLoanAmt || app.amount)}</div></div>
@@ -33931,10 +34541,29 @@ function dcSaveAttachments() {
   if (!pending.length) { showToast('No files to save — please attach at least one file', 'warn'); return; }
   if (!app._taskAttachments) app._taskAttachments = [];
   if (!window._BFP_STORE) window._BFP_STORE = {};
+  // BUGFIX (confirmed real gap): these files used to ONLY ever get a
+  // browser blob-URL (URL.createObjectURL) stored in window._BFP_STORE —
+  // never actually uploaded anywhere. Looked "attached" in this browser
+  // tab, but the blob URL (and the file itself) never survived a refresh,
+  // let alone reached another device/session. Now genuinely uploaded
+  // through the same real, S3-backed POST /loans/{id}/documents endpoint
+  // every other document-upload path already uses.
+  const uploadPromises = [];
   pending.forEach(att => {
     const storeKey = 'dc-attach-' + appId + '-' + att.uid;
     window._BFP_STORE[storeKey] = { name: att.displayName || att.file.name, mimetype: att.mimetype, url: att.objUrl, isImage: att.isImage, isPdf: att.isPdf };
     app._taskAttachments.push({ storeKey, name: att.displayName || att.file.name, mimetype: att.mimetype, isImage: att.isImage, isPdf: att.isPdf, taskTitle: 'Deal Confirmation', date: new Date().toLocaleDateString('en-IN') });
+
+    if (app._apiId && typeof window.apiUploadDocument === 'function') {
+      // apiUploadDocument is callback-based (loanApiId, file, documentType,
+      // callback(success, data)), not Promise-returning — wrap it so the
+      // rest of this function can still Promise.all() consistently.
+      uploadPromises.push(new Promise(function(resolve) {
+        window.apiUploadDocument(app._apiId, att.file, 'Deal Confirmation', function(success) {
+          resolve({ success: !!success });
+        });
+      }));
+    }
   });
   // Mark any open "Deal Confirmation" task as complete
   if (typeof _TASKS_LOCAL2 !== 'undefined') {
@@ -33948,7 +34577,18 @@ function dcSaveAttachments() {
   }
   window._dcPendingAttachments = [];
   dcRenderAttachList();
-  showToast(pending.length + ' file(s) saved to Documents ✓', 'success');
+  if (uploadPromises.length) {
+    Promise.all(uploadPromises).then(function(results) {
+      var failed = results.filter(function(r) { return !r || !r.success; }).length;
+      if (failed) {
+        showToast(pending.length + ' file(s) attached locally — ' + failed + ' failed to upload to server', 'warn');
+      } else {
+        showToast(pending.length + ' file(s) saved to Documents ✓', 'success');
+      }
+    });
+  } else {
+    showToast(pending.length + ' file(s) saved locally — application not yet synced to server', 'warn');
+  }
   // Refresh docs tab if detail panel is open
   if (typeof openDetail === 'function') setTimeout(() => openDetail(appId), 300);
 }
@@ -34195,7 +34835,7 @@ function sysmailRenderPending() {
   el.innerHTML = pending.map(a => `
     <div style="display:flex;align-items:center;gap:14px;padding:13px 16px;border:1.5px solid var(--border);border-radius:12px;margin-bottom:8px;background:var(--surface2)">
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:700;color:var(--text)">${a.id} — ${a.name}</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text)">${escapeHtml(a.id)} — ${escapeHtml(a.name)}</div>
         <div style="font-size:11.5px;color:var(--text3);margin-top:2px">Awaiting reply · <strong>${a.email || 'No email'}</strong></div>
       </div>
       <button class="btn btn-success btn-sm" onclick="sysmailForceAccept('${a.id}');sysmailRenderPending()">✅ Accept</button>
@@ -35303,9 +35943,9 @@ function exportPDF(headers, rows) {
   const displayCols = headers.length > 12 ? headers.slice(0, 12) : headers;
   const displayRows = rows.map(function(r) { return r.slice(0, displayCols.length); });
 
-  const thHtml = displayCols.map(function(h) { return '<th>' + h + '</th>'; }).join('');
+  const thHtml = displayCols.map(function(h) { return '<th>' + escapeHtml(h) + '</th>'; }).join('');
   const trHtml = displayRows.map(function(r) {
-    return '<tr>' + r.map(function(v) { return '<td>' + (v == null || v === '' ? '—' : v) + '</td>'; }).join('') + '</tr>';
+    return '<tr>' + r.map(function(v) { return '<td>' + (v == null || v === '' ? '—' : escapeHtml(v)) + '</td>'; }).join('') + '</tr>';
   }).join('');
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
@@ -35329,7 +35969,7 @@ function exportPDF(headers, rows) {
   <div><div class="hdr-title">${brand} — Application Export</div>
     <div style="font-size:9pt;color:#444;margin-top:2px">${rows.length} record${rows.length !== 1 ? 's' : ''} · Generated ${stamp}</div>
   </div>
-  <div class="hdr-meta">Exported by: ${(window.currentUser && window.currentUser.name) || '—'}<br>${new Date().toLocaleTimeString('en-IN')}</div>
+  <div class="hdr-meta">Exported by: ${escapeHtml((window.currentUser && window.currentUser.name) || '—')}<br>${new Date().toLocaleTimeString('en-IN')}</div>
 </div>
 ${headers.length > 12 ? '<div class="truncate-note">⚠ PDF shows first 12 columns. Use XLSX or CSV for all ' + headers.length + ' columns.</div>' : ''}
 <table><thead><tr>${thHtml}</tr></thead><tbody>${trHtml}</tbody></table>
@@ -36424,7 +37064,7 @@ function stgEeRenderUserList() {
     const checked = _stgEeConfig.userIds.includes(u.id);
     return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:12.5px;cursor:pointer">
       <input type="checkbox" data-ee-user="${u.id}" ${checked ? 'checked' : ''} style="accent-color:#7c3aed">
-      <span style="font-weight:600">${u.name}</span>
+      <span style="font-weight:600">${escapeHtml(u.name)}</span>
       <span style="color:var(--text3)">${u.email} · ${u.role}</span>
     </label>`;
   }).join('');
@@ -37039,6 +37679,17 @@ async function invSaveSetup() {
     // the actual profile page in user-profile.js reads from at render time)
     if (!window.USER_PROFILES[u.email]) window.USER_PROFILES[u.email] = {};
     window.USER_PROFILES[u.email].photoData = preview.src;
+    // BUGFIX (confirmed real gap, now fixed): the sync above only ever
+    // touches the shared USER_PROFILES cache — the profile page's own
+    // _pushProfileToServer() only pushes the CURRENTLY LOGGED-IN user's own
+    // data, so a photo Admin sets here for a DIFFERENT user during
+    // invitation never reached the server for that user at all. Uses the
+    // Admin-only user-update endpoint (Users.PhotoData) instead, which any
+    // Admin/Manager can call for another user's record.
+    if (u._apiId && typeof window.apiReq === 'function') {
+      window.apiReq('PATCH', '/users/' + u._apiId + '/photo', { photoData: preview.src })
+        .catch(function(e) { console.warn('[Invitation] photo sync failed:', e); });
+    }
   }
 
   twRenderUsers();
@@ -37052,7 +37703,7 @@ async function invSaveSetup() {
   } else if (!pwd) {
     showToast('Invitation saved (no changes made)', 'info');
   }
-  pushActivity('var(--accent)', `<strong>Invited user</strong>: ${u.name} — ${u.uid}`);
+  pushActivity('var(--accent)', `<strong>Invited user</strong>: ${escapeHtml(u.name)} — ${escapeHtml(u.uid)}`);
 
   // Fire invitation email automatically, passing plaintext pwd before it's masked
   if (pwd && pwdOk) setTimeout(() => sysmailSendInvitation(u, _pwdForEmail), 300);
@@ -37518,12 +38169,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
      UTILITY HELPERS
   ─────────────────────────────────────────────────────────────────── */
 
-  function daysSince(dateStr) {
-    if (!dateStr) return null;
-    const d = new Date(dateStr);
-    if (isNaN(d)) return null;
-    return Math.floor((Date.now() - d) / 86400000);
-  }
+  // (daysSince dead-code removed — see the actively-used copy in
+  // efin-improvements.js; this file's copy was never called anywhere.)
 
   // Hours since a date — for SLA badge display
   function hoursSince(dateStr) {
@@ -37956,22 +38603,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     return '';
   }
 
-  function _injectSlaBadges() {
-    var rows = document.querySelectorAll('#app-table-body tr');
-    rows.forEach(function (row) {
-      var appIdEl = row.querySelector('.app-id');
-      if (!appIdEl || !window.APPLICATIONS) return;
-      var appId = appIdEl.textContent.trim();
-      var app   = APPLICATIONS.find(function (a) { return a.id === appId; });
-      if (!app) return;
-      // FIX 12: insert badge inside the existing status <td> (5th column), not as new <td>
-      var statusCell = row.querySelector('td:nth-child(5)');
-      if (statusCell && !statusCell.querySelector('.sla-badge')) {
-        var badge = _getAppSlaBadge(app);
-        if (badge) statusCell.insertAdjacentHTML('beforeend', '&nbsp;' + badge);
-      }
-    });
-  }
+  // (_injectSlaBadges dead-code removed — see the actively-used copy in
+  // efin-improvements.js; this file's copy was never called anywhere.)
 
   /* ──────────────────────────────────────────────────────────────────
      3. DETAIL ACTION BAR — consolidated builder
@@ -39592,7 +40225,7 @@ function openClaimVerificationPanel(claimId) {
         </div>
         <div style="font-size:12px;color:var(--text2)">
           <div>Partner: <strong>${claim.partner}</strong></div>
-          <div>Customer: <strong>${claim.customerName}</strong></div>
+          <div>Customer: <strong>${escapeHtml(claim.customerName)}</strong></div>
           <div>Amount: <strong style="color:var(--accent)">₹${claim.claimAmount.toLocaleString()}</strong></div>
           <div style="margin-top:8px;color:var(--text3);font-size:11px">Submitted: ${new Date(claim.submittedAt).toLocaleString()}</div>
         </div>
@@ -39669,7 +40302,18 @@ function approveClaim(claimId) {
   );
 
   notifyPartner(claimId, 'approved', `Your claim has been approved! Amount: ₹${claim.claimAmount.toLocaleString()}`);
-  
+
+  // BUGFIX (confirmed real gap, now fixed): claim approval used to only
+  // ever mutate local PAYOUT_CLAIMS memory — the real backend already had
+  // PATCH /api/payout/{id}/status (Verified/Paid/Rejected/OnHold) for
+  // exactly this, it just never got called from here.
+  if (claim._apiId && typeof window.apiReq === 'function') {
+    window.apiReq('PATCH', '/payout/' + claim._apiId + '/status', { status: 'Verified', notes: claim.verificationNotes })
+      .then(function(res) {
+        if (!res || !res.success) showToast('⚠ Approved locally, but database sync failed', 'warn');
+      }).catch(function() { showToast('⚠ Approved locally, but database sync failed', 'warn'); });
+  }
+
   showToast('Claim approved successfully! ✓', 'success');
   document.getElementById('mgmt-verify-panel').style.display = 'none';
   renderPayoutMgmt();
@@ -39693,7 +40337,17 @@ function requestClaimInfo(claimId) {
   );
 
   notifyPartner(claimId, 'info_requested', `We need more information. Due Date: ${claim.dueDate}`);
-  
+
+  // BUGFIX (confirmed real gap, now fixed): backend has no "awaiting_info"
+  // status — "OnHold" is the closest semantic match in PayoutController's
+  // whitelist, with the actual info-request text stored in Notes.
+  if (claim._apiId && typeof window.apiReq === 'function') {
+    window.apiReq('PATCH', '/payout/' + claim._apiId + '/status', { status: 'OnHold', notes: claim.infoRequest })
+      .then(function(res) {
+        if (!res || !res.success) showToast('⚠ Saved locally, but database sync failed', 'warn');
+      }).catch(function() { showToast('⚠ Saved locally, but database sync failed', 'warn'); });
+  }
+
   showToast('Information request sent to partner! ✓', 'success');
   document.getElementById('mgmt-verify-panel').style.display = 'none';
   renderPayoutMgmt();
@@ -39717,7 +40371,14 @@ function rejectClaim(claimId) {
   );
 
   notifyPartner(claimId, 'rejected', `Your claim has been rejected. Reason: ${claim.rejectionReason}`);
-  
+
+  if (claim._apiId && typeof window.apiReq === 'function') {
+    window.apiReq('PATCH', '/payout/' + claim._apiId + '/status', { status: 'Rejected', notes: claim.rejectionReason })
+      .then(function(res) {
+        if (!res || !res.success) showToast('⚠ Rejected locally, but database sync failed', 'warn');
+      }).catch(function() { showToast('⚠ Rejected locally, but database sync failed', 'warn'); });
+  }
+
   showToast('Claim rejected! Partner has been notified.', 'info');
   document.getElementById('mgmt-verify-panel').style.display = 'none';
   renderPayoutMgmt();
@@ -43259,7 +43920,7 @@ function generateIntelligentInsights(claims) {
     html += `
       <div style="background:${bgColor};border-left:3px solid ${borderColor};border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:700;color:var(--text)">${insight.icon} ${insight.message}</div>
+          <div style="font-size:12px;font-weight:700;color:var(--text)">${escapeHtml(insight.icon)} ${escapeHtml(insight.message)}</div>
         </div>
         <button onclick="alert('Action: ${insight.action}')" style="background:${borderColor};color:white;border:none;padding:6px 12px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer">${insight.action}</button>
       </div>
@@ -43494,7 +44155,7 @@ function buildRiskAssessment(claims) {
           <div style="font-size:12px;font-weight:700;color:var(--text)">${levelEmoji} ${risk.title}</div>
           <button onclick="alert('${risk.action}')" style="background:${risk.color};color:white;border:none;padding:4px 10px;border-radius:4px;font-size:9px;font-weight:700;cursor:pointer">${risk.action}</button>
         </div>
-        <div style="font-size:11px;color:#666">${risk.description}</div>
+        <div style="font-size:11px;color:#666">${escapeHtml(risk.description)}</div>
       </div>
     `;
   });
@@ -43552,7 +44213,7 @@ function buildPerformanceBenchmark(claims) {
     html += `
       <div style="background:white;border-radius:10px;padding:12px;border-left:3px solid #52c41a">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div style="font-weight:700;color:var(--text)">${medal} ${partner.name}</div>
+          <div style="font-weight:700;color:var(--text)">${medal} ${escapeHtml(partner.name)}</div>
           <div style="font-size:12px;font-weight:700;color:#22863a">${partner.successRate}%</div>
         </div>
         <div style="background:#f0f0f0;height:6px;border-radius:3px;overflow:hidden">
@@ -43633,7 +44294,7 @@ function buildSmartRecommendations(claims) {
         <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
           <div>
             <div style="font-weight:700;color:var(--text);font-size:13px">${rec.icon} ${rec.title}</div>
-            <div style="font-size:11px;color:#666;margin-top:4px">${rec.description}</div>
+            <div style="font-size:11px;color:#666;margin-top:4px">${escapeHtml(rec.description)}</div>
           </div>
           <button onclick="alert('${rec.action}')" style="background:#1890ff;color:white;border:none;padding:6px 12px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">${rec.action}</button>
         </div>

@@ -45,6 +45,9 @@ public class MappingProfile : Profile
             // DTO field = ChangedAt, maps from CreatedAt (when status was changed)
             .ForMember(d => d.ChangedAt,  o => o.MapFrom(s => s.CreatedAt));
 
+        CreateMap<LoanBankLine, LoanBankLineDto>();
+        CreateMap<LoanReference, LoanReferenceDto>();
+
         // ── Loan (no role-based masking — use LoanService.MapToDto for that)
         CreateMap<Loan, LoanDto>()
             .ForMember(d => d.LoanType,     o => o.MapFrom(s => s.LoanType.ToString()))
@@ -54,6 +57,13 @@ public class MappingProfile : Profile
             .ForMember(d => d.CreatedBy,     o => o.MapFrom(s => s.CreatedBy))
             .ForMember(d => d.AssignedTo,    o => o.MapFrom(s => s.AssignedTo))
             .ForMember(d => d.LoginUser,     o => o.MapFrom(s => s.LoginUser))
+            .ForMember(d => d.LocationName,  o => o.MapFrom(s => s.Location != null ? s.Location.Name : null))
+            .ForMember(d => d.DsaName,       o => o.MapFrom(s => s.Dsa != null ? s.Dsa.Name : null))
+            .ForMember(d => d.PartnerName,   o => o.MapFrom(s => s.Partner != null ? s.Partner.Name : null))
+            .ForMember(d => d.BankLines,     o => o.MapFrom(s => s.BankLines))
+            .ForMember(d => d.References,    o => o.MapFrom(s => s.References))
+            .ForMember(d => d.SalesTeamName, o => o.MapFrom(s => s.SalesTeamName))
+            .ForMember(d => d.OpsManager,    o => o.MapFrom(s => s.OpsManager))
             // RiskGrade isn't a Loan property at all (it lives on BureauReport,
             // a different entity, keyed by CustomerId) — LoanService.GetByIdAsync
             // sets it manually after mapping, via ILoanRepository.GetLatestRiskGradeAsync.

@@ -11,11 +11,15 @@ namespace LoanMS.API.Controllers;
 public class TicketsController : BaseController
 {
     private readonly AppDbContext _db;
-    public TicketsController(AppDbContext db) => _db = db;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
+    public TicketsController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "tickets"))
+            return Forbid();
+
         var q = _db.Tickets.Include(t => t.CreatedBy).Include(t => t.AssignedTo).AsQueryable();
         if (!string.IsNullOrEmpty(status)) q = q.Where(t => t.Status == status);
 

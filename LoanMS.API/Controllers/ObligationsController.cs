@@ -23,17 +23,22 @@ public class ObligationsController : BaseController
 {
     private readonly ILoanService _loanService;
     private readonly AppDbContext _db;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
 
-    public ObligationsController(ILoanService loanService, AppDbContext db)
+    public ObligationsController(ILoanService loanService, AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm)
     {
         _loanService = loanService;
         _db          = db;
+        _rolePerm    = rolePerm;
     }
 
     /// <summary>Get all obligations for a loan application (FOIR tab).</summary>
     [HttpGet("/api/loans/{loanId:int}/obligations")]
     public async Task<IActionResult> GetByLoan(int loanId)
     {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canViewObligations"))
+            return Forbid();
+
         var loan = await _loanService.GetByIdAsync(loanId, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(loan);
 
@@ -54,6 +59,9 @@ public class ObligationsController : BaseController
         if (!ModelState.IsValid)
             return BadRequest(ApiResponseDto<LoanObligationDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
+
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canEditObligations"))
+            return Forbid();
 
         var loan = await _loanService.GetByIdAsync(request.LoanApplicationId, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(ApiResponseDto<LoanObligationDto>.Fail("Loan application not found."));
@@ -86,6 +94,9 @@ public class ObligationsController : BaseController
         if (!ModelState.IsValid)
             return BadRequest(ApiResponseDto<LoanObligationDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
+
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canEditObligations"))
+            return Forbid();
 
         var obligation = await _db.LoanObligations.FindAsync(id);
         if (obligation == null) return NotFound(ApiResponseDto<LoanObligationDto>.Fail("Obligation not found."));

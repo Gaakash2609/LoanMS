@@ -162,6 +162,7 @@ try
     builder.Services.AddScoped<IUserService, UserService>();
     builder.Services.AddScoped<ICustomerService, CustomerService>();
     builder.Services.AddScoped<ILoanService, LoanService>();
+    builder.Services.AddScoped<LoanMS.API.Services.IRolePermissionService, LoanMS.API.Services.RolePermissionService>();
     builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
     builder.Services.AddScoped<LoanMS.Infrastructure.Services.IEmailConfigStore, LoanMS.Infrastructure.Services.EmailConfigStore>();
     builder.Services.AddScoped<IEmailService, LoanMS.Infrastructure.Services.EmailService>();

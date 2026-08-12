@@ -2,6 +2,9 @@
 var _lsGet = function(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } };
 var _lsSet = function(k,v){ try{ localStorage.setItem(k,v); }catch(e){} };
 var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
+// Security fix — separate file from efin-app.js (where escapeHtml() lives);
+// defensive fallback in case load order ever changes.
+function eh(v) { return window.escapeHtml ? window.escapeHtml(v) : String(v == null ? '' : v); }
     // ══════════════════════════════════════════════════════════
     //  USER PROFILE PAGE
     //  Reference: partner profile page (image provided)
@@ -97,16 +100,16 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       try { localStorage.setItem('efin_user_profiles', JSON.stringify(USER_PROFILES)); } catch(e) {}
     }
 
-    // ── Server sync: PhoneNumber + PhotoData are now DB-backed ─────────────
+    // ── Server sync: PhoneNumber/PhotoData/Address/Bank Details are DB-backed ──
     // localStorage ('efin_user_profiles') remains the instant-render cache —
     // GET/PUT /api/users/profile (via window.apiReq, from api-bridge.js) is
-    // the actual source of truth for these two fields, same pattern already
+    // the actual source of truth for these fields, same pattern already
     // used for PRODUCT_CAM_MATRICES in product-offer-matrix.js. Previously
     // this whole file was localStorage-only, so a photo/phone set on one
     // device/browser never showed up on another, and was lost entirely if
-    // browser data was cleared. Every OTHER profile field (address/bank/
-    // DOB/employeeId/etc.) is intentionally left as localStorage-only for
-    // now — out of scope for this fix.
+    // browser data was cleared. Address/Bank Details were fixed in a later
+    // pass (see profileSaveEdit) — DOB/employeeId/gender/name fields remain
+    // localStorage-only for now, out of scope for this fix.
 
     // Trigger point lives in api-bridge.js now, in the standard sync-list
     // pattern (alongside _syncUsers, _syncTeams, etc.) — called once per
@@ -127,6 +130,16 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         // server has, e.g. after removing a photo on another device).
         USER_PROFILES[email].mobile    = res.data.phoneNumber || '';
         USER_PROFILES[email].photoData = res.data.photoData || null;
+        USER_PROFILES[email].addressLine1 = res.data.addressLine1 || '';
+        USER_PROFILES[email].addressLine2 = res.data.addressLine2 || '';
+        USER_PROFILES[email].city = res.data.addressCity || '';
+        USER_PROFILES[email].state = res.data.addressState || '';
+        USER_PROFILES[email].postalCode = res.data.addressPostalCode || '';
+        USER_PROFILES[email].accountHolderName = res.data.bankAccountHolderName || '';
+        USER_PROFILES[email].bankName = res.data.bankName || '';
+        USER_PROFILES[email].accountType = res.data.bankAccountType || '';
+        USER_PROFILES[email].accountNumber = res.data.bankAccountNumber || '';
+        USER_PROFILES[email].ifscCode = res.data.bankIfscCode || '';
         saveProfilesToStorage();
         try { if (typeof renderProfilePage === 'function' && window.currentUser) renderProfilePage(); } catch (e) {}
       }).catch(function(e) {
@@ -143,7 +156,17 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       if (!email || !p) return;
       window.apiReq('PUT', '/users/profile', {
         phoneNumber: p.mobile || null,
-        photoData: p.photoData || null
+        photoData: p.photoData || null,
+        addressLine1: p.addressLine1 || null,
+        addressLine2: p.addressLine2 || null,
+        addressCity: p.city || null,
+        addressState: p.state || null,
+        addressPostalCode: p.postalCode || null,
+        bankAccountHolderName: p.accountHolderName || null,
+        bankName: p.bankName || null,
+        bankAccountType: p.accountType || null,
+        bankAccountNumber: p.accountNumber || null,
+        bankIfscCode: p.ifscCode || null
       }).then(function(res) {
         if (!res || !res.success) {
           console.warn('[UserProfile] profile sync to server failed — change saved locally only');
@@ -315,8 +338,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       const el = document.getElementById(containerId); if (!el) return;
       el.innerHTML = fields.map(f => `
         <div style="${f.full ? 'grid-column:1/-1' : ''}">
-          <div style="font-size:11.5px;font-weight:600;color:var(--accent);margin-bottom:5px;letter-spacing:.2px">${f.label}</div>
-          <div style="font-size:14px;color:var(--text);font-weight:500">${f.value || '—'}</div>
+          <div style="font-size:11.5px;font-weight:600;color:var(--accent);margin-bottom:5px;letter-spacing:.2px">${eh(f.label)}</div>
+          <div style="font-size:14px;color:var(--text);font-weight:500">${eh(f.value) || '—'}</div>
         </div>`).join('');
     }
 
@@ -429,7 +452,12 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
 
       closeModal('modal-profile-edit');
       saveProfilesToStorage();
-      if (section === 'primary') _pushProfileToServer(); // mobile is DB-backed
+      // BUGFIX (confirmed real gap): only 'primary' used to sync to the
+      // server — address/bank were explicitly, deliberately left
+      // localStorage-only in an earlier pass (see the doc comment above
+      // saveProfilesToStorage). Now that Users has the columns for them,
+      // this fires the same push for every section.
+      _pushProfileToServer();
       renderProfilePage();
       showToast(`${section.charAt(0).toUpperCase()+section.slice(1)} details saved`, 'success');
     }

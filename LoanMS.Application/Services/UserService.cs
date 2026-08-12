@@ -90,6 +90,7 @@ public class UserService : IUserService
         user.LocationName = request.LocationName?.Trim();
         user.SalesTeam    = request.SalesTeam?.Trim();
         user.OpTeam       = request.OpTeam?.Trim();
+        if (request.PhotoData != null) user.PhotoData = string.IsNullOrWhiteSpace(request.PhotoData) ? null : request.PhotoData;
         user.UpdatedAt    = DateTime.UtcNow;
 
         await _uow.Users.UpdateAsync(user);
@@ -158,6 +159,22 @@ public class UserService : IUserService
 
         user.PhoneNumber = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
         user.PhotoData   = string.IsNullOrWhiteSpace(request.PhotoData) ? null : request.PhotoData;
+        // Address/Bank fields: the frontend saves one section (address OR
+        // bank OR primary) at a time — unlike PhoneNumber/PhotoData above,
+        // these must be "only touch if this request actually included it",
+        // not "always overwrite, blank clears", or saving one section would
+        // silently wipe out whichever other section wasn't included in this
+        // particular request.
+        if (request.AddressLine1 != null) user.AddressLine1 = request.AddressLine1.Trim();
+        if (request.AddressLine2 != null) user.AddressLine2 = request.AddressLine2.Trim();
+        if (request.AddressCity != null) user.AddressCity = request.AddressCity.Trim();
+        if (request.AddressState != null) user.AddressState = request.AddressState.Trim();
+        if (request.AddressPostalCode != null) user.AddressPostalCode = request.AddressPostalCode.Trim();
+        if (request.BankAccountHolderName != null) user.BankAccountHolderName = request.BankAccountHolderName.Trim();
+        if (request.BankName != null) user.BankName = request.BankName.Trim();
+        if (request.BankAccountType != null) user.BankAccountType = request.BankAccountType.Trim();
+        if (request.BankAccountNumber != null) user.BankAccountNumber = request.BankAccountNumber.Trim();
+        if (request.BankIfscCode != null) user.BankIfscCode = request.BankIfscCode.Trim().ToUpperInvariant();
         user.UpdatedAt   = DateTime.UtcNow;
 
         await _uow.Users.UpdateAsync(user);
@@ -177,6 +194,16 @@ public class UserService : IUserService
         LocationName = u.LocationName,
         SalesTeam    = u.SalesTeam,
         OpTeam       = u.OpTeam,
-        PhotoData    = u.PhotoData
+        PhotoData    = u.PhotoData,
+        AddressLine1 = u.AddressLine1,
+        AddressLine2 = u.AddressLine2,
+        AddressCity  = u.AddressCity,
+        AddressState = u.AddressState,
+        AddressPostalCode = u.AddressPostalCode,
+        BankAccountHolderName = u.BankAccountHolderName,
+        BankName = u.BankName,
+        BankAccountType = u.BankAccountType,
+        BankAccountNumber = u.BankAccountNumber,
+        BankIfscCode = u.BankIfscCode
     };
 }

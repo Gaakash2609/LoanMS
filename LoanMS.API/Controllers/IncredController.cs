@@ -48,15 +48,17 @@ public class IncredController : BaseController
     private readonly IDataProtector _protector;
     private readonly ILogger<IncredController> _log;
     private readonly ICacheService _cache;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
 
     public IncredController(AppDbContext db, IHttpClientFactory http,
-        IDataProtectionProvider dpProvider, ILogger<IncredController> log, ICacheService cache)
+        IDataProtectionProvider dpProvider, ILogger<IncredController> log, ICacheService cache, LoanMS.API.Services.IRolePermissionService rolePerm)
     {
         _db = db;
         _http = http;
         _protector = dpProvider.CreateProtector("LoanMS.InCredSecrets.v1");
         _log = log;
         _cache = cache;
+        _rolePerm = rolePerm;
     }
 
     // ── Load credentials from DB (Settings); no built-in fallback — see PHASE 6 fix ──
@@ -503,6 +505,9 @@ public class IncredController : BaseController
     [HttpGet("loan/{loanId:int}")]
     public async Task<IActionResult> GetLoanIncredInfo(int loanId)
     {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canViewIncred"))
+            return Forbid();
+
         var loan = await _db.Loans.Include(l => l.IncredOffers)
             .FirstOrDefaultAsync(l => l.Id == loanId);
         if (loan == null)

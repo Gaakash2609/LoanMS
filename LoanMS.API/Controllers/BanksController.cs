@@ -23,11 +23,18 @@ namespace LoanMS.API.Controllers;
 public class BanksController : BaseController
 {
     private readonly AppDbContext _db;
-    public BanksController(AppDbContext db) => _db = db;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
+    public BanksController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
+        // Server-side enforcement of Menu Access Control (Settings screen)
+        // — same non-invasive, fail-open pattern as LoansController's
+        // action-permission checks (see RolePermissionService).
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "banks"))
+            return Forbid();
+
         var banks = await _db.Banks
             .Include(b => b.Lines)
             .OrderBy(b => b.BankName)
@@ -60,6 +67,14 @@ public class BanksController : BaseController
                 b.MinExpMonths,
                 b.EmpTypesJson,
                 b.CompTypesJson,
+                b.LoanTypesJson,
+                b.ServiceablePinsJson,
+                b.HomeTypesJson,
+                ProductRules = b.ProductRules.Select(r => new {
+                    r.ProductKey, r.MinCibil, r.AcceptNtc, r.MaxLoanAmt, r.MinTenure, r.MaxTenure,
+                    r.FoirLimit, r.PfRequired, r.MinAge, r.MaxAge, r.MinExpMonths,
+                    r.EmpTypesJson, r.CompTypesJson, r.HomeTypesJson
+                }),
                 Lines = b.Lines.Select(l => new { l.Id, l.CompanyId, l.CategoryId, l.PinCode, l.Pf })
             })
             .ToListAsync();
@@ -183,10 +198,61 @@ public class BanksController : BaseController
         if (dto.MinExpMonths.HasValue) bank.MinExpMonths = dto.MinExpMonths.Value;
         if (dto.EmpTypes  != null) bank.EmpTypesJson  = System.Text.Json.JsonSerializer.Serialize(dto.EmpTypes);
         if (dto.CompTypes != null) bank.CompTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.CompTypes);
+        if (dto.LoanTypes != null) bank.LoanTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.LoanTypes);
+        if (dto.ServiceablePins != null) bank.ServiceablePinsJson = System.Text.Json.JsonSerializer.Serialize(dto.ServiceablePins);
+        if (dto.HomeTypes != null) bank.HomeTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.HomeTypes);
         bank.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<bool>.Ok(true, "Bank updated."));
+    }
+
+    /// <summary>
+    /// Upsert per-product rule variation for a bank (Lender Configuration's
+    /// per-product tabs — Bank Rules, Employment Types, Home Types).
+    /// Separate from Update() above, which writes BankMaster's own flat
+    /// fields (the single set the wizard's eligibility engine actually
+    /// reads); this is the fuller, per-product picture.
+    /// </summary>
+    [HttpPut("{id:int}/product-rules/{productKey}")]
+    [Authorize(Roles = "Admin,ProductTeam")]
+    public async Task<IActionResult> UpsertProductRule(int id, string productKey, [FromBody] BankProductRuleDto dto)
+    {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+
+        var bankExists = await _db.Banks.AnyAsync(b => b.Id == id);
+        if (!bankExists) return NotFound(ApiResponseDto<bool>.Fail("Bank not found."));
+
+        var rule = await _db.Set<BankProductRule>()
+            .FirstOrDefaultAsync(r => r.BankId == id && r.ProductKey == productKey);
+
+        if (rule == null)
+        {
+            rule = new BankProductRule { BankId = id, ProductKey = productKey, CreatedAt = DateTime.UtcNow };
+            _db.Set<BankProductRule>().Add(rule);
+        }
+        else
+        {
+            rule.UpdatedAt = DateTime.UtcNow;
+        }
+
+        if (dto.MinCibil.HasValue)     rule.MinCibil     = dto.MinCibil.Value;
+        if (dto.AcceptNtc.HasValue)    rule.AcceptNtc     = dto.AcceptNtc.Value;
+        if (dto.MaxLoanAmt.HasValue)   rule.MaxLoanAmt    = dto.MaxLoanAmt.Value;
+        if (dto.MinTenure.HasValue)    rule.MinTenure     = dto.MinTenure.Value;
+        if (dto.MaxTenure.HasValue)    rule.MaxTenure     = dto.MaxTenure.Value;
+        if (dto.FoirLimit.HasValue)    rule.FoirLimit     = dto.FoirLimit.Value;
+        if (dto.PfRequired.HasValue)   rule.PfRequired    = dto.PfRequired.Value;
+        if (dto.MinAge.HasValue)       rule.MinAge        = dto.MinAge.Value;
+        if (dto.MaxAge.HasValue)       rule.MaxAge        = dto.MaxAge.Value;
+        if (dto.MinExpMonths.HasValue) rule.MinExpMonths  = dto.MinExpMonths.Value;
+        if (dto.EmpTypes  != null) rule.EmpTypesJson  = System.Text.Json.JsonSerializer.Serialize(dto.EmpTypes);
+        if (dto.CompTypes != null) rule.CompTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.CompTypes);
+        if (dto.HomeTypes != null) rule.HomeTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.HomeTypes);
+
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Product rules saved."));
     }
 
     [HttpDelete("{id:int}")]
@@ -235,4 +301,24 @@ public class BankDto
     public int? MinExpMonths { get; set; }
     public List<string>? EmpTypes { get; set; }
     public List<string>? CompTypes { get; set; }
+    public List<string>? LoanTypes { get; set; }
+    public List<string>? ServiceablePins { get; set; }
+    public List<string>? HomeTypes { get; set; }
+}
+
+public class BankProductRuleDto
+{
+    public int? MinCibil { get; set; }
+    public bool? AcceptNtc { get; set; }
+    public decimal? MaxLoanAmt { get; set; }
+    public int? MinTenure { get; set; }
+    public int? MaxTenure { get; set; }
+    public int? FoirLimit { get; set; }
+    public bool? PfRequired { get; set; }
+    public int? MinAge { get; set; }
+    public int? MaxAge { get; set; }
+    public int? MinExpMonths { get; set; }
+    public List<string>? EmpTypes { get; set; }
+    public List<string>? CompTypes { get; set; }
+    public List<string>? HomeTypes { get; set; }
 }

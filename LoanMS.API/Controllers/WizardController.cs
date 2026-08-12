@@ -19,12 +19,14 @@ public class WizardController : BaseController
     private readonly AppDbContext _db;
     private readonly ILogger<WizardController> _logger;
     private readonly ICacheService _cache;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
 
-    public WizardController(AppDbContext db, ILogger<WizardController> logger, ICacheService cache)
+    public WizardController(AppDbContext db, ILogger<WizardController> logger, ICacheService cache, LoanMS.API.Services.IRolePermissionService rolePerm)
     {
         _db     = db;
         _logger = logger;
         _cache  = cache;
+        _rolePerm = rolePerm;
     }
 
     // NOTE: the wizard frontend sends short keys (new_car, used_car, education, lap)
@@ -163,6 +165,13 @@ public class WizardController : BaseController
         if (dto.DsaId.HasValue)      loan.DsaId      = dto.DsaId;
         if (dto.PartnerId.HasValue)  loan.PartnerId  = dto.PartnerId;
         if (dto.LocationId.HasValue) loan.LocationId = dto.LocationId;
+        // Product-specific fields (Insurance/Property/Vehicle/Education) —
+        // confirmed real gap, previously never captured at all. Only
+        // overwrite if this particular call actually included data, same
+        // "don't clobber a value from an earlier save" rule as the fields
+        // above.
+        if (dto.ProductData != null && dto.ProductData.Count > 0)
+            loan.ProductDataJson = System.Text.Json.JsonSerializer.Serialize(dto.ProductData);
     }
 
     /// <summary>
@@ -305,6 +314,9 @@ public class WizardController : BaseController
     [HttpPost("submit")]
     public async Task<IActionResult> Submit([FromBody] WizardSubmitDto dto)
     {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canCreateApp"))
+            return Forbid();
+
         var errors = ValidateFieldFormats(dto);
         if (dto.Amount <= 0)
             errors.Add("Loan amount must be greater than 0.");

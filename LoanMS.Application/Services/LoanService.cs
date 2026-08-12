@@ -24,7 +24,7 @@ public class LoanService : ILoanService
     private static readonly HashSet<string> _elevatedRoles =
         new(StringComparer.OrdinalIgnoreCase) { "Admin", "Manager" };
 
-    public async Task<ApiResponseDto<LoanDto>> GetByIdAsync(int id, int currentUserId, string callerRole = "Sales")
+    public async Task<ApiResponseDto<LoanDto>> GetByIdAsync(int id, int currentUserId, string callerRole = "Sales", HashSet<string>? deniedTabs = null)
     {
         // Phase 2B — role-based visibility is enforced at the repository query
         // level, not after the fact. If the loan exists but falls outside the
@@ -33,7 +33,7 @@ public class LoanService : ILoanService
         // is leaked between "doesn't exist" and "not yours to see".
         var loan = await _uow.Loans.GetWithDetailsAsync(id, currentUserId, callerRole);
         if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
-        var dto = MapToDto(loan, callerRole);
+        var dto = MapToDto(loan, callerRole, deniedTabs);
         dto.RiskGrade = await _uow.Loans.GetLatestRiskGradeAsync(loan.CustomerId);
         return ApiResponseDto<LoanDto>.Ok(dto);
     }
@@ -213,6 +213,137 @@ public class LoanService : ILoanService
         return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), $"Loan status updated to {request.NewStatus}.");
     }
 
+    /// <summary>
+    /// Sales Team / Operations Manager assignment (linked-users visibility
+    /// fix — see UpdateLoanAssignmentRequestDto for why this is separate
+    /// from UpdateAsync). Same HasAccessAsync check every other
+    /// loan-mutating method uses; works regardless of loan status, unlike
+    /// UpdateAsync. Each field is independently optional: sending only
+    /// SalesTeamName leaves OpsManagerId untouched, and vice versa; the
+    /// Clear* flags are how a caller explicitly removes a value rather
+    /// than just not mentioning it.
+    /// </summary>
+    public async Task<ApiResponseDto<LoanDto>> UpdateAssignmentAsync(int id, UpdateLoanAssignmentRequestDto request, int currentUserId, string currentUserRole)
+    {
+        if (!await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        if (request.OpsManagerId.HasValue)
+        {
+            var opsManagerError = await ValidateAssigneeAsync(request.OpsManagerId);
+            if (opsManagerError != null) return ApiResponseDto<LoanDto>.Fail(opsManagerError);
+            loan.OpsManagerId = request.OpsManagerId;
+        }
+        else if (request.ClearOpsManager)
+        {
+            loan.OpsManagerId = null;
+        }
+
+        if (request.SalesTeamName != null)
+        {
+            loan.SalesTeamName = request.SalesTeamName;
+        }
+        else if (request.ClearSalesTeam)
+        {
+            loan.SalesTeamName = null;
+        }
+
+        // ── Extended: Login User, Sales Person, Location (same pattern) ──
+        if (request.LoginUserId.HasValue)
+        {
+            var loginUserError = await ValidateAssigneeAsync(request.LoginUserId);
+            if (loginUserError != null) return ApiResponseDto<LoanDto>.Fail(loginUserError);
+            loan.LoginUserId = request.LoginUserId;
+        }
+        else if (request.ClearLoginUser)
+        {
+            loan.LoginUserId = null;
+        }
+
+        if (request.AssignedToUserId.HasValue)
+        {
+            var assignedToError = await ValidateAssigneeAsync(request.AssignedToUserId);
+            if (assignedToError != null) return ApiResponseDto<LoanDto>.Fail(assignedToError);
+            loan.AssignedToUserId = request.AssignedToUserId;
+        }
+        else if (request.ClearAssignedTo)
+        {
+            loan.AssignedToUserId = null;
+        }
+
+        if (request.LocationId.HasValue)
+        {
+            // Lightweight existence check (Locations, not Users — different
+            // table, so ValidateAssigneeAsync doesn't apply here).
+            var locationExists = await _uow.Loans.LocationExistsAsync(request.LocationId.Value);
+            if (!locationExists) return ApiResponseDto<LoanDto>.Fail("Selected location was not found.");
+            loan.LocationId = request.LocationId;
+        }
+        else if (request.ClearLocation)
+        {
+            loan.LocationId = null;
+        }
+
+        loan.UpdatedAt = DateTime.UtcNow;
+        await _uow.Loans.UpdateAsync(loan);
+        await _uow.SaveChangesAsync();
+
+        var updated = await _uow.Loans.GetWithDetailsAsync(id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), "Assignment updated.");
+    }
+
+    /// <summary>
+    /// Whole-table replace for a loan's Bank Lines (Application Number /
+    /// Approved Loan / Remarks per bank the application was sent to) —
+    /// previously frontend-only. Same visibility gate as every other
+    /// loan-mutating method; no status restriction (a lender detail can be
+    /// updated at any stage, same reasoning as UpdateAssignmentAsync).
+    /// </summary>
+    public async Task<ApiResponseDto<LoanDto>> UpdateBankLinesAsync(int id, UpdateLoanBankLinesRequestDto request, int currentUserId, string currentUserRole)
+    {
+        if (!await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var newLines = (request.BankLines ?? new List<BankLineItemDto>()).Select(l => new LoanBankLine
+        {
+            BankName = l.BankName ?? string.Empty,
+            TempApplicationNumber = l.TempApplicationNumber ?? string.Empty,
+            ApplicationNumber = l.ApplicationNumber,
+            ApprovedLoan = l.ApprovedLoan,
+            Remarks = l.Remarks
+        }).ToList();
+
+        await _uow.Loans.ReplaceBankLinesAsync(id, newLines);
+
+        var updated = await _uow.Loans.GetWithDetailsAsync(id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), "Bank details saved.");
+    }
+
+    public async Task<ApiResponseDto<LoanDto>> UpdateReferencesAsync(int id, List<UpdateLoanReferenceItemDto> request, int currentUserId, string currentUserRole)
+    {
+        if (!await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var newRefs = (request ?? new List<UpdateLoanReferenceItemDto>())
+            .Where(r => !string.IsNullOrWhiteSpace(r.Name))
+            .Select(r => new LoanReference { Name = r.Name!, Mobile = r.Mobile ?? string.Empty, Relation = r.Relation ?? string.Empty, RefNumber = r.RefNumber })
+            .ToList();
+
+        await _uow.Loans.ReplaceReferencesAsync(id, newRefs);
+
+        var updated = await _uow.Loans.GetWithDetailsAsync(id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), "References saved.");
+    }
+
     public async Task<ApiResponseDto<bool>> DeleteAsync(int id, int currentUserId, string currentUserRole)
     {
         // Delete is no longer Admin-only at the controller — every role can
@@ -302,10 +433,25 @@ public class LoanService : ILoanService
         _                      => new()
     };
 
-    internal static LoanDto MapToDto(Loan l, string callerRole = "Sales")
+    internal static LoanDto MapToDto(Loan l, string callerRole = "Sales", HashSet<string>? deniedTabs = null)
     {
         var isInternal = _internalRoles.Contains(callerRole);
         var isElevated = _elevatedRoles.Contains(callerRole);
+        // Tab Data Access (Roles & Permissions matrix) — Admin-configurable,
+        // on top of (never instead of) the existing isElevated PAN/Aadhaar
+        // masking above. Deliberately conservative: FullName/Email/Phone
+        // stay visible even with canViewPersonal off (used for basic
+        // record-identification throughout the UI, not just this one tab —
+        // hiding them entirely risks breaking assumptions elsewhere this
+        // pass can't fully audit); only the more Personal-Details-specific
+        // fields (DOB/Gender/FatherName) and the genuinely tab-scoped
+        // Address/Employment field groups are masked. "References" has no
+        // backend representation to mask (never persisted server-side —
+        // same class of gap as Bank Lines before that was fixed), so
+        // canViewReferences is intentionally not checked here.
+        var hidePersonal   = deniedTabs != null && deniedTabs.Contains("canViewPersonal");
+        var hideAddress    = deniedTabs != null && deniedTabs.Contains("canViewAddress");
+        var hideEmployment = deniedTabs != null && deniedTabs.Contains("canViewEmployment");
 
         return new LoanDto
         {
@@ -333,7 +479,19 @@ public class LoanService : ILoanService
                 // PAN and Aadhaar masked for non-elevated roles
                 PanNumber     = isElevated ? l.Customer.PanNumber     : CustomerService.MaskPan(l.Customer.PanNumber),
                 AadhaarNumber = isElevated ? l.Customer.AadhaarNumber : CustomerService.MaskAadhaar(l.Customer.AadhaarNumber),
-                CibilScore    = l.Customer.CibilScore
+                CibilScore    = l.Customer.CibilScore,
+                DateOfBirth        = hidePersonal   ? null : l.Customer.DateOfBirth,
+                Gender             = hidePersonal   ? null : l.Customer.Gender,
+                FatherName         = hidePersonal   ? null : l.Customer.FatherName,
+                Address            = hideAddress    ? null : l.Customer.Address,
+                City               = hideAddress    ? null : l.Customer.City,
+                State              = hideAddress    ? null : l.Customer.State,
+                PinCode            = hideAddress    ? null : l.Customer.PinCode,
+                ResidenceType      = hideAddress    ? null : l.Customer.ResidenceType,
+                MonthlyIncome      = hideEmployment ? null : l.Customer.MonthlyIncome,
+                MonthlyObligations = hideEmployment ? null : l.Customer.MonthlyObligations,
+                EmploymentType     = hideEmployment ? null : l.Customer.EmploymentType,
+                CompanyName        = hideEmployment ? null : l.Customer.CompanyName,
             },
             CreatedBy = new UserDto
             {
@@ -356,6 +514,37 @@ public class LoanService : ILoanService
                 Email    = l.LoginUser.Email,
                 Role     = l.LoginUser.Role.ToString()
             },
+            OpsManager = l.OpsManager == null ? null : new UserDto
+            {
+                Id       = l.OpsManager.Id,
+                FullName = l.OpsManager.FullName,
+                Email    = l.OpsManager.Email,
+                Role     = l.OpsManager.Role.ToString()
+            },
+            LocationName  = l.Location?.Name,
+            DsaName       = l.Dsa?.Name,
+            PartnerName   = l.Partner?.Name,
+            SalesTeamName = l.SalesTeamName,
+            BankLines = l.BankLines?.Select(b => new LoanBankLineDto
+            {
+                Id = b.Id, BankName = b.BankName, TempApplicationNumber = b.TempApplicationNumber,
+                ApplicationNumber = b.ApplicationNumber, ApprovedLoan = b.ApprovedLoan, Remarks = b.Remarks
+            }).ToList() ?? new(),
+            // "References" tab masking (Tab Data Access) — same
+            // deniedTabs mechanism as Personal/Address/Employment above.
+            References = (deniedTabs != null && deniedTabs.Contains("canViewReferences"))
+                ? new()
+                : l.References?.Select(r => new LoanReferenceDto
+                    { Id = r.Id, Name = r.Name, Mobile = r.Mobile, Relation = r.Relation, RefNumber = r.RefNumber }).ToList() ?? new(),
+            SanctionDetail = l.SanctionDetail == null ? null : new LoanSanctionDetailDto
+            {
+                StampDuty = l.SanctionDetail.StampDuty, Gst = l.SanctionDetail.Gst,
+                Insurance = l.SanctionDetail.Insurance, PfPercent = l.SanctionDetail.PfPercent,
+                InsuranceInBundled = l.SanctionDetail.InsuranceInBundled, PfInBundled = l.SanctionDetail.PfInBundled,
+                IsBundled = l.SanctionDetail.IsBundled, IsBt = l.SanctionDetail.IsBt,
+                FlatRate = l.SanctionDetail.FlatRate, EmiDate = l.SanctionDetail.EmiDate
+            },
+            ProductDataJson = l.ProductDataJson,
             StatusHistory = l.StatusHistory?.Select(h => new LoanStatusHistoryDto
             {
                 Id         = h.Id,
