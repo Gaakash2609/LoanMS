@@ -323,7 +323,15 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   ══════════════════════════════════════════════════════════ */
   function _syncUsers() {
     return apiReq('GET', '/users').then(function(res) {
-      if (!res || !res.success || !res.data) return;
+      // GET /api/users is Admin-only (403 for every other role). Previously
+      // that 403 was silently swallowed by apiReq's catch, leaving twUsers
+      // permanently empty for non-Admin logins — which is why the wizard's
+      // Location -> Sales Person dropdown always showed "No Sales Person
+      // found for this location" for anyone but Admin, even when Sales
+      // Person users existed for that location. Fall back to the
+      // non-Admin-safe /users/lookup endpoint (id/fullName/role/location
+      // only) so every authenticated role gets a populated list.
+      if (!res || !res.success || !res.data) return _syncUsersLookupFallback();
       var apiUsers = res.data.map(function(u) {
         var roleKey = ROLE_MAP[u.role] || 'sales_executive';
         var roleLabel = (typeof window.ROLES !== 'undefined' && window.ROLES[roleKey] && window.ROLES[roleKey].label) || u.role || roleKey;
@@ -368,6 +376,43 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         if (typeof window.twRenderUsers === 'function') { try { window.twRenderUsers(); } catch(e){} }
       }
     }).catch(function(e){ console.warn('[Bridge] syncUsers:',e); });
+  }
+
+  // Minimal, non-Admin-safe replacement for _syncUsers() above — same
+  // merge/replace logic, just sourced from /users/lookup (id, fullName,
+  // role, locationName only, no email/mobile/isActive/etc.) since that's
+  // all any non-Admin role is authorized to see.
+  function _syncUsersLookupFallback() {
+    return apiReq('GET', '/users/lookup').then(function(res) {
+      if (!res || !res.success || !res.data) return;
+      var apiUsers = res.data.map(function(u) {
+        var roleKey = ROLE_MAP[u.role] || 'sales_executive';
+        var roleLabel = (typeof window.ROLES !== 'undefined' && window.ROLES[roleKey] && window.ROLES[roleKey].label) || u.role || roleKey;
+        return {
+          id: 'API' + u.id, _apiId: u.id,
+          name: u.fullName, email: '',
+          role: roleLabel, roleKey: roleKey,
+          mobile: '',
+          loc: u.locationName || '', st: '', ot: '',
+          locs: u.locationName ? [u.locationName] : [],
+          salesTeams: [], opTeams: [],
+          status: 'active', joinDate: '', uid: null
+        };
+      });
+      if (typeof window.twUsers !== 'undefined' && Array.isArray(window.twUsers)) {
+        var freshUserIds = new Set(apiUsers.map(function(u){ return u._apiId; }));
+        for (var ui = window.twUsers.length - 1; ui >= 0; ui--) {
+          var urow = window.twUsers[ui];
+          if (urow._apiId && !freshUserIds.has(urow._apiId)) window.twUsers.splice(ui, 1);
+        }
+        apiUsers.forEach(function(au) {
+          var existing = window.twUsers.findIndex(function(u){ return u._apiId === au._apiId; });
+          if (existing >= 0) { window.twUsers[existing] = Object.assign(window.twUsers[existing], au); }
+          else { window.twUsers.push(au); }
+        });
+        if (typeof window.twRenderUsers === 'function') { try { window.twRenderUsers(); } catch(e){} }
+      }
+    }).catch(function(e){ console.warn('[Bridge] syncUsersLookup:',e); });
   }
 
   // Frontend snake_case role key (ROLES config in efin-app.js) → backend
