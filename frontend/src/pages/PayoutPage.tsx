@@ -32,6 +32,8 @@ function StatusCard({ icon, count, label, description, color }: StatusCardProps)
   )
 }
 
+const PAGE_SIZE = 20
+
 export default function PayoutPage() {
   const [activeTab, setActiveTab] = useState<'claims' | 'management'>('claims')
   const [searchQuery, setSearchQuery] = useState('')
@@ -40,10 +42,22 @@ export default function PayoutPage() {
   const [page, setPage] = useState(1)
   const qc = useQueryClient()
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['payouts', page, filterStatus],
-    queryFn: () => payoutApi.getClaims({ page, pageSize: 20, status: filterStatus || undefined }).then(r => r.data.data),
+  // BUGFIX (confirmed real, pre-existing gap — Phase 7 audit): see
+  // payoutApi.ts's getClaims() doc-comment. PayoutController.GetAll
+  // returns a plain array, not a paged shape — data?.items was always
+  // undefined, so every KPI card, status card, and the table itself
+  // always showed zero regardless of how many real claims existed.
+  // Corrected to fetch the full (already status-filtered server-side)
+  // array once and paginate client-side, same pattern already proven in
+  // UsersPage.tsx/TasksPage.tsx/TicketsPage.tsx.
+  const { data: allClaims, isLoading } = useQuery({
+    queryKey: ['payouts', filterStatus],
+    queryFn: () => payoutApi.getClaims({ status: filterStatus || undefined }).then(r => r.data.data),
   })
+  const claims = allClaims ?? []
+  const totalCount = claims.length
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const pageItems = claims.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const update = useMutation({
     mutationFn: ({ id, newStatus }: { id: number; newStatus: string }) =>
@@ -53,17 +67,20 @@ export default function PayoutPage() {
 
   // Calculate statistics for both tabs
   const claimsStats = useMemo(() => ({
-    pending: data?.items?.filter(c => c.status === 'Pending').length ?? 0,
-    approved: data?.items?.filter(c => c.status === 'Approved').length ?? 0,
-    paid: data?.items?.filter(c => c.status === 'Paid').length ?? 0,
-    rejected: data?.items?.filter(c => c.status === 'Rejected').length ?? 0,
-    totalDisbursed: data?.items?.reduce((sum, c) => sum + (c.claimAmount || 0), 0) ?? 0,
-  }), [data])
+    pending: claims.filter(c => c.status === 'Pending').length,
+    approved: claims.filter(c => c.status === 'Approved').length,
+    paid: claims.filter(c => c.status === 'Paid').length,
+    rejected: claims.filter(c => c.status === 'Rejected').length,
+    totalDisbursed: claims.reduce((sum, c) => sum + (c.claimAmount || 0), 0),
+  }), [claims])
 
   const columns: Column<PayoutClaim>[] = [
     { key: 'loanNumber',    label: 'LOAN / APAC',   className: 'font-mono text-xs font-semibold' },
     { key: 'customerName',  label: 'CUSTOMER', className: 'font-medium' },
-    { key: 'claimedByName', label: 'AGENT',    className: 'text-gray-700' },
+    // BUGFIX (Phase 7): was 'claimedByName', a field that never existed
+    // in the actual API response (see payoutApi.ts's doc-comment — the
+    // real field is claimedBy) — this column always rendered blank.
+    { key: 'claimedBy', label: 'AGENT',    className: 'text-gray-700' },
     { key: 'month',         label: 'MONTH',    render: (r: PayoutClaim) => r.month ?? '—', className: 'text-gray-600' },
     { key: 'claimAmount',   label: 'AMOUNT',   render: (r: PayoutClaim) => <span className="font-semibold text-green-700">{formatCurrency(r.claimAmount)}</span> },
     { key: 'status',        label: 'STATUS',   render: (r: PayoutClaim) => (
@@ -151,7 +168,7 @@ export default function PayoutPage() {
               <div className="bg-blue-50 rounded-lg p-6 border border-blue-200">
                 <div className="text-gray-600 text-xs font-semibold uppercase tracking-wide mb-2">TOTAL DISBURSED</div>
                 <div className="text-3xl font-bold text-blue-600 mb-1">{formatCurrency(claimsStats.totalDisbursed)}</div>
-                <div className="text-xs text-gray-500">{data?.items?.length ?? 0} claims</div>
+                <div className="text-xs text-gray-500">{totalCount} claims</div>
               </div>
 
               <div className="bg-green-50 rounded-lg p-6 border border-green-200">
@@ -163,7 +180,7 @@ export default function PayoutPage() {
               <div className="bg-purple-50 rounded-lg p-6 border border-purple-200">
                 <div className="text-gray-600 text-xs font-semibold uppercase tracking-wide mb-2">APPROVAL RATE</div>
                 <div className="text-3xl font-bold text-purple-600 mb-1">
-                  {data?.items && data.items.length > 0 
+                  {claims.length > 0 
                     ? Math.round((claimsStats.paid / (claimsStats.pending + claimsStats.approved + claimsStats.paid)) * 100) 
                     : 0}%
                 </div>
@@ -262,12 +279,12 @@ export default function PayoutPage() {
               <CardHeader title="My Claims" />
               <DataTable
                 columns={columns}
-                data={data?.items}
+                data={pageItems}
                 isLoading={isLoading}
-                totalPages={data?.totalPages}
+                totalPages={totalPages}
                 currentPage={page}
                 onPageChange={setPage}
-                totalCount={data?.totalCount}
+                totalCount={totalCount}
               />
             </Card>
           </div>
@@ -301,7 +318,7 @@ export default function PayoutPage() {
               <div className="bg-blue-50 rounded-lg p-6 border border-blue-200">
                 <div className="text-gray-600 text-xs font-semibold uppercase tracking-wide mb-2">TOTAL DISBURSED</div>
                 <div className="text-3xl font-bold text-blue-600 mb-1">{formatCurrency(claimsStats.totalDisbursed)}</div>
-                <div className="text-xs text-gray-500">{data?.items?.length ?? 0} claims</div>
+                <div className="text-xs text-gray-500">{totalCount} claims</div>
               </div>
 
               <div className="bg-green-50 rounded-lg p-6 border border-green-200">
@@ -313,7 +330,7 @@ export default function PayoutPage() {
               <div className="bg-purple-50 rounded-lg p-6 border border-purple-200">
                 <div className="text-gray-600 text-xs font-semibold uppercase tracking-wide mb-2">SUCCESS RATE</div>
                 <div className="text-3xl font-bold text-purple-600 mb-1">
-                  {data?.items && data.items.length > 0
+                  {claims.length > 0
                     ? Math.round((claimsStats.paid / (claimsStats.pending + claimsStats.approved + claimsStats.paid)) * 100)
                     : 0}%
                 </div>
@@ -421,12 +438,12 @@ export default function PayoutPage() {
               <CardHeader title="All Claims" />
               <DataTable
                 columns={columns}
-                data={data?.items}
+                data={pageItems}
                 isLoading={isLoading}
-                totalPages={data?.totalPages}
+                totalPages={totalPages}
                 currentPage={page}
                 onPageChange={setPage}
-                totalCount={data?.totalCount}
+                totalCount={totalCount}
               />
             </Card>
           </div>

@@ -13,22 +13,6 @@ import { Plus, UserCheck, UserX } from 'lucide-react'
 interface DsaPartner {
   id: number; name: string; code: string; email?: string
   phone?: string; city?: string; isActive: boolean; createdAt: string
-  // BUGFIX (Phase 6): these were already present in the actual GET
-  // /api/dsa response (DsaController.GetAll's Select) but never captured
-  // in this type — needed now because DsaController.Update (PUT, the
-  // only endpoint that can change IsActive — there is no dedicated
-  // status-only endpoint for this module) unconditionally overwrites
-  // every one of these fields from the request body, with no per-field
-  // null-check. Sending only { isActive } would have silently wiped
-  // Name/Code/PartnerType/etc back to empty/default. mappedSalesUserId is
-  // deliberately NOT added here — confirmed it genuinely is not part of
-  // the GetAll response at all (only the resolved name, MappedSalesUser,
-  // is) — see toggle's own comment below for how that one field is
-  // handled.
-  partnerType?: string
-  linkedUserId?: number | null
-  pan?: string; officeAddress?: string; officeState?: string; officePin?: string
-  officeAddressType?: string; category?: string; mappedDsaId?: number | null
 }
 
 export default function DsaPage() {
@@ -48,36 +32,18 @@ export default function DsaPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['dsa'] }); setShowForm(false); setForm({ name: '', code: '', email: '', phone: '', city: '' }) },
   })
 
-  // BUGFIX (confirmed real, pre-existing bug — Phase 6 audit): called
-  // PATCH /api/dsa/{id}/toggle-active, a route that never existed in
-  // DsaController.cs — every click genuinely 404'd. There is no
-  // dedicated status-only endpoint for this module (unlike Users' PATCH
-  // /{id}/status) — the only endpoint that can change IsActive is the
-  // full PUT /{id} (DsaController.Update), which unconditionally
-  // overwrites every field from the request body. Sends back the row's
-  // own current values for every field the list-response actually
-  // provides, with only isActive flipped — preserves the record instead
-  // of wiping it.
-  //
-  // mappedSalesUserId is the one field genuinely NOT recoverable here —
-  // confirmed the list-response only exposes the resolved name
-  // (MappedSalesUser), never the raw id — omitting it from this payload
-  // means the backend's unconditional `dsa.MappedSalesUserId =
-  // dto.MappedSalesUserId` will reset it to null if a mapping was
-  // previously set. This is a genuine, narrow, pre-existing API-shape
-  // limitation (no GET /dsa/{id} endpoint exists either) that can't be
-  // fixed from this file alone without a backend change, which is out of
-  // this phase's scope — flagged, not silently fixed.
+  // BUGFIX (Phase 6, corrected): the first Phase 6 attempt called PATCH
+  // /api/dsa/{id}/toggle-active (a route that never existed — every click
+  // 404'd), then an unsafe follow-up tried reconstructing a full PUT
+  // payload from the row's own fields — but DsaController.GetAll never
+  // exposes MappedSalesUserId's raw id (only the resolved name), so that
+  // full-PUT would have silently cleared any existing sales-mapping on
+  // toggle. Corrected to use a new, dedicated, minimal endpoint
+  // (DsaController.SetStatus) that touches only IsActive server-side —
+  // no other field is read or sent, so nothing else can be cleared.
   const [toggleError, setToggleError] = useState('')
   const toggle = useMutation({
-    mutationFn: (d: DsaPartner) => api.put(`/api/dsa/${d.id}`, {
-      name: d.name, code: d.code, email: d.email, phone: d.phone, city: d.city,
-      partnerType: d.partnerType, linkedUserId: d.linkedUserId,
-      isActive: !d.isActive,
-      pan: d.pan, officeAddress: d.officeAddress, officeState: d.officeState,
-      officePin: d.officePin, officeAddressType: d.officeAddressType,
-      category: d.category, mappedDsaId: d.mappedDsaId,
-    }),
+    mutationFn: (d: DsaPartner) => api.patch(`/api/dsa/${d.id}/status`, { isActive: !d.isActive }),
     onSuccess: () => { setToggleError(''); qc.invalidateQueries({ queryKey: ['dsa'] }) },
     onError: () => setToggleError('Could not update DSA status. Please try again.'),
   })

@@ -371,8 +371,7 @@ public class UsersController : BaseController
             _db.TeamMembers.Add(new TeamMember { TeamId = teamId, UserId = userId, CreatedAt = DateTime.UtcNow });
         }
     }
-
-
+    private async Task<string> ApplyTeamMembershipAsync(int userId, string? newSalesTeam, string? newOpTeam, string? oldSalesTeam, string? oldOpTeam)
     {
         var notes = new List<string>();
         var salesNote = await ApplyOneTeamTypeAsync(userId, "Sales", newSalesTeam, oldSalesTeam);

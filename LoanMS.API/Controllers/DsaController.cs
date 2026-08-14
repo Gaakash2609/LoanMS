@@ -189,6 +189,30 @@ public class DsaController : BaseController
         return Ok(ApiResponseDto<object>.Ok(new { dsa.Id }, "DSA created."));
     }
 
+    /// <summary>
+    /// Archive/Restore a DSA or Partner [Admin/Sales/ProductTeam — same
+    /// roles as Update above]. Dedicated, minimal endpoint — same
+    /// reasoning as UsersController.SetStatus/TeamsController.SetStatus:
+    /// reusing the full Update() above would need every field resent
+    /// correctly just to flip one flag, and DsaDto's shape doesn't even
+    /// expose MappedSalesUserId's raw id anywhere in GetAll's response —
+    /// a full-PUT round-trip from the list page would silently null it
+    /// out. Touches only IsActive.
+    /// </summary>
+    public class SetDsaStatusRequestDto { public bool IsActive { get; set; } }
+
+    [HttpPatch("{id:int}/status")]
+    [Authorize(Roles = "Admin,Sales,ProductTeam")]
+    public async Task<IActionResult> SetStatus(int id, [FromBody] SetDsaStatusRequestDto request)
+    {
+        var dsa = await _db.DsaPartners.FindAsync(id);
+        if (dsa == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+        dsa.IsActive = request.IsActive;
+        dsa.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Status updated."));
+    }
+
     [HttpPut("{id:int}")]
     [Authorize(Roles = "Admin,Sales,ProductTeam")]
     public async Task<IActionResult> Update(int id, [FromBody] DsaDto dto)

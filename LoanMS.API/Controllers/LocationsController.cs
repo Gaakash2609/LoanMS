@@ -64,6 +64,30 @@ public class LocationsController : BaseController
         return Ok(ApiResponseDto<bool>.Ok(true, "Updated."));
     }
 
+    /// <summary>
+    /// Archive/Restore a Location [Admin — same role as Update above].
+    /// Dedicated, minimal endpoint — Location.IsActive already exists on
+    /// the entity and is already returned by GetAll (confirmed by
+    /// inspection), it just had no way to be SET — LocationDto (the
+    /// general Update() request-shape) never exposed it, and Update()
+    /// itself never touched loc.IsActive at all. No migration needed —
+    /// the column was already there. Touches only IsActive, leaving
+    /// Name/City/State/PinCode/Code (Update()'s own fields) untouched.
+    /// </summary>
+    public class SetLocationStatusRequestDto { public bool IsActive { get; set; } }
+
+    [HttpPatch("{id:int}/status")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> SetStatus(int id, [FromBody] SetLocationStatusRequestDto request)
+    {
+        var loc = await _db.Locations.FindAsync(id);
+        if (loc == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+        loc.IsActive = request.IsActive;
+        loc.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Status updated."));
+    }
+
     [HttpDelete("{id:int}")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)

@@ -29,9 +29,18 @@ export default function LocationsPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['locations'] }); setShowForm(false); setForm({ name: '', city: '', state: '', pinCode: '' }) },
   })
 
+  // BUGFIX (Phase 6, corrected): called PATCH /api/locations/{id}/toggle-active,
+  // a route that never existed — every click 404'd. Corrected to use the
+  // new, dedicated, minimal endpoint (LocationsController.SetStatus) —
+  // Location.IsActive already existed on the entity/database (confirmed
+  // by inspection — no migration was needed), it just had no endpoint
+  // that could set it. Touches only IsActive server-side; Name/City/
+  // State/PinCode/Code are untouched.
+  const [toggleError, setToggleError] = useState('')
   const toggle = useMutation({
-    mutationFn: (id: number) => api.patch(`/api/locations/${id}/toggle-active`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['locations'] }),
+    mutationFn: (l: Location) => api.patch(`/api/locations/${l.id}/status`, { isActive: !l.isActive }),
+    onSuccess: () => { setToggleError(''); qc.invalidateQueries({ queryKey: ['locations'] }) },
+    onError: () => setToggleError('Could not update location status. Please try again.'),
   })
 
   const columns: Column<Location>[] = [
@@ -43,7 +52,7 @@ export default function LocationsPage() {
       <Badge variant={l.isActive ? 'success' : 'danger'}>{l.isActive ? 'Active' : 'Inactive'}</Badge>
     )},
     { key: 'actions', label: '', render: l => (
-      <button onClick={() => toggle.mutate(l.id)}
+      <button onClick={() => toggle.mutate(l)}
         className="text-xs text-blue-600 hover:underline">
         {l.isActive ? 'Deactivate' : 'Activate'}
       </button>
@@ -82,6 +91,11 @@ export default function LocationsPage() {
       )}
 
       <Card>
+        {toggleError && (
+          <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            {toggleError}
+          </div>
+        )}
         <DataTable columns={columns} data={locations} isLoading={isLoading} />
       </Card>
     </div>
