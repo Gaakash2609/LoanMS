@@ -18,7 +18,13 @@ export default function AuditLogPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['audit', page, entity],
-    queryFn: () => api.get<ApiResponse<{ items: AuditLog[]; totalCount: number; totalPages: number }>>(
+    // BUGFIX (confirmed real, pre-existing gap — Phase 8 audit):
+    // AuditController.GetLogs (LoanMS.API/Controllers/AuditController.cs)
+    // returns { items, total, page, pageSize, totalPages } — the property
+    // is `total`, not `totalCount`. items/totalPages already matched, so
+    // the table and pagination-buttons worked correctly; only the count
+    // read below (data?.totalCount) was always undefined.
+    queryFn: () => api.get<ApiResponse<{ items: AuditLog[]; total: number; totalPages: number }>>(
       '/api/audit', { params: { page, pageSize: 30, entity: entity || undefined } }).then(r => r.data.data),
     staleTime: 30_000,
   })
@@ -51,7 +57,7 @@ export default function AuditLogPage() {
         } />
       <Card>
         <DataTable columns={columns} data={data?.items} isLoading={isLoading}
-          totalPages={data?.totalPages} currentPage={page} onPageChange={setPage} totalCount={data?.totalCount} />
+          totalPages={data?.totalPages} currentPage={page} onPageChange={setPage} totalCount={data?.total} />
       </Card>
     </div>
   )

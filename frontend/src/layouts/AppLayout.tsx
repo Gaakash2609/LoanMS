@@ -40,13 +40,13 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/tickets',        label: 'Tickets',         icon: Ticket },
   { to: '/profile',        label: 'My Profile',      icon: UserCircle },
   // Manager+
-  { to: '/payout',         label: 'Payout',          icon: IndianRupee,   roles: ['Admin','Manager'] },
+  { to: '/payout',         label: 'Payout',          icon: IndianRupee,   roles: ['Admin','Manager','Accounts'] },
   { to: '/reports',        label: 'Reports',         icon: BarChart3,     roles: ['Admin','Manager'] },
   { to: '/teams',          label: 'Teams',           icon: Building2,     roles: ['Admin','Manager'] },
-  { to: '/dsa',            label: 'DSA',             icon: Briefcase,     roles: ['Admin','Manager'] },
+  { to: '/dsa',            label: 'DSA',             icon: Briefcase,     roles: ['Admin','Manager','Sales','ProductTeam'] },
   { to: '/locations',      label: 'Locations',       icon: MapPin,        roles: ['Admin','Manager'] },
   { to: '/banks',          label: 'Banks',           icon: BankIcon,      roles: ['Admin','Manager'] },
-  { to: '/lender-config',  label: 'Lender Config',   icon: Grid,          roles: ['Admin','Manager'] },
+  { to: '/lender-config',  label: 'Lender Config',   icon: Grid,          roles: ['Admin','Manager','ProductTeam'] },
   { to: '/incred',         label: 'InCred',          icon: ExternalLink,  roles: ['Admin','Manager'] },
   // Admin only
   { to: '/users',          label: 'Users',           icon: UserCog,       roles: ['Admin'] },

@@ -256,7 +256,23 @@ export default function LoanDetailPage() {
   if (!loan) return <div className="p-8 text-center text-gray-500">Loan not found</div>
 
   const actions = TRANSITIONS[loan.status] ?? []
-  const canAct = user?.role === 'Admin' || user?.role === 'Manager'
+  // BUGFIX (confirmed real, pre-existing gap — Phase 11 audit): every
+  // status-transition button below (Submit/Approve/Reject/Disburse, via
+  // handleAction → updateStatus.mutate) goes through the SAME, single,
+  // generic PATCH /api/loans/{id}/status endpoint (loansApi.updateStatus)
+  // — confirmed the dedicated /submit,/approve,/reject,/disburse routes
+  // on LoansController exist but are never called from this page at all.
+  // That one endpoint's actual [Authorize(Roles=...)] is
+  // "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager" —
+  // canAct previously only checked Admin/Manager, hiding these buttons
+  // entirely from LoginTeam/TeamLeader/LocationHead/OperationManager even
+  // though the backend already lets them act. Accounts and ProductTeam
+  // are deliberately NOT added here — they're authorized on
+  // /assignment,/bank-lines,/sanction-detail, none of which this page has
+  // any UI for; adding them to canAct would show status-transition
+  // buttons that call an endpoint they're not actually authorized on.
+  const canAct = ['Admin', 'Manager', 'LoginTeam', 'TeamLeader', 'LocationHead', 'OperationManager']
+    .includes(user?.role ?? '')
 
   const handleAction = (label: string) => {
     const newStatus = STATUS_MAP[label]

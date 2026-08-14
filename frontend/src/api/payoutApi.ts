@@ -21,6 +21,31 @@ export interface PayoutRule {
   minPayout?: number; maxPayout?: number; isActive: boolean; notes?: string
 }
 
+// Exact shape of ClaimCreateDto (LoanMS.API/Controllers/PayoutController.cs)
+// — claimAmount/claimType are only honored server-side for Admin/Manager
+// callers reconciling on another eligible claimant's behalf; for every
+// other role the server derives claimType from the caller's own
+// authenticated role and computes claimAmount from the configured
+// PayoutRule, ignoring whatever is sent.
+export interface ClaimCreateRequest {
+  loanId: number
+  claimAmount?: number
+  month?: string
+  notes?: string
+  claimType?: string
+}
+
+export interface ClaimCreateResponse {
+  id: number; claimAmount: number; claimType: string
+}
+
+// Exact shape of GET /api/payout/my-earnings's response — grouped by the
+// caller's own claim-status, server-scoped to ClaimedByUserId == caller
+// (confirmed in PayoutController.MyEarnings).
+export interface EarningsGroup {
+  status: string; total: number; count: number
+}
+
 export const payoutApi = {
   // BUGFIX (confirmed real, pre-existing gap — Phase 7 audit, same
   // root-cause class as Phase 4 Part C / Phase 5's fixes):
@@ -39,4 +64,11 @@ export const payoutApi = {
     api.get<ApiResponse<PayoutRule[]>>('/api/payout-rules'),
   updateRule: (id: number, data: Partial<PayoutRule>) =>
     api.put<ApiResponse<PayoutRule>>(`/api/payout-rules/${id}`, data),
+  // Phase 11 Priority-2 — genuine, existing, working backend endpoints
+  // (POST /api/payout, GET /api/payout/my-earnings) that had no frontend
+  // wiring at all before this fix.
+  submitClaim: (data: ClaimCreateRequest) =>
+    api.post<ApiResponse<ClaimCreateResponse>>('/api/payout', data),
+  getMyEarnings: () =>
+    api.get<ApiResponse<EarningsGroup[]>>('/api/payout/my-earnings'),
 }

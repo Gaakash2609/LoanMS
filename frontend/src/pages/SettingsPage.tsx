@@ -14,6 +14,12 @@ export default function SettingsPage() {
   const qc = useQueryClient()
   const [editKey, setEditKey] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  // Which category the setting being edited belongs to — captured when
+  // Edit is clicked (see the "Edit" button below), sent back unchanged on
+  // Save so Upsert's unconditional `existing.Category = dto.Category`
+  // (see settingsApi.ts's doc-comment) never wipes it.
+  const [editCategory, setEditCategory] = useState<string | undefined>(undefined)
+  const [saveError, setSaveError] = useState('')
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ['settings'],
@@ -27,11 +33,21 @@ export default function SettingsPage() {
   })
 
   const update = useMutation({
-    mutationFn: ({ key, value }: { key: string; value: string }) =>
-      settingsApi.update(key, value),
+    mutationFn: ({ key, value, category }: { key: string; value: string; category?: string }) =>
+      settingsApi.update(key, value, category),
     onSuccess: () => {
+      setSaveError('')
+      // Same convention as the rest of this codebase (see e.g. Phase 11's
+      // payout-claim submit) — invalidate rather than locally splice the
+      // new value into cache, so what's displayed always comes back from
+      // a real GET /api/settings re-fetch, never an optimistic/local-only
+      // update.
       qc.invalidateQueries({ queryKey: ['settings'] })
       setEditKey(null)
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
+      setSaveError(msg?.message || msg?.errors?.join(' ') || 'Could not save this setting. Please try again.')
     },
   })
 
@@ -59,6 +75,12 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="System Settings" subtitle="Configure application behavior" />
+
+      {saveError && (
+        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {saveError}
+        </div>
+      )}
 
       {/* AI Status */}
       <Card>
@@ -91,9 +113,9 @@ export default function SettingsPage() {
                       onChange={e => setEditValue(e.target.value)}
                       className="border border-gray-300 rounded-lg px-2 py-1 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
-                    <Button size="sm" onClick={() => update.mutate({ key: setting.key, value: editValue })}
+                    <Button size="sm" onClick={() => update.mutate({ key: setting.key, value: editValue, category: editCategory })}
                       loading={update.isPending}>Save</Button>
-                    <Button size="sm" variant="secondary" onClick={() => setEditKey(null)}>Cancel</Button>
+                    <Button size="sm" variant="secondary" onClick={() => { setEditKey(null); setSaveError('') }}>Cancel</Button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -101,7 +123,7 @@ export default function SettingsPage() {
                       {setting.value.length > 30 ? setting.value.slice(0, 30) + '...' : setting.value}
                     </span>
                     <button
-                      onClick={() => { setEditKey(setting.key); setEditValue(setting.value) }}
+                      onClick={() => { setEditKey(setting.key); setEditValue(setting.value); setEditCategory(setting.category); setSaveError('') }}
                       className="text-xs text-blue-600 hover:underline"
                     >
                       Edit

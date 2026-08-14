@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { payoutApi, type PayoutClaim } from '@/api/payoutApi'
+import { useAuthStore } from '@/store/authStore'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -34,6 +35,148 @@ function StatusCard({ icon, count, label, description, color }: StatusCardProps)
 
 const PAGE_SIZE = 20
 
+// ── Phase 11 Priority-2: New Claim modal ────────────────────────────────────
+// Reuses the existing POST /api/payout endpoint exactly as-is (ClaimCreateDto
+// — see payoutApi.ts's doc-comment). claimAmount/claimType are only shown
+// for Admin/Manager, matching the backend's own documented behavior that
+// these fields are ignored for every other role (server computes the amount
+// from the configured PayoutRule and derives claimType from the caller's own
+// role instead).
+function NewClaimModal({ isAdminOrManager, onClose, onSuccess }: {
+  isAdminOrManager: boolean
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const [loanId, setLoanId] = useState('')
+  const [claimAmount, setClaimAmount] = useState('')
+  const [claimType, setClaimType] = useState('')
+  const [month, setMonth] = useState('')
+  const [notes, setNotes] = useState('')
+  const [error, setError] = useState('')
+
+  const submit = useMutation({
+    mutationFn: () => payoutApi.submitClaim({
+      loanId: Number(loanId),
+      claimAmount: claimAmount ? Number(claimAmount) : undefined,
+      claimType: claimType || undefined,
+      month: month || undefined,
+      notes: notes || undefined,
+    }),
+    onSuccess: () => onSuccess(),
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
+      setError(msg?.message || msg?.errors?.join(' ') || 'Could not submit claim. Please try again.')
+    },
+  })
+
+  function handleSubmit() {
+    const idNum = Number(loanId)
+    if (!loanId || !Number.isFinite(idNum) || idNum <= 0) { setError('Enter a valid Loan ID.'); return }
+    setError('')
+    // disabled-while-pending on the button below is the actual duplicate-
+    // submission guard — this early return is a defensive second layer.
+    if (submit.isPending) return
+    submit.mutate()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-md p-5">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm font-semibold">New Payout Claim</p>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        {error && (
+          <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+        )}
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Loan ID *</label>
+            <input type="number" value={loanId} onChange={e => setLoanId(e.target.value)}
+              placeholder="e.g. 1042" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+          </div>
+
+          {isAdminOrManager && (
+            <>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Claim Amount (optional — within rule bounds)</label>
+                <input type="number" value={claimAmount} onChange={e => setClaimAmount(e.target.value)}
+                  placeholder="Leave blank to use the configured rule" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Claim Type (reconciling on another claimant's behalf)</label>
+                <select value={claimType} onChange={e => setClaimType(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <option value="">Self (default)</option>
+                  {['Sales', 'Dsa', 'Partner', 'Login', 'Manager', 'Admin'].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            </>
+          )}
+
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Month</label>
+            <input value={month} onChange={e => setMonth(e.target.value)}
+              placeholder="e.g. Aug 2026" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Notes</label>
+            <input value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Optional" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-5">
+          <Button size="sm" loading={submit.isPending} disabled={submit.isPending} onClick={handleSubmit}>Submit Claim</Button>
+          <Button size="sm" variant="secondary" onClick={onClose}>Cancel</Button>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// ── Phase 11 Priority-2: Earnings modal ─────────────────────────────────────
+// Reuses the existing GET /api/payout/my-earnings endpoint exactly as-is —
+// server-scoped to the caller's own claims, grouped by status.
+function EarningsModal({ onClose }: { onClose: () => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['payout-earnings'],
+    queryFn: () => payoutApi.getMyEarnings().then(r => r.data.data ?? []),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-md p-5">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm font-semibold">My Earnings</p>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        {isLoading ? (
+          <p className="text-sm text-gray-400 py-6 text-center">Loading…</p>
+        ) : !data?.length ? (
+          <p className="text-sm text-gray-400 py-6 text-center">No claims yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {data.map(g => (
+              <div key={g.status} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <Badge variant={STATUS_VARIANTS[g.status] ?? 'default'}>{g.status}</Badge>
+                  <span className="text-xs text-gray-500 ml-2">{g.count} claim{g.count !== 1 ? 's' : ''}</span>
+                </div>
+                <span className="font-semibold text-green-700">{formatCurrency(g.total)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+
 export default function PayoutPage() {
   const [activeTab, setActiveTab] = useState<'claims' | 'management'>('claims')
   const [searchQuery, setSearchQuery] = useState('')
@@ -41,6 +184,14 @@ export default function PayoutPage() {
   const [filterMonth, setFilterMonth] = useState('')
   const [page, setPage] = useState(1)
   const qc = useQueryClient()
+  const user = useAuthStore(s => s.user)
+  const isAdminOrManager = user?.role === 'Admin' || user?.role === 'Manager'
+
+  // Phase 11 Priority-2 — New Claim / Earnings modal visibility. Kept as
+  // simple local state, same convention as the show/hide modals already
+  // used elsewhere in this app (e.g. UsersPage.tsx's mapping modal).
+  const [showNewClaim, setShowNewClaim] = useState(false)
+  const [showEarnings, setShowEarnings] = useState(false)
 
   // BUGFIX (confirmed real, pre-existing gap — Phase 7 audit): see
   // payoutApi.ts's getClaims() doc-comment. PayoutController.GetAll
@@ -148,7 +299,7 @@ export default function PayoutPage() {
                 <p className="text-gray-600 text-sm mt-1">Track your commission claims, disbursements and payment receipts</p>
               </div>
               <div className="flex gap-3">
-                <button className="flex items-center gap-2 px-4 py-2 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors">
+                <button onClick={() => setShowEarnings(true)} className="flex items-center gap-2 px-4 py-2 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors">
                   <Download className="w-4 h-4" />
                   Earnings
                 </button>
@@ -156,7 +307,7 @@ export default function PayoutPage() {
                   <ClipboardList className="w-4 h-4" />
                   Export
                 </button>
-                <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                <button onClick={() => setShowNewClaim(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                   <Plus className="w-4 h-4" />
                   New Claim
                 </button>
@@ -306,7 +457,7 @@ export default function PayoutPage() {
                   <Download className="w-4 h-4" />
                   Export CSV
                 </button>
-                <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                <button onClick={() => setShowNewClaim(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                   <Plus className="w-4 h-4" />
                   New Claim
                 </button>
@@ -449,6 +600,22 @@ export default function PayoutPage() {
           </div>
         )}
       </div>
+
+      {showNewClaim && (
+        <NewClaimModal
+          isAdminOrManager={isAdminOrManager}
+          onClose={() => setShowNewClaim(false)}
+          onSuccess={() => {
+            setShowNewClaim(false)
+            // Same invalidation-key the existing status-update mutation
+            // already uses — refreshes the list/KPI-cards/status-cards on
+            // both tabs, since they all derive from the same ['payouts']
+            // query.
+            qc.invalidateQueries({ queryKey: ['payouts'] })
+          }}
+        />
+      )}
+      {showEarnings && <EarningsModal onClose={() => setShowEarnings(false)} />}
     </div>
   )
 }

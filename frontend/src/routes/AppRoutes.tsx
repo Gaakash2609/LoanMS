@@ -60,16 +60,49 @@ export default function AppRoutes() {
             {/* Tracking embedded under loan */}
             <Route path="/loans/:loanId/tracking" element={<TrackingPage />} />
 
+            {/* Admin/Manager/Accounts — Payout: backend PayoutController.
+                UpdateStatus already authorizes Admin,Manager,Accounts; this
+                route-guard previously only allowed Admin,Manager, blocking
+                Accounts-role users from a page the backend already lets
+                them act on. Split into its own guard rather than widening
+                the shared Admin,Manager block below (which would have
+                also widened Reports/Teams/Locations/Banks/LenderConfig/
+                Incred to Accounts — none of those were part of this fix). */}
+            <Route element={<ProtectedRoute allowedRoles={['Admin', 'Manager', 'Accounts']} />}>
+              <Route path="/payout"              element={<PayoutPage />} />
+            </Route>
+
+            {/* Admin/Manager/Sales/ProductTeam — DSA: backend DsaController's
+                Create/Update/Upload/SetStatus already authorize
+                Admin,Sales,ProductTeam; this route-guard previously only
+                allowed Admin,Manager, blocking Sales and ProductTeam from a
+                page the backend already lets them act on. Split into its
+                own guard for the same reason as Payout above — Manager's
+                existing access is preserved even though Manager isn't in
+                DsaController's own role list, since removing it wasn't
+                part of this fix. */}
+            <Route element={<ProtectedRoute allowedRoles={['Admin', 'Manager', 'Sales', 'ProductTeam']} />}>
+              <Route path="/dsa"                 element={<DsaPage />} />
+            </Route>
+
             {/* Admin/Manager */}
             <Route element={<ProtectedRoute allowedRoles={['Admin', 'Manager']} />}>
-              <Route path="/payout"              element={<PayoutPage />} />
               <Route path="/reports"             element={<ReportsPage />} />
               <Route path="/teams"               element={<TeamsPage />} />
-              <Route path="/dsa"                 element={<DsaPage />} />
               <Route path="/locations"           element={<LocationsPage />} />
               <Route path="/banks"               element={<BanksPage />} />
-              <Route path="/lender-config"       element={<LenderConfigPage />} />
               <Route path="/incred"              element={<IncredPage />} />
+            </Route>
+
+            {/* Admin/Manager/ProductTeam — Lender Config: backend
+                LenderConfigController's Companies/Categories/Lines mutation
+                endpoints already authorize Admin,ProductTeam; this
+                route-guard previously only allowed Admin,Manager, blocking
+                ProductTeam from a page the backend already lets them manage.
+                Split into its own guard for the same reason as Phase 10's
+                Payout/DSA fixes — Manager's existing access is preserved. */}
+            <Route element={<ProtectedRoute allowedRoles={['Admin', 'Manager', 'ProductTeam']} />}>
+              <Route path="/lender-config"       element={<LenderConfigPage />} />
             </Route>
 
             {/* Admin only */}

@@ -13,6 +13,19 @@ export interface Task {
   createdAt: string
 }
 
+// Exact shape of TaskCreateDto (LoanMS.API/Controllers/TasksController.cs)
+// — genuinely different from the Task list-shape above (that one has
+// assignedTo as a resolved name-string; the backend's create-DTO wants
+// AssignedToUserId as a required number).
+export interface TaskCreateRequest {
+  title: string
+  description?: string
+  priority?: string
+  dueDate?: string
+  loanId?: number
+  assignedToUserId: number
+}
+
 export const tasksApi = {
   // BUGFIX (confirmed real, pre-existing gap — Phase 5 audit, same
   // root-cause class as Phase 4 Part C's UsersController fix):
@@ -26,7 +39,7 @@ export const tasksApi = {
   // page/pageSize illusion is removed, since the backend never paginates.
   getAll: (params?: { loanId?: number; completed?: boolean }) =>
     api.get<ApiResponse<Task[]>>('/api/tasks', { params }),
-  create: (data: Partial<Task>) => api.post<ApiResponse<Task>>('/api/tasks', data),
+  create: (data: TaskCreateRequest) => api.post<ApiResponse<{ id: number }>>('/api/tasks', data),
   update: (id: number, data: Partial<Task>) => api.put<ApiResponse<Task>>(`/api/tasks/${id}`, data),
   complete: (id: number) => api.patch<ApiResponse<Task>>(`/api/tasks/${id}/complete`),
   delete: (id: number) => api.delete(`/api/tasks/${id}`),

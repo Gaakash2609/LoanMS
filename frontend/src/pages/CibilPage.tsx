@@ -19,15 +19,86 @@ interface CibilReport {
   paymentHistory: { dpdHeatmap: { healthStatus: string; last3MonthsDPD: number } }
 }
 
+// Exact shape of CibilAccountDto (LoanMS.Application/DTOs/Cibil) — as
+// returned by GET /cibil/accounts.
+interface CibilAccount {
+  id: number
+  lenderName?: string
+  loanType?: string
+  ownership?: string
+  accountNumberMasked?: string
+  openDate?: string
+  closedDate?: string
+  reportDate?: string
+  lastPaymentDate?: string
+  sanctionAmount?: number
+  currentBalance?: number
+  emiAmount?: number
+  tenureMonths?: number
+  remainingTenure?: number
+  paymentFrequency?: string
+  accountStatus?: string
+  currentDPD?: number
+  isWrittenOff?: boolean
+  isSettled?: boolean
+}
+
+// Exact shape of CibilPaymentHistoryDto / CibilMonthlyPaymentStatusDto /
+// CibilDPDHeatmapDto (LoanMS.Application/DTOs/Cibil) — as returned by
+// GET /cibil/payment-history.
+interface CibilPaymentHistory {
+  monthly: {
+    reportMonth: string
+    dpdStatus?: string
+    daysOverdue: number
+    isMissedPayment: boolean
+    isWriteOff: boolean
+    isSettlement: boolean
+  }[]
+  dpdHeatmap: {
+    last3MonthsDPD: number
+    last6MonthsDPD: number
+    last12MonthsDPD: number
+    healthStatus?: string
+  }
+  missedPaymentAlerts: string[]
+}
+
+// Exact shape of CibilRiskAnalysisDto / CibilRiskFactorDto
+// (LoanMS.Application/DTOs/Cibil) — as returned by GET /cibil/risk-analysis.
+interface CibilRiskAnalysis {
+  riskLevel?: string
+  riskGrade?: string
+  bureauRiskScore: number
+  approvalProbability: number
+  lendingRecommendation?: string
+  riskFactors: { factor?: string; impact?: string; weight: number; description?: string }[]
+  riskWarnings: string[]
+  recommendations: string[]
+}
+
 export default function CibilPage() {
   const [customerId, setCustomerId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'overview' | 'accounts' | 'history' | 'risk'>('overview')
+  // Confirmed real, pre-existing gap (Phase 14 audit): GET /cibil/accounts
+  // genuinely paginates server-side (page/pageSize, default 1/10 — see
+  // CibilController.GetAccounts) — this page never sent either param, so
+  // any customer with more than 10 accounts silently had the rest hidden,
+  // with no pagination UI at all. accountsPage resets to 1 whenever the
+  // customer changes (see the effect below), so switching customers never
+  // leaves a stale page-number applied to the new customer's accounts.
+  const [accountsPage, setAccountsPage] = useState(1)
+  const ACCOUNTS_PAGE_SIZE = 10
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const cId = params.get('customerId')
     if (cId) setCustomerId(parseInt(cId))
   }, [])
+
+  // Customer change → pagination reset, so a previously-viewed customer's
+  // page-number is never silently applied to a different customer.
+  useEffect(() => { setAccountsPage(1) }, [customerId])
 
   const { data: reportData, isLoading, error, refetch } = useQuery({
     queryKey: ['cibil-report', customerId],
@@ -39,32 +110,46 @@ export default function CibilPage() {
     enabled: !!customerId,
   })
 
-  const { data: accountsData } = useQuery({
-    queryKey: ['cibil-accounts', customerId],
+  // BUGFIX (Phase 14): query key now includes accountsPage/pageSize, so a
+  // page-change genuinely triggers a fresh fetch (and each page's result
+  // is cached separately) instead of silently reusing page-1's cached
+  // response.
+  const { data: accountsData, isLoading: accountsLoading, isError: accountsError } = useQuery({
+    queryKey: ['cibil-accounts', customerId, accountsPage],
     queryFn: async () => {
       if (!customerId) return []
-      const res = await api.get(`/api/cibil/accounts?customerId=${customerId}`)
-      return res.data.data
+      const res = await api.get<ApiResponse<CibilAccount[]>>(
+        `/api/cibil/accounts?customerId=${customerId}&page=${accountsPage}&pageSize=${ACCOUNTS_PAGE_SIZE}`
+      )
+      return res.data.data ?? []
     },
     enabled: !!customerId && activeTab === 'accounts',
   })
 
-  useQuery({
+  // BUGFIX (Phase 14): the response was fetched but never captured/used —
+  // History tab always showed a hardcoded "Loading payment history..."
+  // placeholder even after this genuinely succeeded. Now captured and
+  // rendered below. No .items/array assumption — CibilPaymentHistoryDto
+  // is a single object ({monthly, dpdHeatmap, missedPaymentAlerts}), not
+  // a list.
+  const { data: historyData, isLoading: historyLoading, isError: historyError } = useQuery({
     queryKey: ['cibil-history', customerId],
     queryFn: async () => {
       if (!customerId) return null
-      const res = await api.get(`/api/cibil/payment-history?customerId=${customerId}`)
-      return res.data.data
+      const res = await api.get<ApiResponse<CibilPaymentHistory>>(`/api/cibil/payment-history?customerId=${customerId}`)
+      return res.data.data ?? null
     },
     enabled: !!customerId && activeTab === 'history',
   })
 
-  useQuery({
+  // BUGFIX (Phase 14): same issue as History above — response fetched but
+  // discarded. Now captured and rendered below.
+  const { data: riskData, isLoading: riskLoading, isError: riskError } = useQuery({
     queryKey: ['cibil-risk', customerId],
     queryFn: async () => {
       if (!customerId) return null
-      const res = await api.get(`/api/cibil/risk-analysis?customerId=${customerId}`)
-      return res.data.data
+      const res = await api.get<ApiResponse<CibilRiskAnalysis>>(`/api/cibil/risk-analysis?customerId=${customerId}`)
+      return res.data.data ?? null
     },
     enabled: !!customerId && activeTab === 'risk',
   })
@@ -308,23 +393,180 @@ export default function CibilPage() {
       {activeTab === 'accounts' && (
         <Card>
           <CardHeader title={<><ClipboardList size={16} className="text-gray-500" /> Loan Accounts</>} />
-          <div className="p-6 text-center text-gray-500">
-            {accountsData && accountsData.length > 0 ? `${accountsData.length} accounts` : 'No accounts found'}
-          </div>
+          {accountsLoading ? (
+            <div className="p-6 text-center text-gray-500">Loading accounts...</div>
+          ) : accountsError ? (
+            <div className="p-6 text-center text-red-600">Failed to load accounts.</div>
+          ) : !accountsData?.length ? (
+            <div className="p-6 text-center text-gray-500">No accounts found.</div>
+          ) : (
+            <>
+              <div className="divide-y divide-gray-100">
+                {accountsData.map(acc => (
+                  <div key={acc.id} className="p-4 flex items-center justify-between text-sm">
+                    <div>
+                      <p className="font-medium text-gray-900">{acc.lenderName ?? '—'}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{acc.loanType ?? '—'} · {acc.accountStatus ?? '—'}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold">₹{(acc.currentBalance ?? 0).toLocaleString('en-IN')}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">EMI ₹{(acc.emiAmount ?? 0).toLocaleString('en-IN')}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* BUGFIX (Phase 14): the backend paginates but returns no
+                  total-count/total-pages metadata (confirmed — plain
+                  List<CibilAccountDto>) — no fabricated total is shown.
+                  Next is only enabled when this page came back full,
+                  which is the only safe signal that another page might
+                  exist. */}
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+                <button
+                  disabled={accountsPage <= 1}
+                  onClick={() => setAccountsPage(p => Math.max(1, p - 1))}
+                  className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-gray-500">Page {accountsPage}</span>
+                <button
+                  disabled={accountsData.length < ACCOUNTS_PAGE_SIZE}
+                  onClick={() => setAccountsPage(p => p + 1)}
+                  className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                  Next
+                </button>
+              </div>
+            </>
+          )}
         </Card>
       )}
 
       {activeTab === 'history' && (
         <Card>
           <CardHeader title={<><TrendingUp size={16} className="text-gray-500" /> Payment History</>} />
-          <div className="p-6 text-center text-gray-500">Loading payment history...</div>
+          {historyLoading ? (
+            <div className="p-6 text-center text-gray-500">Loading payment history...</div>
+          ) : historyError ? (
+            <div className="p-6 text-center text-red-600">Failed to load payment history.</div>
+          ) : !historyData ? (
+            <div className="p-6 text-center text-gray-500">No payment history available.</div>
+          ) : (
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-gray-50 p-4 rounded-lg text-center">
+                  <p className="text-xs text-gray-600 mb-1">Last 3 Months DPD</p>
+                  <p className="text-xl font-bold">{historyData.dpdHeatmap.last3MonthsDPD}</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-lg text-center">
+                  <p className="text-xs text-gray-600 mb-1">Last 6 Months DPD</p>
+                  <p className="text-xl font-bold">{historyData.dpdHeatmap.last6MonthsDPD}</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-lg text-center">
+                  <p className="text-xs text-gray-600 mb-1">Last 12 Months DPD</p>
+                  <p className="text-xl font-bold">{historyData.dpdHeatmap.last12MonthsDPD}</p>
+                </div>
+              </div>
+
+              {historyData.missedPaymentAlerts.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-sm font-semibold text-red-800 mb-2">Missed Payment Alerts</p>
+                  <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
+                    {historyData.missedPaymentAlerts.map((alert, i) => <li key={i}>{alert}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {historyData.monthly.length > 0 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">Monthly Status</p>
+                  <div className="divide-y divide-gray-100 border border-gray-100 rounded-lg">
+                    {historyData.monthly.map((m, i) => (
+                      <div key={i} className="flex items-center justify-between px-3 py-2 text-sm">
+                        <span>{m.reportMonth}</span>
+                        <span className="text-gray-500">{m.dpdStatus ?? '—'} · {m.daysOverdue} DPD</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </Card>
       )}
 
       {activeTab === 'risk' && (
         <Card>
           <CardHeader title={<><AlertTriangle size={16} className="text-amber-500" /> Risk Assessment</>} />
-          <div className="p-6 text-center text-gray-500">Loading risk analysis...</div>
+          {riskLoading ? (
+            <div className="p-6 text-center text-gray-500">Loading risk analysis...</div>
+          ) : riskError ? (
+            <div className="p-6 text-center text-red-600">Failed to load risk analysis.</div>
+          ) : !riskData ? (
+            <div className="p-6 text-center text-gray-500">No risk analysis available.</div>
+          ) : (
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-gray-50 p-4 rounded-lg text-center">
+                  <p className="text-xs text-gray-600 mb-1">Risk Level</p>
+                  <p className="text-lg font-bold">{riskData.riskLevel ?? '—'}</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-lg text-center">
+                  <p className="text-xs text-gray-600 mb-1">Risk Grade</p>
+                  <p className="text-lg font-bold">{riskData.riskGrade ?? '—'}</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-lg text-center">
+                  <p className="text-xs text-gray-600 mb-1">Bureau Risk Score</p>
+                  <p className="text-lg font-bold">{riskData.bureauRiskScore}</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-lg text-center">
+                  <p className="text-xs text-gray-600 mb-1">Approval Probability</p>
+                  <p className="text-lg font-bold">{riskData.approvalProbability}%</p>
+                </div>
+              </div>
+
+              {riskData.lendingRecommendation && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm font-semibold text-blue-900">Recommendation: {riskData.lendingRecommendation}</p>
+                </div>
+              )}
+
+              {riskData.riskFactors.length > 0 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">Risk Factors</p>
+                  <div className="space-y-1.5">
+                    {riskData.riskFactors.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2">
+                        <span>{f.factor ?? '—'}{f.description ? ` — ${f.description}` : ''}</span>
+                        <span className={`text-xs font-medium ${f.impact === 'Positive' ? 'text-green-600' : f.impact === 'Negative' ? 'text-red-600' : 'text-gray-500'}`}>
+                          {f.impact ?? '—'} ({f.weight})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {riskData.riskWarnings.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-sm font-semibold text-red-800 mb-2">Warnings</p>
+                  <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
+                    {riskData.riskWarnings.map((w, i) => <li key={i}>{w}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {riskData.recommendations.length > 0 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">Recommendations</p>
+                  <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
+                    {riskData.recommendations.map((r, i) => <li key={i}>{r}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </Card>
       )}
     </div>

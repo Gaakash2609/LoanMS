@@ -15,30 +15,52 @@ interface DsaPartner {
   phone?: string; city?: string; isActive: boolean; createdAt: string
 }
 
+const PAGE_SIZE = 20
+
 export default function DsaPage() {
   const [page, setPage] = useState(1)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', code: '', email: '', phone: '', city: '' })
   const qc = useQueryClient()
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['dsa', page],
-    queryFn: () => api.get<ApiResponse<{ items: DsaPartner[]; totalCount: number; totalPages: number }>>(
-      '/api/dsa', { params: { page, pageSize: 20 } }).then(r => r.data.data),
+  // BUGFIX (confirmed real, pre-existing gap — Phase 9 audit, same
+  // root-cause class as Phase 4 Part C / Phase 5 / Phase 7's fixes):
+  // DsaController.GetAll (LoanMS.API/Controllers/DsaController.cs)
+  // returns a plain ApiResponseDto<object> wrapping a raw array
+  // (`return Ok(ApiResponseDto<object>.Ok(dsa))`, where dsa is a
+  // List<> — no page/pageSize params are even accepted) — not a paged
+  // shape — so data?.items/totalCount/totalPages were always undefined
+  // and the table showed zero DSA/Partner records regardless of how many
+  // actually existed. The Phase 6 fix only touched the status-toggle
+  // mutation below and never touched this list-fetch, so this bug
+  // survived Phase 6 untouched. Corrected to fetch the full array once
+  // and paginate client-side, same pattern already proven in
+  // UsersPage.tsx/TasksPage.tsx/TicketsPage.tsx/PayoutPage.tsx. No
+  // search/filter existed on this page before this fix (confirmed by
+  // inspection), so there is nothing to preserve there beyond not
+  // introducing one.
+  const { data: allDsa, isLoading } = useQuery({
+    queryKey: ['dsa'],
+    queryFn: () => api.get<ApiResponse<DsaPartner[]>>('/api/dsa').then(r => r.data.data ?? []),
   })
+  const dsaList = allDsa ?? []
+  const totalCount = dsaList.length
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const pageItems = dsaList.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const create = useMutation({
     mutationFn: () => api.post('/api/dsa', form),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['dsa'] }); setShowForm(false); setForm({ name: '', code: '', email: '', phone: '', city: '' }) },
   })
 
-  // BUGFIX (Phase 6, corrected): the first Phase 6 attempt called PATCH
+  // BUGFIX (Phase 6, corrected — kept fully intact, untouched by this
+  // Phase 9 fix): the first Phase 6 attempt called PATCH
   // /api/dsa/{id}/toggle-active (a route that never existed — every click
   // 404'd), then an unsafe follow-up tried reconstructing a full PUT
   // payload from the row's own fields — but DsaController.GetAll never
   // exposes MappedSalesUserId's raw id (only the resolved name), so that
   // full-PUT would have silently cleared any existing sales-mapping on
-  // toggle. Corrected to use a new, dedicated, minimal endpoint
+  // toggle. Corrected to use a dedicated, minimal endpoint
   // (DsaController.SetStatus) that touches only IsActive server-side —
   // no other field is read or sent, so nothing else can be cleared.
   const [toggleError, setToggleError] = useState('')
@@ -70,7 +92,7 @@ export default function DsaPage() {
 
   return (
     <div>
-      <PageHeader title="DSA Management" subtitle={`${data?.totalCount ?? 0} partners`}
+      <PageHeader title="DSA Management" subtitle={`${totalCount} partners`}
         action={<Button size="sm" onClick={() => setShowForm(true)}><Plus size={14} className="mr-1" />Add DSA</Button>} />
 
       {showForm && (
@@ -106,8 +128,8 @@ export default function DsaPage() {
             {toggleError}
           </div>
         )}
-        <DataTable columns={columns} data={data?.items} isLoading={isLoading}
-          totalPages={data?.totalPages} currentPage={page} onPageChange={setPage} totalCount={data?.totalCount} />
+        <DataTable columns={columns} data={pageItems} isLoading={isLoading}
+          totalPages={totalPages} currentPage={page} onPageChange={setPage} totalCount={totalCount} />
       </Card>
     </div>
   )

@@ -16,7 +16,17 @@ export default function ProfilePage() {
   const [pwError, setPwError] = useState('')
 
   const changePassword = useMutation({
-    mutationFn: () => api.post<ApiResponse<null>>('/api/auth/change-password', pwForm),
+    // BUGFIX (confirmed real, pre-existing bug — Phase 13 audit): called
+    // POST /api/auth/change-password, a route that never existed —
+    // UsersController.ChangePassword (LoanMS.API/Controllers/
+    // UsersController.cs) is the real, existing endpoint, at
+    // POST /api/users/change-password (no [Authorize(Roles=...)]
+    // restriction beyond the class-level [Authorize] — any logged-in
+    // user can change their own password). Request-body fields
+    // (currentPassword/newPassword) already matched
+    // ChangePasswordRequestDto's CurrentPassword/NewPassword via ASP.NET
+    // Core's case-insensitive JSON binding — only the route was wrong.
+    mutationFn: () => api.post<ApiResponse<null>>('/api/users/change-password', pwForm),
     onSuccess: () => {
       setPwSuccess(true)
       setPwForm({ currentPassword: '', newPassword: '', confirmPassword: '' })

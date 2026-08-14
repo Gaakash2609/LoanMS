@@ -344,6 +344,44 @@ public class IncredController : BaseController
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // GET /api/incred/applications — read-only list for IncredPage.tsx's
+    // Applications tab. Confirmed real, pre-existing gap (Phase 15 audit):
+    // this route never existed anywhere in this controller — every request
+    // 404'd, so the tab always showed empty regardless of how many real
+    // InCred applications existed. Uses only existing Loan/Customer
+    // columns — no new database field, no migration.
+    //
+    // FIELD-MISMATCH NOTE (flagged rather than guessed silently): there is
+    // no single Loan.Amount column — the entity has RequestedAmount
+    // (decimal) and ApprovedAmount (decimal?) separately (confirmed via
+    // LoanListDto, the project's own established convention for exposing
+    // loan amounts). loanAmount here uses ApprovedAmount if the loan has
+    // one (more authoritative once sanctioned), falling back to
+    // RequestedAmount otherwise — a standard coalesce over two genuinely
+    // existing fields, not an invented one.
+    // ─────────────────────────────────────────────────────────────────────────
+    [HttpGet("applications")]
+    public async Task<IActionResult> GetApplications()
+    {
+        var apps = await _db.Loans
+            .AsNoTracking()
+            .Where(l => l.IncredApplicationId != null)
+            .Select(l => new
+            {
+                Id = l.Id,
+                LoanId = l.Id,
+                ApplicantName = l.Customer.FullName,
+                IncredAppId = l.IncredApplicationId,
+                LoanAmount = l.ApprovedAmount ?? l.RequestedAmount,
+                OfferStatus = l.IncredOfferStatus,
+                UpdatedAt = l.IncredLastSyncedAt
+            })
+            .ToListAsync();
+
+        return Ok(ApiResponseDto<object>.Ok(apps));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // GET /api/incred/status — check if credentials are configured
     // ─────────────────────────────────────────────────────────────────────────
     [HttpGet("status")]
