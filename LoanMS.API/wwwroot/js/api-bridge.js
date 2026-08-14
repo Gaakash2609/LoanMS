@@ -481,41 +481,25 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     window._bridgeTwSaveUserDetailPatched = true;
     var _orig = window.twSaveUserDetail;
     if (typeof _orig !== 'function') return;
+    // BUGFIX (confirmed real bug — "select Location Head, save, it becomes
+    // Sales Person"): twSaveUserDetail() in efin-app.js now already sends
+    // the authoritative PUT /users/{id} (with the CORRECT role mapped from
+    // the panel's actual <select> option values, e.g. "Location Head") plus
+    // the Locations/Teams syncs, all in one place. This patch used to fire
+    // a SECOND, competing PUT /users/{id} right after it, built from
+    // ROLE_KEY_TO_ENUM — a snake_case-keyed map (location_head, etc.) that
+    // was never going to match this panel's label-valued <select> ("Location
+    // Head", with a space and capitals). That lookup always missed and
+    // silently fell back to 'Sales', so this second call clobbered whatever
+    // correct role the first call had just saved — the user would pick
+    // "Location Head", watch it save, and see "Sales Person" stick instead.
+    // Just delegate to the (now-authoritative) original; no second save.
     window.twSaveUserDetail = function() {
-      var nameEl  = document.getElementById('tw-ud-name');
-      var emailEl = document.getElementById('tw-ud-email');
-      var roleEl  = document.getElementById('tw-ud-role');
-      var editingUser = (typeof window._twEditUserId === 'number' && window.twUsers && window.twUsers[window._twEditUserId])
-        ? window.twUsers[window._twEditUserId] : null;
-      var locVal   = (window._twUdLocs  || [])[0] || '';
-      var stVal    = (window._twUdSales || [])[0] || '';
-      var otVal    = (window._twUdOps   || [])[0] || '';
-
       var result = _orig.apply(this, arguments);
-
-      if (!editingUser || !editingUser._apiId || !nameEl || !nameEl.value.trim() || !emailEl || !emailEl.value.trim()) {
-        _syncUsers();
-        return result;
-      }
-      var payload = {
-        fullName: nameEl.value.trim(),
-        email: emailEl.value.trim().toLowerCase(),
-        role: ROLE_KEY_TO_ENUM[roleEl ? roleEl.value : ''] || 'Sales',
-        phoneNumber: editingUser.mobile || '',
-        locationName: locVal,
-        salesTeam: stVal,
-        opTeam: otVal,
-        isActive: editingUser.status !== 'inactive' && editingUser.status !== 'suspended'
-      };
-      apiReq('PUT', '/users/' + editingUser._apiId, payload).then(function(r) {
-        if (r && r.success) {
-          if (typeof window.showToast === 'function') window.showToast('User saved to database ✓', 'success');
-          setTimeout(_syncUsers, 500);
-        } else if (typeof window.showToast === 'function') {
-          var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
-          window.showToast('⚠ User saved locally, but database sync failed: ' + msg, 'warn');
-        }
-      });
+      // Original already PUTs the full, correct payload (role/name/locations/
+      // teams) straight to the server — just pull the canonical post-save
+      // state back down afterward, same as every other save path here.
+      setTimeout(_syncUsers, 700);
       return result;
     };
   }
@@ -2733,8 +2717,16 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           // only synced when the Settings → Access tab was opened, so a
           // permission change made by one admin didn't apply anywhere else
           // until that tab happened to be visited. Now part of the regular
-          // boot sync, same as every other entity above.
-          if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer();
+          // boot sync, same as every other entity above. Re-run
+          // applySession() once the pull resolves so the sidebar (already
+          // built once, above, from defaults) picks up whatever the server
+          // actually has — otherwise a fresh login still shows the stale
+          // pre-sync nav until the next full page reload.
+          if (typeof window.stgSyncPermissionsFromServer === 'function') {
+            window.stgSyncPermissionsFromServer().then(function() {
+              if (typeof window.applySession === 'function') window.applySession();
+            });
+          }
           // Profile (PhoneNumber/PhotoData, DB-backed) — one-shot pull on
           // login, same as every other entity above. Function itself is
           // defined in user-profile.js and exposed on window.
@@ -2861,7 +2853,11 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             _syncProductOfferMatrix();
             // See the matching comment in the login-success sync block above.
             _syncWizardDrafts();
-            if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer();
+            if (typeof window.stgSyncPermissionsFromServer === 'function') {
+              window.stgSyncPermissionsFromServer().then(function() {
+                if (typeof window.applySession === 'function') window.applySession();
+              });
+            }
             if (typeof window._pullProfileFromServer === 'function') window._pullProfileFromServer();
             setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500);
             setTimeout(tkMigrateLegacyLocalTickets, 1400);

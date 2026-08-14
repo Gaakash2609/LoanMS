@@ -1258,8 +1258,21 @@
       // ── Core items (always visible) — no change needed ──
       // Overview, Applications, EMI Calculator, Tasks, My Payout are always shown.
 
-      // ── Admin-controlled items: show/hide based on canNav* role keys (Admin Master Control)
-      //    with fallback to roleMenuVisibility for backward compat ──
+      // ── Admin-controlled items: show/hide based on canNav* role keys (Admin
+      //    Master Control) AND roleMenuVisibility (Settings → Roles &
+      //    Permissions → Menu Access Control) ──
+      // BUGFIX (confirmed real bug — "changes not reflecting on the user
+      // dashboard even after modifying permissions" in Menu Access Control):
+      // every item here has a NAV_PERM_MAP entry, and every role in ROLES
+      // always defines that canNav* key — so `typeof rd[permKey] !== 'undefined'`
+      // was ALWAYS true, meaning the `else` branch that actually reads
+      // roleMenuVisibility could never run. Toggling anything in the Menu
+      // Access Control grid (and clicking Apply Changes / saving it to the
+      // server) had zero effect on any user's sidebar — this function only
+      // ever consulted the OTHER permissions screen (Admin Master Control /
+      // Access Rights). Now both are checked: an item only shows if NEITHER
+      // system has hidden it for this role, so an explicit toggle in either
+      // screen actually takes effect.
       const NAV_PERM_MAP = {
         'banks':          'canNavBanks',
         'incred':         'canNavIncred',
@@ -1277,15 +1290,9 @@
       };
       ALL_MENU_ITEMS.filter(m => m.canHide).forEach(m => {
         const permKey = NAV_PERM_MAP[m.id];
-        let visible;
-        if (permKey && typeof rd[permKey] !== 'undefined') {
-          // Use Admin Master Control key
-          visible = isAdmin ? true : !!rd[permKey];
-        } else {
-          // Fallback to legacy roleMenuVisibility
-          const allowed = roleMenuVisibility[m.id] ? roleMenuVisibility[m.id].has(role) : false;
-          visible = isAdmin || allowed;
-        }
+        const allowedByMaster = (permKey && typeof rd[permKey] !== 'undefined') ? !!rd[permKey] : true;
+        const allowedByMenu   = roleMenuVisibility[m.id] ? roleMenuVisibility[m.id].has(role) : false;
+        const visible = isAdmin || (allowedByMaster && allowedByMenu);
         document.querySelectorAll(`[data-menu-id="${m.id}"]`).forEach(el => {
           el.style.display = visible ? '' : 'none';
         });
@@ -25125,6 +25132,25 @@ ${printContent}
       }
     }
 
+    // Maps the "Locations & Teams" panel's Role dropdown labels (display
+    // strings shown to the user, e.g. "Sales Person") to the backend
+    // UserRole enum names the API actually expects (e.g. "Sales"). Needed
+    // because the panel's <select> reuses the human-readable labels as its
+    // option values, not the enum names.
+    var TW_UD_ROLE_TO_ENUM = {
+      'Location Head':     'LocationHead',
+      'Admin':             'Admin',
+      'Partner':           'Partner',
+      'Sales Person':      'Sales',
+      'Team Leader':       'TeamLeader',
+      'Manager':           'Manager',
+      'Login Team':        'LoginTeam',
+      'Operation Manager': 'OperationManager',
+      'Accounts':          'Accounts',
+      'Product Team':      'ProductTeam',
+      'DSA User':          'Dsa'
+    };
+
     function twSaveUserDetail() {
       const name=document.getElementById('tw-ud-name').value.trim(), email=document.getElementById('tw-ud-email').value.trim(), role=document.getElementById('tw-ud-role').value;
       if(!name||!email){showToast('Name and email are required','error');return;}
@@ -25153,7 +25179,32 @@ ${printContent}
             return m && m._apiId;
           }).filter(function(x){ return !!x; });
 
+          // BUGFIX (confirmed real bug — Role/Name/Email silently reverting
+          // after Save): this panel's form lets you edit Name/Email/Role,
+          // but only ever pushed Locations and Teams to the server — the
+          // Role change was applied to local state only, so the very next
+          // GET /users refresh (page reload, or just reopening this panel)
+          // pulled the untouched old Role back from the database and it
+          // looked like the selection "reset itself". PUT /users/{id} is
+          // the actual endpoint that persists Name/Role/etc.; call it
+          // alongside the existing Locations/Teams syncs so all three save
+          // together as one action, matching what "Save User" looks like
+          // it should do. IsActive is round-tripped from the user's current
+          // local status so a Role/Location edit here never accidentally
+          // flips their active/suspended state.
+          var roleEnum = TW_UD_ROLE_TO_ENUM[role] || role;
+          var isActive = (u.status || 'active') === 'active';
+
           Promise.all([
+            window.apiReq('PUT', '/users/' + u._apiId, {
+              fullName:     name,
+              isActive:     isActive,
+              role:         roleEnum,
+              phoneNumber:  u.mobile || '',
+              locationName: _twUdLocs[0] || '',
+              salesTeam:    _twUdSales[0] || '',
+              opTeam:       _twUdOps[0] || ''
+            }),
             window.apiReq('PUT', '/users/' + u._apiId + '/locations', locIds),
             window.apiReq('PUT', '/users/' + u._apiId + '/teams', { salesTeamIds: salesIds, operationTeamIds: opIds })
           ]).then(function(results) {
