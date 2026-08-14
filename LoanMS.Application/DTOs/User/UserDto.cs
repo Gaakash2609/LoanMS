@@ -11,6 +11,10 @@ public class UserDto
     public string Role { get; set; } = string.Empty;
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
+    // Unique, permanent Employee Code / User ID (MH-{ROLE}-{LOCATION}-
+    // {RANDOM4}) — see IEmployeeCodeGenerator. Null only for users created
+    // before this feature existed and not yet covered by the backfill.
+    public string? EmployeeCode { get; set; }
     public string? PhoneNumber { get; set; }
     public string? LocationName { get; set; }
     public string? SalesTeam { get; set; }

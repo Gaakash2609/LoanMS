@@ -1,4 +1,9 @@
-export type UserRole = 'Admin' | 'Manager' | 'Sales' | 'Partner'
+// Extended to match the full backend UserRole enum (LoanMS.Domain.Enums.
+// UserRole — 11 values) — was previously only the 4 roles this page's own
+// ROLE_VARIANTS badge-map happened to color, not the actual full set a
+// user can be created/edited with.
+export type UserRole = 'Admin' | 'Manager' | 'Sales' | 'Dsa' | 'Partner' |
+  'LoginTeam' | 'TeamLeader' | 'Accounts' | 'LocationHead' | 'OperationManager' | 'ProductTeam'
 
 export interface User {
   id: number
@@ -7,7 +12,28 @@ export interface User {
   role: UserRole
   isActive: boolean
   createdAt: string
+  // Confirmed already present in the backend's UserDto (LoanMS.
+  // Application/DTOs/User/UserDto.cs) and already returned by GET
+  // /api/users — this type just didn't declare the field yet. Nullable —
+  // users created before Employee Code generation existed may not have
+  // one (see IEmployeeCodeGenerator's backfill routine).
+  employeeCode?: string | null
 }
+
+// Shape of GET /users/{id}/locations-and-teams's response (Users
+// Controller.GetLocationsAndTeams) — read-only display data for Part C,
+// reusing this existing per-user endpoint as-is.
+export interface UserLocationsAndTeams {
+  locations: { locationId: number; name: string }[]
+  salesTeams: { teamId: number; name: string }[]
+  opTeams: { teamId: number; name: string }[]
+}
+
+// Minimal shapes for the dropdown/checklist option-lists — GET
+// /api/locations and GET /api/teams already return more fields than
+// this, but the mapping UI only needs id+name.
+export interface LocationOption { id: number; name: string }
+export interface TeamOption { id: number; name: string; type: 'Sales' | 'Login' }
 
 export type LoanStatus = 'Draft'|'Submitted'|'UnderReview'|'Approved'|'Disbursed'|'Rejected'|'Closed'
 export type LoanType = 'Personal'|'Business'|'Home'|'NewCar'|'UsedCar'|'Education'|'AgainstProperty'|'Insurance'

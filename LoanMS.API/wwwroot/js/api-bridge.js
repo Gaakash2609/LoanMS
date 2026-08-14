@@ -337,7 +337,12 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           salesTeams: u.salesTeam ? [u.salesTeam] : [],
           opTeams: u.opTeam ? [u.opTeam] : [],
           status: u.isActive ? 'active' : 'inactive',
-          joinDate: _fmtDate(u.createdAt)
+          joinDate: _fmtDate(u.createdAt),
+          // Real, permanent, server-generated Employee Code (MH-{ROLE}-
+          // {LOCATION}-{RANDOM4}) — replaces the old, purely-local
+          // 'USR-' + array-index display, which was never a real,
+          // persistent identifier (see twUsers rendering below).
+          uid: u.employeeCode || null
         };
       });
       if (typeof window.twUsers !== 'undefined' && Array.isArray(window.twUsers)) {
@@ -546,8 +551,46 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           // name never showed up anywhere in the UI (displayed as "—") even
           // though the backend had it correctly. Confirmed no other code
           // anywhere reads the (wrong) .lead field, so this rename is safe.
+          // BUGFIX (confirmed real gap — Sales/Login Teams page always
+          // showing "Archived"): this mapping never set `active` at all,
+          // so every server-synced team's t.active was undefined
+          // (falsy) — twRenderSalesTeams/twRenderLoginTeams's
+          // `t.active ? 'Active' : 'Archived'` check therefore showed
+          // "Archived" for literally every team, regardless of its real
+          // status. Team has no backend IsActive column at all (confirmed
+          // by inspection — Team.cs / BaseEntity.cs), so there is no real
+          // archived-status to sync from the server; per the explicit
+          // requirement that a team must be Active by default unless an
+          // Admin explicitly archives it, this defaults freshly-synced
+          // teams to active:true. Object.assign below only overwrites
+          // keys present in this object, so an EXISTING local row that a
+          // user already archived this session (via twArchiveTeam, a
+          // local-only action — no backend persistence exists for it
+          // either) is not clobbered back to active on the next sync,
+          // since `existing >= 0` rows keep whatever `active` they
+          // already had unless explicitly changed again locally.
+          //
+          // location now carries the resolved Location NAME (at.locationName)
+          // instead of the raw, unresolved numeric LocationId — see
+          // TeamsController.GetAll's new LocationName projection. Team's
+          // Location is a single FK, not many-to-many (confirmed by
+          // inspection — no Team↔Location junction table exists, unlike
+          // the genuinely many-to-many User↔Location/UserLocations), so
+          // this shows the one assigned Location's name instead of a bare id.
           var mapped = { id:'API'+at.id, _apiId:at.id, name:at.name, leader:at.teamLead||'',
-                         members:(at.members||[]).map(function(m){ return m.fullName; }), location:at.locationId||'' };
+                         members:(at.members||[]).map(function(m){ return m.fullName; }),
+                         location:at.locationName||'',
+                         // BUGFIX (confirmed real gap — Archive/Active
+                         // status not persistent): Teams.IsActive now
+                         // exists server-side (see TeamsController.cs) —
+                         // this is the real source of truth going forward,
+                         // replacing the earlier temporary "default new
+                         // rows to Active" workaround. Present on every
+                         // sync now (new AND existing rows), so Object.assign
+                         // below correctly overwrites with whatever the
+                         // database actually says, including after a
+                         // refresh/logout/new-device.
+                         active: at.isActive !== false };
           var existing = store.findIndex(function(t){ return t._apiId === at.id; });
           if (existing >= 0) store[existing] = Object.assign(store[existing], mapped);
           else store.push(mapped);
@@ -567,12 +610,39 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
      a `teamId` argument that never arrives (always undefined), so its lookup
      never matched any team and NOTHING was ever sent to the backend — new or
      edited teams stayed local-only forever despite the misleading comment. */
+  /* Patch: twArchiveTeam → PATCH /api/teams/{id}/status
+     Confirmed real gap (Archive/Active status not persistent): the raw
+     function only ever toggled t.active in local memory — nothing reached
+     the server, so the status reverted to Active on every refresh/logout/
+     new device. */
+  function _patchTeamArchive() {
+    if (window._bridgeTeamArchivePatched) return;
+    window._bridgeTeamArchivePatched = true;
+    var _orig = window.twArchiveTeam;
+    if (typeof _orig !== 'function') return;
+    window.twArchiveTeam = function(type, id) {
+      var arr = (type === 'sales') ? window.twSalesTeams : window.twLoginTeams;
+      var t = (arr || []).find(function(row) { return String(row.id) === String(id); });
+      var result = _orig.apply(this, arguments); // flips t.active locally, renders, shows toast
+      if (t && t._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('PATCH', '/teams/' + t._apiId + '/status', { isActive: t.active }).then(function(r) {
+          if (!r || !r.success) {
+            if (typeof window.showToast === 'function') window.showToast('⚠ Status changed locally, but database sync failed', 'warn');
+          }
+        }).catch(function() {
+          if (typeof window.showToast === 'function') window.showToast('⚠ Status changed locally, but database sync failed', 'warn');
+        });
+      }
+      return result;
+    };
+  }
+
   function _patchTeamSave() {
     if (window._bridgeTeamSavePatched) return;
     window._bridgeTeamSavePatched = true;
     var _cfg = {
-      twSaveSalesTeamDetail: { type: 'Sales', store: 'twSalesTeams', editVar: '_twEditSalesId', nameEl: 'tw-st-name', leaderEl: 'tw-st-leader', locEl: 'tw-st-loc' },
-      twSaveLoginTeamDetail: { type: 'Login', store: 'twLoginTeams', editVar: '_twEditLoginId', nameEl: 'tw-lt-name', leaderEl: 'tw-lt-leader', locEl: 'tw-lt-loc' }
+      twSaveSalesTeamDetail: { type: 'Sales', store: 'twSalesTeams', editVar: '_twEditSalesId', nameEl: 'tw-st-name', leaderEl: 'tw-st-leader', locEl: 'tw-st-loc', activeEl: 'tw-st-active' },
+      twSaveLoginTeamDetail: { type: 'Login', store: 'twLoginTeams', editVar: '_twEditLoginId', nameEl: 'tw-lt-name', leaderEl: 'tw-lt-leader', locEl: 'tw-lt-loc', activeEl: 'tw-lt-active' }
     };
     Object.keys(_cfg).forEach(function(fnName) {
       var _orig = window[fnName];
@@ -586,9 +656,20 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         var nameEl    = document.getElementById(c.nameEl);
         var leaderEl  = document.getElementById(c.leaderEl);
         var locEl     = document.getElementById(c.locEl);
+        var activeEl  = document.getElementById(c.activeEl);
         var nameVal   = nameEl ? nameEl.value.trim() : '';
         var leaderVal = leaderEl ? leaderEl.value : '';
         var locVal    = locEl ? locEl.value : '';
+        // BUGFIX (confirmed real gap — project-wide persistence audit):
+        // the Edit-Team modal's Active/Archived dropdown was read into
+        // local t.active by the raw twSaveSalesTeamDetail/
+        // twSaveLoginTeamDetail functions, but this payload never included
+        // it — so the change showed "Team saved to database ✓" while the
+        // real status was untouched, and the setTimeout(_syncTeams, 300)
+        // right below silently reverted the visual change back to
+        // whatever the database actually had. Reuses the same
+        // PATCH /teams/{id}/status endpoint twArchiveTeam already calls.
+        var activeVal = activeEl ? activeEl.value === 'true' : null;
         var wasValid  = !!nameVal;
 
         // BUGFIX (Members not persisting — confirmed): "Save Team" showed
@@ -644,14 +725,26 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             if (r && r.success) {
               if (!apiId && r.data && r.data.id) team._apiId = r.data.id;
               var finalApiId = team._apiId;
-              _reconcileTeamMembers(finalApiId, oldMemberNames, newMemberNames).then(function(memberIssues) {
-                if (typeof window.showToast === 'function') {
-                  window.showToast(memberIssues
-                    ? 'Team saved to database ✓ (' + memberIssues + ')'
-                    : 'Team saved to database ✓', memberIssues ? 'warn' : 'success');
-                }
-                if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
-                setTimeout(_syncTeams, 300);
+              // Status is a separate, dedicated endpoint (same one
+              // twArchiveTeam uses) rather than part of the main payload
+              // above — the main Update() endpoint doesn't accept
+              // IsActive at all, by design (see TeamsController.SetStatus's
+              // own doc-comment on why this stays a minimal, separate call).
+              var statusReq = (finalApiId && activeVal !== null)
+                ? apiReq('PATCH', '/teams/' + finalApiId + '/status', { isActive: activeVal })
+                : Promise.resolve({ success: true });
+              statusReq.then(function(sr) {
+                var statusFailed = activeVal !== null && (!sr || !sr.success);
+                _reconcileTeamMembers(finalApiId, oldMemberNames, newMemberNames).then(function(memberIssues) {
+                  var issues = [memberIssues, statusFailed ? 'status not saved' : null].filter(Boolean).join(', ');
+                  if (typeof window.showToast === 'function') {
+                    window.showToast(issues
+                      ? 'Team saved to database ✓ (' + issues + ')'
+                      : 'Team saved to database ✓', issues ? 'warn' : 'success');
+                  }
+                  if (typeof window.persistSave === 'function') { try { window.persistSave(); } catch(e){} }
+                  setTimeout(_syncTeams, 300);
+                });
               });
             } else if (typeof window.showToast === 'function') {
               var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
@@ -2679,6 +2772,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       _patchTwSaveUser();
       _patchTwSaveUserDetail();
       _patchTeamSave();
+      _patchTeamArchive();
       _patchLocationSave();
       _patchLocationRename();
       _patchLocationDelete();
@@ -2911,7 +3005,25 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           'insNomineeDob','insExistingCov','insExistingPol','insExistingNo',
           'propType','propOwnership','propUnderConstruct','propBuilder','propCity','propValue',
           'carMake','carModel','carYear','carPrice','carKm','carDealer',
-          'eduInstitution','eduCourse','eduDuration','eduAdmissionStatus','eduStudyLocation','eduCoApplicant'];
+          'eduInstitution','eduCourse','eduDuration','eduAdmissionStatus','eduStudyLocation','eduCoApplicant',
+          // Confirmed real gap (second pass) — Permanent Address, Co-Applicant,
+          // Reference addresses, Business-loan fields, Insurance health-fields,
+          // Employment office-address, and a few remaining Personal fields. No
+          // dedicated column exists for any of these, same reasoning as the
+          // fields above — reusing this same flexible blob rather than adding
+          // 6+ separate migrations for what's fundamentally the same kind of gap.
+          'mname','mname2','empcode','leadsrc',
+          'pstreet1','pstreet2','pcity','pstate','pzip','phometype','sameAddr',
+          'coappName','coappPan','coappAadhar','coappMobile',
+          'coapplicantEmail','coapplicantMobile','coapplicantPan','coapplicantRel',
+          'r1addr1','r1addr2','r1city','r1pin','r2addr1','r2addr2','r2city','r2pin',
+          'bizName','bizType','bizVintage','gst','turnover','netProfit','itrFiled',
+          'heightCm','weightKg','smoker','occHazard','sumAssured','policyTerm',
+          'officeaddrL1','officeaddrL2','officeaddrPin',
+          'street2','phone','preexisting','preexistingDesc',
+          'officeaddrL1Self','officeaddrL2Self','officeaddrPinSelf',
+          'isCustomCompany','companyNameId','comptypeSelf','profBody','coapplicant','nomineeId',
+          'dsaPartnerLinkedId'];
         var out = {};
         keys.forEach(function(k) { if (app[k] !== undefined && app[k] !== null && app[k] !== '') out[k] = app[k]; });
         return out;
@@ -3214,7 +3326,25 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           carPrice: 'w-car-price', carKm: 'w-car-km', carDealer: 'w-dealer',
           eduInstitution: 'w-institution', eduCourse: 'w-course',
           eduDuration: 'w-course-duration', eduAdmissionStatus: 'w-admission-status',
-          eduStudyLocation: 'w-study-location'
+          eduStudyLocation: 'w-study-location',
+          mname: 'w-mname', mname2: 'w-mname2', empcode: 'w-empcode', leadsrc: 'w-leadsrc',
+          pstreet1: 'w-pstreet1', pstreet2: 'w-pstreet2', pcity: 'w-pcity', pstate: 'w-pstate',
+          pzip: 'w-pzip', phometype: 'w-phometype', sameAddr: 'w-same-addr',
+          coappName: 'w-coapp-name', coappPan: 'w-coapp-pan', coappAadhar: 'w-coapp-aadhar', coappMobile: 'w-coapp-mobile',
+          coapplicantEmail: 'w-coapplicant-email', coapplicantMobile: 'w-coapplicant-mobile',
+          coapplicantPan: 'w-coapplicant-pan', coapplicantRel: 'w-coapplicant-rel',
+          r1addr1: 'w-r1addr1', r1addr2: 'w-r1addr2', r1city: 'w-r1city', r1pin: 'w-r1pin',
+          r2addr1: 'w-r2addr1', r2addr2: 'w-r2addr2', r2city: 'w-r2city', r2pin: 'w-r2pin',
+          bizName: 'w-biz-name', bizType: 'w-biz-type', bizVintage: 'w-biz-vintage',
+          gst: 'w-gst', turnover: 'w-turnover', netProfit: 'w-net-profit', itrFiled: 'w-itr-filed',
+          heightCm: 'w-height-cm', weightKg: 'w-weight-kg', smoker: 'w-smoker', occHazard: 'w-occ-hazard',
+          sumAssured: 'w-sum-assured', policyTerm: 'w-policy-term',
+          officeaddrL1: 'w-officeaddr-l1', officeaddrL2: 'w-officeaddr-l2', officeaddrPin: 'w-officeaddr-pin',
+          street2: 'w-street2', phone: 'w-phone', preexisting: 'w-preexisting', preexistingDesc: 'w-preexisting-desc',
+          officeaddrL1Self: 'w-officeaddr-l1-self', officeaddrL2Self: 'w-officeaddr-l2-self', officeaddrPinSelf: 'w-officeaddr-pin-self',
+          isCustomCompany: 'w-is-custom-company', companyNameId: 'w-company-name-id', comptypeSelf: 'w-comptype-self',
+          profBody: 'w-prof-body', coapplicant: 'w-coapplicant', nomineeId: 'w-nominee-id',
+          dsaPartnerLinkedId: 'w-dsa-partner-linked-val'
         };
         var out = {};
         Object.keys(idMap).forEach(function(k) {
@@ -3310,7 +3440,21 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       'w-r1rel':       dto.r1Relation || '',
       'w-r2name':      dto.r2Name || '',
       'w-r2no':        dto.r2Mobile || '',
-      'w-r2rel':       dto.r2Relation || ''
+      'w-r2rel':       dto.r2Relation || '',
+      // BUGFIX (confirmed real gap — draft resume losing Location/DSA/
+      // Partner/Sales Person): the backend GetDraft response already
+      // included dsaId/partnerId/locationId (and now dsaName/partnerName/
+      // locationName/salesPerson, added alongside this fix) — this mapping
+      // function just never read any of them back into the wizard's actual
+      // field ids. w-location/w-dsa-name-val/w-partner-name-val/w-sales
+      // hold display NAMES (see wsddCreate's hiddenId pattern and
+      // _stripApiPrefixId's name→id resolution elsewhere in this file),
+      // which is why the *Name fields are used here, not the raw ids.
+      'w-location':         dto.locationName || '',
+      'w-dsa-name-val':     dto.dsaName || '',
+      'w-partner-name-val': dto.partnerName || '',
+      'w-sales':            dto.salesPerson || '',
+      'w-channel':          dto.channel || ''
     };
   }  // Fetches the full draft (GET /api/wizard/draft/{loanId}) and returns an
   // object ready to Object.assign() onto a local draft row — the w-* field
@@ -3334,6 +3478,52 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       // Step 9 bank-selection round-trip (see Loan.SelectedLenderNames) —
       // consumed by _restoreDraftIntoWizard (efin-app.js).
       fields._selectedLenderNames = dto.lenderName || '';
+      // BUGFIX (confirmed real gap — draft resume losing Insurance/
+      // Property/Vehicle/Education fields): dto.productData is now
+      // returned by GetDraft (see WizardController.cs) — spread it onto
+      // the individual w-* keys the same way _loanToApp() already does
+      // for a fully-submitted application, so a resumed draft's
+      // product-specific fields restore the same way.
+      if (dto.productData && typeof dto.productData === 'object') {
+        var pdMap = {
+          insType: 'w-ins-type', insInsurer: 'w-ins-insurer', insPremium: 'w-ins-premium',
+          insPayFreq: 'w-ins-payment-freq', insNomineeName: 'w-nominee-name',
+          insNomineeRel: 'w-nominee-relation', insNomineeDob: 'w-nominee-dob',
+          insExistingCov: 'w-existing-coverage', insExistingPol: 'w-existing-policy',
+          insExistingNo: 'w-existing-policy-no',
+          propType: 'w-prop-type', propOwnership: 'w-ownership',
+          propUnderConstruct: 'w-under-construction', propBuilder: 'w-builder',
+          propCity: 'w-prop-city', propValue: 'w-prop-value',
+          carMake: 'w-car-make', carModel: 'w-car-model', carYear: 'w-car-year',
+          carPrice: 'w-car-price', carKm: 'w-car-km', carDealer: 'w-dealer',
+          eduInstitution: 'w-institution', eduCourse: 'w-course',
+          eduDuration: 'w-course-duration', eduAdmissionStatus: 'w-admission-status',
+          eduStudyLocation: 'w-study-location',
+          mname: 'w-mname', mname2: 'w-mname2', empcode: 'w-empcode', leadsrc: 'w-leadsrc',
+          pstreet1: 'w-pstreet1', pstreet2: 'w-pstreet2', pcity: 'w-pcity', pstate: 'w-pstate',
+          pzip: 'w-pzip', phometype: 'w-phometype', sameAddr: 'w-same-addr',
+          coappName: 'w-coapp-name', coappPan: 'w-coapp-pan', coappAadhar: 'w-coapp-aadhar', coappMobile: 'w-coapp-mobile',
+          coapplicantEmail: 'w-coapplicant-email', coapplicantMobile: 'w-coapplicant-mobile',
+          coapplicantPan: 'w-coapplicant-pan', coapplicantRel: 'w-coapplicant-rel',
+          r1addr1: 'w-r1addr1', r1addr2: 'w-r1addr2', r1city: 'w-r1city', r1pin: 'w-r1pin',
+          r2addr1: 'w-r2addr1', r2addr2: 'w-r2addr2', r2city: 'w-r2city', r2pin: 'w-r2pin',
+          bizName: 'w-biz-name', bizType: 'w-biz-type', bizVintage: 'w-biz-vintage',
+          gst: 'w-gst', turnover: 'w-turnover', netProfit: 'w-net-profit', itrFiled: 'w-itr-filed',
+          heightCm: 'w-height-cm', weightKg: 'w-weight-kg', smoker: 'w-smoker', occHazard: 'w-occ-hazard',
+          sumAssured: 'w-sum-assured', policyTerm: 'w-policy-term',
+          officeaddrL1: 'w-officeaddr-l1', officeaddrL2: 'w-officeaddr-l2', officeaddrPin: 'w-officeaddr-pin',
+          street2: 'w-street2', phone: 'w-phone', preexisting: 'w-preexisting', preexistingDesc: 'w-preexisting-desc',
+          officeaddrL1Self: 'w-officeaddr-l1-self', officeaddrL2Self: 'w-officeaddr-l2-self', officeaddrPinSelf: 'w-officeaddr-pin-self',
+          isCustomCompany: 'w-is-custom-company', companyNameId: 'w-company-name-id', comptypeSelf: 'w-comptype-self',
+          profBody: 'w-prof-body', coapplicant: 'w-coapplicant', nomineeId: 'w-nominee-id',
+          dsaPartnerLinkedId: 'w-dsa-partner-linked-val'
+        };
+        Object.keys(pdMap).forEach(function(k) {
+          if (dto.productData[k] !== undefined && dto.productData[k] !== null) {
+            fields[pdMap[k]] = dto.productData[k];
+          }
+        });
+      }
       return fields;
     }).catch(function(e) { console.warn('[Bridge] fetchWizardDraftFields:', e); return null; });
   };
@@ -3442,9 +3632,18 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           }
           badge.style.background = badgeColor + '22';
           badge.style.color      = badgeColor;
-          badge.textContent      = 'CIBIL: ' + d.cibilScore + ' (' + d.status + ')';
+          // BUGFIX (approved improvement — CIBIL mock/demo warning):
+          // /cibil/check always calls the backend's mock-score generator
+          // (_getMockCibilScore — confirmed, no real-vs-mock branch exists
+          // in that specific endpoint) — this badge/toast is therefore
+          // ALWAYS a demo value, unlike cibil-view.js's report-viewer
+          // (which correctly has both a real, BureauReports-backed path
+          // and a mock-fallback path). Never touches the real FullReport
+          // flow — that's a completely separate endpoint/file.
+          badge.textContent      = '⚠️ Demo CIBIL: ' + d.cibilScore + ' (' + d.status + ')';
+          badge.title            = 'Estimated / Demo Data — Not Verified CIBIL Score';
           if (typeof window.showToast === 'function')
-            window.showToast('CIBIL: ' + d.cibilScore + ' — ' + d.message, d.isEligible ? 'success' : 'warn');
+            window.showToast('⚠️ Demo CIBIL (not verified): ' + d.cibilScore + ' — ' + d.message, d.isEligible ? 'success' : 'warn');
         });
       }, 800);
     }, true);

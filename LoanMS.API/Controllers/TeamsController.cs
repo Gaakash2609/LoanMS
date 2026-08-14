@@ -38,7 +38,7 @@ public class TeamsController : BaseController
         if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, menuId))
             return Forbid();
 
-        var q = _db.Teams.Include(t => t.TeamLead).Include(t => t.Members).ThenInclude(m => m.User).AsQueryable();
+        var q = _db.Teams.Include(t => t.TeamLead).Include(t => t.Location).Include(t => t.Members).ThenInclude(m => m.User).AsQueryable();
         if (!string.IsNullOrEmpty(type)) q = q.Where(t => t.Type == type);
 
         if (string.Equals(CurrentUserRole, "Manager", StringComparison.OrdinalIgnoreCase))
@@ -49,7 +49,17 @@ public class TeamsController : BaseController
 
         var teams = await q.Select(t => new {
             t.Id, t.Name, t.Type, t.LocationId,
+            // BUGFIX (confirmed real gap — Sales Teams page showing raw
+            // location-id "3" instead of a name): LocationId was returned
+            // as-is, with no name ever resolved — the frontend had no way
+            // to show anything but the bare database id. Team.LocationId
+            // is a single FK (no many-to-many Team↔Location table exists
+            // in this codebase — confirmed by inspection, unlike the
+            // genuinely many-to-many User↔Location/UserLocations), so this
+            // resolves that one Location's Name for display.
+            LocationName = t.Location != null ? t.Location.Name : null,
             TeamLead = t.TeamLead != null ? t.TeamLead.FullName : null,
+            t.IsActive,
             Members  = t.Members.Select(m => new { m.UserId, m.User.FullName, m.User.Email }).ToList()
         }).ToListAsync();
         return Ok(ApiResponseDto<object>.Ok(teams));
@@ -80,6 +90,28 @@ public class TeamsController : BaseController
         team.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<bool>.Ok(true, "Updated."));
+    }
+
+    /// <summary>
+    /// Archive/Restore a Team [Admin only]. Dedicated, minimal endpoint —
+    /// same reasoning as UsersController's SetStatus/SetPhoto: reusing the
+    /// full Update() above would need Name/Type/LocationId/TeamLeadUserId
+    /// all resent correctly just to flip one flag, risking accidentally
+    /// clobbering one of those fields with a stale frontend value. Touches
+    /// only IsActive.
+    /// </summary>
+    public class SetTeamStatusRequestDto { public bool IsActive { get; set; } }
+
+    [HttpPatch("{id:int}/status")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> SetStatus(int id, [FromBody] SetTeamStatusRequestDto request)
+    {
+        var team = await _db.Teams.FindAsync(id);
+        if (team == null) return NotFound(ApiResponseDto<bool>.Fail("Team not found."));
+        team.IsActive = request.IsActive;
+        team.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Status updated."));
     }
 
     [HttpPost("{id:int}/members")]

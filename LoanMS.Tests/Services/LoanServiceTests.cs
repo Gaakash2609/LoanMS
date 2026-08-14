@@ -17,6 +17,8 @@ public class LoanServiceTests
     private readonly Mock<IUserRepository>          _userRepoMock = new();
     private readonly Mock<ILoanStatusHistoryRepository> _histRepoMock = new();
     private readonly Mock<ICacheService>            _cacheMock    = new();
+    private readonly Mock<IEmailService>             _emailMock    = new();
+    private readonly Mock<IEmailTemplateProvider>    _emailTplMock = new();
 
     private LoanService CreateService()
     {
@@ -36,7 +38,15 @@ public class LoanServiceTests
         _cacheMock.Setup(c => c.RemoveAsync(It.IsAny<string>()))
                   .Returns(Task.CompletedTask);
 
-        return new LoanService(_uowMock.Object, _cacheMock.Object);
+        // Email mocks: no-op sends, template lookups return "no override" —
+        // the stage-notification email trigger added to UpdateStatusAsync
+        // should never fail a test that isn't specifically about it.
+        _emailMock.Setup(e => e.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()))
+                  .Returns(Task.CompletedTask);
+        _emailTplMock.Setup(t => t.GetTemplateAsync(It.IsAny<string>()))
+                  .ReturnsAsync(((string?)null, (string?)null));
+
+        return new LoanService(_uowMock.Object, _cacheMock.Object, _emailMock.Object, _emailTplMock.Object);
     }
 
     [Fact]

@@ -8,11 +8,13 @@ public class UserService : IUserService
 {
     private readonly IUnitOfWork _uow;
     private readonly IAuthService _auth;
+    private readonly IEmployeeCodeGenerator _codeGen;
 
-    public UserService(IUnitOfWork uow, IAuthService auth)
+    public UserService(IUnitOfWork uow, IAuthService auth, IEmployeeCodeGenerator codeGen)
     {
         _uow  = uow;
         _auth = auth;
+        _codeGen = codeGen;
     }
 
     public async Task<ApiResponseDto<UserDto>> GetByIdAsync(int id)
@@ -72,6 +74,12 @@ public class UserService : IUserService
             SalesTeam    = request.SalesTeam?.Trim(),
             OpTeam       = request.OpTeam?.Trim()
         };
+
+        // Server-side, permanent Employee Code — MH-{ROLE}-{LOCATION}-
+        // {RANDOM4}. Generated once, here, at creation; never regenerated
+        // on subsequent role/location changes (see UpdateAsync, which
+        // deliberately never touches EmployeeCode).
+        user.EmployeeCode = await _codeGen.GenerateAsync(request.Role, request.LocationName);
 
         await _uow.Users.AddAsync(user);
         await _uow.SaveChangesAsync();
@@ -190,6 +198,7 @@ public class UserService : IUserService
         Role         = u.Role.ToString(),
         IsActive     = u.IsActive,
         CreatedAt    = u.CreatedAt,
+        EmployeeCode = u.EmployeeCode,
         PhoneNumber  = u.PhoneNumber,
         LocationName = u.LocationName,
         SalesTeam    = u.SalesTeam,

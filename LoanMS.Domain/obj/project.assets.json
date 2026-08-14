@@ -13,11 +13,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Domain\\LoanMS.Domain.csproj",
+      "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj",
       "projectName": "LoanMS.Domain",
-      "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Domain\\LoanMS.Domain.csproj",
+      "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj",
       "packagesPath": "C:\\Users\\Aakash Gupta\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Domain\\obj\\",
+      "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\Aakash Gupta\\AppData\\Roaming\\NuGet\\NuGet.Config"

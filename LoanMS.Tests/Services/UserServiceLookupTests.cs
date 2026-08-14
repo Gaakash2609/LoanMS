@@ -27,11 +27,12 @@ public class UserServiceLookupTests
     private readonly Mock<IUnitOfWork>     _uowMock  = new();
     private readonly Mock<IUserRepository> _userMock = new();
     private readonly Mock<IAuthService>    _authMock = new();
+    private readonly Mock<IEmployeeCodeGenerator> _codeGenMock = new();
 
     private UserService CreateService()
     {
         _uowMock.Setup(u => u.Users).Returns(_userMock.Object);
-        return new UserService(_uowMock.Object, _authMock.Object);
+        return new UserService(_uowMock.Object, _authMock.Object, _codeGenMock.Object);
     }
 
     private static List<User> SeedUsers() => new()

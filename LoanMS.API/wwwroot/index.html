@@ -7045,15 +7045,15 @@
           </label>
         </div>
 
-        <!-- User ID (custom override) -->
-        <div class="form-group" style="margin-bottom:14px">
-          <label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2)">🪪 Custom User ID (optional override)</label>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input type="text" id="inv-custom-uid" placeholder="e.g. USR-EFN-001 (leave blank for auto)" class="form-control" style="font-family:monospace;letter-spacing:.5px">
-            <button class="btn btn-ghost btn-sm" onclick="invApplyUID()" style="white-space:nowrap">Apply</button>
-          </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:4px">Auto-generated ID will be used if left blank</div>
-        </div>
+        <!-- Custom User ID override removed — conflicted with the new,
+             secure, server-generated Employee Code (MH-{ROLE}-{LOCATION}-
+             {RANDOM4}): this input never actually persisted to the
+             database (confirmed — no backend endpoint backed it, it only
+             ever mutated the in-memory twUsers array), and allowing an
+             arbitrary Admin-typed value here would have defeated the
+             point of a secure, unpredictable, immutable identifier even
+             if it had. The real Employee Code is shown read-only below
+             instead. -->
 
         <!-- Password Setup -->
         <div style="margin-bottom:18px">

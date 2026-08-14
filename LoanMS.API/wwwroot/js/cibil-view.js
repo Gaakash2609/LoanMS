@@ -511,8 +511,22 @@
       : '<div style="font-size:11px;color:var(--text3);padding:10px 14px;background:var(--surface2);border-radius:var(--r-sm);border:1px solid var(--border);line-height:1.6;margin-top:14px">🔷 <strong>Simulated report</strong> — Score generated from PAN for demonstration. Upload bureau file or configure live credentials for real data.</div>';
 
     /* ── ASSEMBLE ── */
+    // Approved improvement — CIBIL mock/demo warning. isFullReport is the
+    // existing, already-correct flag this file uses to distinguish the two
+    // genuinely different response-shapes (BureauReports-backed vs the PAN-
+    // based mock-fallback, see loadReport()'s two _call*Api branches) — no
+    // new detection-logic invented, this only adds a visible banner keyed
+    // off that pre-existing flag. Never renders when isFullReport is true.
+    var mockWarningBanner = isFullReport ? '' :
+      '<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:#fef3c7;border:1.5px solid #f59e0b;border-radius:var(--r-sm);margin-bottom:14px">' +
+        '<span style="font-size:18px">⚠️</span>' +
+        '<div><div style="font-size:12.5px;font-weight:800;color:#92400e">Estimated / Demo Data — Not Verified CIBIL Score</div>' +
+        '<div style="font-size:11px;color:#92400e;opacity:.85">This score is generated for demonstration purposes and is not a verified report from the bureau. Upload a real bureau file for a verified score.</div></div>' +
+      '</div>';
+
     container.innerHTML =
       '<div style="padding:2px 4px">' +
+        mockWarningBanner +
 
         _buildTOC() +
         _buildSectionNav() +

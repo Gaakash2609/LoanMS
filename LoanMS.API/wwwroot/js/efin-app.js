@@ -9772,6 +9772,16 @@
           window._BFP_STORE[item.id].dataUrl = ev.target.result;
           var fi = store.files.length - 1;
           if (store.files[fi]) store.files[fi].dataUrl = ev.target.result;
+          // BUGFIX (confirmed real gap — attachment could be lost if the
+          // user closed/navigated away before the next periodic autosave
+          // tick): the dataUrl the background-upload logic in
+          // wizardAutoSaveDraft() needs only becomes available right here.
+          // Triggering that same, existing function immediately — instead
+          // of only ever waiting for its own timer/other-field-edit
+          // triggers — means a just-uploaded file starts its
+          // (already-debounced) server push right away, same
+          // architecture, just not delayed behind unrelated field edits.
+          if (typeof window.wizardAutoSaveDraft === 'function') window.wizardAutoSaveDraft();
         }
       };
       _fr.readAsDataURL(file);
@@ -10441,6 +10451,14 @@
       }
       if (newStatus === 'rejected') {
         bumpStat('st-rejected', getPartnerScopedApps().filter(a => a.status === 'rejected').length);
+        // Approved improvement — "Rejected Lender → Next Eligible Lender
+        // Suggestion". Reuses the SAME /lenderconfig/match backend engine
+        // the wizard's live-eligibility-preview and Step 9 already call —
+        // no second/duplicate matching logic. Purely informational: does
+        // NOT touch app.status, app.bank, or SelectedLenderNames — the
+        // existing manual laToggleCard multi-select flow is completely
+        // untouched, this only adds a suggestion-box.
+        if (typeof fetchOtherEligibleLenders === 'function') fetchOtherEligibleLenders(app);
       }
 
       renderTable();
@@ -20042,6 +20060,79 @@ ${printContent}
       }
     }
 
+    // ── Approved improvement: Rejected Lender → Next Eligible Lender ──
+    // Reuses the SAME POST /lenderconfig/match backend engine as the
+    // Employment-step live-preview and Step 9's own matching — no second/
+    // duplicate matching logic anywhere. Purely a read-only suggestion:
+    // this function never touches app.status, app.bank, or
+    // SelectedLenderNames, and never calls laToggleCard or anything that
+    // would auto-select a lender — the existing manual multi-select flow
+    // is completely untouched. Renders as an independent, dismissible
+    // floating panel appended to <body>, NOT by editing openDetail()'s own
+    // template — avoids any risk of breaking the existing, working
+    // application-detail rendering.
+    async function fetchOtherEligibleLenders(app) {
+      if (!app || typeof apiReq !== 'function') return;
+      const salary = Number(app.salary) || 0;
+      if (!salary) return; // matches the live-preview's own "no salary yet" guard — nothing to score against
+
+      let companyId = null;
+      if (app.compName && typeof LA_DB !== 'undefined' && Array.isArray(LA_DB.companies)) {
+        const match = LA_DB.companies.find(c => (c.name || '').toLowerCase() === app.compName.toLowerCase());
+        if (match) companyId = match._apiId || match.id || null;
+      }
+
+      const payload = {
+        loanType:    app.loanType || 'personal_loan',
+        salary:      salary,
+        obligations: Number(app.obligations) || 0,
+        empType:     (app.empType || 'SALARIED').toUpperCase(),
+        compType:    (app.compType || '').toLowerCase(),
+        companyId:   companyId,
+        loanAmount:  Number(app.amount) || null,
+        tenure:      parseInt(app.tenure) || null,
+        pinCode:     (app.zip || '').trim() || null,
+        cibil:       Number(app.cibil) || null
+      };
+
+      let res;
+      try {
+        res = await apiReq('POST', '/lenderconfig/match', payload);
+      } catch (e) { return; }
+      if (!res || !res.success || !res.data || res.data.awaitingDetails) return;
+
+      // The lender(s) this application was already submitted to / just
+      // rejected from — SelectedLenderNames is comma-joined (confirmed
+      // earlier in this codebase's own draft-round-trip logic), so a
+      // multi-lender case is handled the same way here.
+      const excludeNames = new Set((app.bank || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+      const others = (res.data.results || [])
+        .filter(r => r.eligible && !excludeNames.has((r.bankName || '').toLowerCase()))
+        .sort((a, b) => (b.score || 0) - (a.score || 0));
+
+      if (!others.length) return; // nothing else eligible — stay silent, don't show an empty/misleading panel
+
+      const existing = document.getElementById('other-eligible-lenders-panel');
+      if (existing) existing.remove();
+
+      const panel = document.createElement('div');
+      panel.id = 'other-eligible-lenders-panel';
+      panel.style.cssText = 'position:fixed;bottom:20px;right:20px;max-width:360px;background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;box-shadow:var(--shadow-lg);padding:16px 18px;z-index:900';
+      panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:800;color:var(--text)">🔎 Other Eligible Lenders</div>
+          <button onclick="document.getElementById('other-eligible-lenders-panel').remove()" style="border:none;background:none;cursor:pointer;color:var(--text3);font-size:16px;line-height:1;padding:0 2px">✕</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Based on this application's details, ${others.length} other lender${others.length !== 1 ? 's' : ''} may still be eligible. Select manually at Step 9 if you'd like to proceed.</div>
+        <div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto">
+          ${others.map(r => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--surface2);border-radius:8px;font-size:12.5px">
+            <span style="font-weight:600">${escapeHtml(r.bankName)}</span>
+            <span style="color:var(--success);font-size:11px;font-weight:700">Score ${r.score}</span>
+          </div>`).join('')}
+        </div>`;
+      document.body.appendChild(panel);
+    }
+
     function laAutoDetectFromWizard() {
       const isCustom    = document.getElementById('w-is-custom-company')?.checked || false;
       const companyId   = isCustom ? 0 : (parseInt(document.getElementById('w-company-name-id')?.value) || 0);
@@ -24751,7 +24842,18 @@ ${printContent}
     function twRenderUsers(data) {
       const tb=document.getElementById('tw-user-table'); if(!tb) return;
       const isAdmin = (typeof currentUser !== 'undefined') && (currentUser.role === 'admin' || currentUser.role === 'product_team');
-      (data||twUsers).forEach(u=>{ if(!u.locs) u.locs=u.loc?[u.loc]:[]; if(!u.salesTeams) u.salesTeams=u.st?[u.st]:[]; if(!u.opTeams) u.opTeams=u.ot?[u.ot]:[]; if(!u.uid) u.uid='USR-'+String(twUsers.indexOf(u)+1).padStart(4,'0'); });
+      (data||twUsers).forEach(u=>{ if(!u.locs) u.locs=u.loc?[u.loc]:[]; if(!u.salesTeams) u.salesTeams=u.st?[u.st]:[]; if(!u.opTeams) u.opTeams=u.ot?[u.ot]:[];
+        // BUGFIX (confirmed real gap — Employee Code feature build): this
+        // fallback used to synthesize a fake, sequential 'USR-000N' id
+        // (array-index-based) whenever u.uid was missing — exactly the
+        // predictable pattern the real server-generated Employee Code
+        // (MH-{ROLE}-{LOCATION}-{RANDOM4}) exists to avoid. In practice
+        // every user gets a real employeeCode from the startup backfill,
+        // so this should be rare — but when it IS momentarily missing
+        // (e.g. right after creation, before the 500ms _syncUsers
+        // refresh lands), showing an honest "pending" placeholder is
+        // correct; inventing a fake-looking sequential id is not.
+        if(!u.uid) u.uid='(pending)'; });
       const uidCol = isAdmin ? (u=>`<td style="white-space:nowrap"><div style="display:flex;align-items:center;gap:5px"><code style="font-size:11px;background:var(--surface2);border:1px solid var(--border);padding:2px 6px;border-radius:6px;color:var(--text2)">${u.uid||'—'}</code><button onclick="twCopyUID('${u.uid||''}',this)" title="Copy ID" style="border:none;background:none;cursor:pointer;padding:2px;border-radius:5px;color:var(--text3);display:flex;align-items:center;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text3)'"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div></td>`) : (_=>`<td style="color:var(--text3);font-size:12px">—</td>`);
       const canManage = isAdmin;
       const statusBadge = s => ({ active:'<span style="font-size:10px;font-weight:700;color:var(--success);background:rgba(16,185,129,.12);padding:3px 8px;border-radius:20px;white-space:nowrap">● Active</span>', inactive:'<span style="font-size:10px;font-weight:700;color:#dc2626;background:rgba(220,38,38,.1);padding:3px 8px;border-radius:20px;white-space:nowrap">● Inactive</span>', suspended:'<span style="font-size:10px;font-weight:700;color:#d97706;background:rgba(245,158,11,.12);padding:3px 8px;border-radius:20px;white-space:nowrap">● Suspended</span>' }[s||'active'] || '—');
@@ -24791,6 +24893,7 @@ ${printContent}
         <button class="row-menu-item" onclick="closeAllRowMenus();twViewUserDetail(${idx})">👁 View Details</button>` +
         (canManage ? `
         <button class="row-menu-item" onclick="closeAllRowMenus();twEditUser(${idx})">✏️ Edit User</button>
+        <button class="row-menu-item" onclick="closeAllRowMenus();twOpenLocationsTeams(${idx})">📍 Manage Locations &amp; Teams</button>
         <button class="row-menu-item warn" onclick="closeAllRowMenus();twToggleUserStatus(${idx})">${isActive?'🔴 Deactivate':'🟢 Activate'}</button>
         <button class="row-menu-item warn" onclick="closeAllRowMenus();twSuspendUser(${idx})">${isSuspended?'🟢 Unsuspend':'⏸ Suspend'}</button>
         <button class="row-menu-item" onclick="closeAllRowMenus();openResetPasswordForUser(${idx})">🔑 Reset Password</button>
@@ -24952,16 +25055,6 @@ ${printContent}
       const editInfo = document.getElementById('tw-um-edit-info');
       if (editInfo) { editInfo.textContent = 'Last updated: ' + (u._lastUpdated || 'never') + '  ·  Created: ' + (u._created || u.date || '—'); editInfo.style.display = ''; }
       openModal('tw-user-modal');
-      { const vEl=document.getElementById('tw-user-detail-view'); if(vEl) vEl.style.display='none';
-        const eEl=document.getElementById('tw-user-detail-edit'); if(eEl) eEl.style.display=''; }
-      _twUdLocs=[...(u.locs||[])]; _twUdSales=[...(u.salesTeams||[])]; _twUdOps=[...(u.opTeams||[])];
-      document.getElementById('tw-ud-name').value=u.name; document.getElementById('tw-ud-email').value=u.email; document.getElementById('tw-ud-role').value=u.role;
-      const lSel=document.getElementById('tw-ud-locs-add'); if(lSel) lSel.innerHTML='<option value="">+ Add location…</option>'+twLocations.map(l=>`<option value="${l.name}">${l.name}</option>`).join('');
-      const sSel=document.getElementById('tw-ud-sales-add'); if(sSel) sSel.innerHTML='<option value="">+ Add sales team…</option>'+twSalesTeams.map(t=>`<option value="${t.name}">${t.name}</option>`).join('');
-      const oSel=document.getElementById('tw-ud-ops-add'); if(oSel) oSel.innerHTML='<option value="">+ Add operation team…</option>'+twLoginTeams.map(t=>`<option value="${t.name}">${t.name}</option>`).join('');
-      twRenderUdTags();
-      document.getElementById('tw-user-detail-title').textContent='User — '+u.name;
-      const det=document.getElementById('tw-user-detail'); det.style.display=''; det.scrollIntoView({behavior:'smooth',block:'nearest'});
     }
     function twRenderUdTags() {
       twRenderTagGroup('tw-ud-locs-tags',_twUdLocs,'locs','#1a4fa3');
@@ -24985,6 +25078,53 @@ ${printContent}
       if(type==='ops')   _twUdOps=_twUdOps.filter(v=>v!==val);
       twRenderUdTags();
     }
+    // Confirmed real gap (User↔Location/Team many-to-many mapping): opens
+    // the multi-select chip panel with the user's ACTUAL, full set of
+    // saved Locations/Sales-Teams/Operation-Teams (from the new
+    // GET /users/{id}/locations-and-teams endpoint), not just the single
+    // primary location twUsers[idx].locs[0] previously held.
+    function twOpenLocationsTeams(idx) {
+      if (!twCanManageUsers()) { showToast('Only Admin or Product Team can manage users', 'error'); return; }
+      const u = twUsers[idx]; if (!u) return;
+      _twEditUserId = idx;
+
+      function openWithData(locNames, salesNames, opNames) {
+        _twUdLocs = locNames; _twUdSales = salesNames; _twUdOps = opNames;
+        document.getElementById('tw-ud-name').value = u.name || '';
+        document.getElementById('tw-ud-email').value = u.email || '';
+        document.getElementById('tw-ud-role').value = u.role || '';
+        const lSel = document.getElementById('tw-ud-locs-add');
+        if (lSel) lSel.innerHTML = '<option value="">+ Add location…</option>' + (window.twLocations||[]).map(l => `<option value="${l.name}">${l.name}</option>`).join('');
+        const sSel = document.getElementById('tw-ud-sales-add');
+        if (sSel) sSel.innerHTML = '<option value="">+ Add sales team…</option>' + (window.twSalesTeams||[]).map(t => `<option value="${t.name}">${t.name}</option>`).join('');
+        const oSel = document.getElementById('tw-ud-ops-add');
+        if (oSel) oSel.innerHTML = '<option value="">+ Add operation team…</option>' + (window.twLoginTeams||[]).map(t => `<option value="${t.name}">${t.name}</option>`).join('');
+        twRenderUdTags();
+        document.getElementById('tw-user-detail-title').textContent = 'Locations & Teams — ' + u.name;
+        const vEl = document.getElementById('tw-user-detail-view'); if (vEl) vEl.style.display = 'none';
+        const eEl = document.getElementById('tw-user-detail-edit'); if (eEl) eEl.style.display = '';
+        const det = document.getElementById('tw-user-detail'); det.style.display = ''; det.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      if (u._apiId && typeof window.apiReq === 'function') {
+        window.apiReq('GET', '/users/' + u._apiId + '/locations-and-teams').then(function(r) {
+          if (r && r.success && r.data) {
+            openWithData(
+              (r.data.locations || []).map(function(l){ return l.name; }),
+              (r.data.salesTeams || []).map(function(t){ return t.name; }),
+              (r.data.opTeams || []).map(function(t){ return t.name; })
+            );
+          } else {
+            openWithData([...(u.locs||[])], [...(u.salesTeams||[])], [...(u.opTeams||[])]);
+          }
+        }).catch(function() {
+          openWithData([...(u.locs||[])], [...(u.salesTeams||[])], [...(u.opTeams||[])]);
+        });
+      } else {
+        openWithData([...(u.locs||[])], [...(u.salesTeams||[])], [...(u.opTeams||[])]);
+      }
+    }
+
     function twSaveUserDetail() {
       const name=document.getElementById('tw-ud-name').value.trim(), email=document.getElementById('tw-ud-email').value.trim(), role=document.getElementById('tw-ud-role').value;
       if(!name||!email){showToast('Name and email are required','error');return;}
@@ -24992,7 +25132,37 @@ ${printContent}
         const u=twUsers[_twEditUserId]; u.name=name; u.email=email; u.role=role;
         u.locs=[..._twUdLocs]; u.salesTeams=[..._twUdSales]; u.opTeams=[..._twUdOps];
         u.loc=_twUdLocs[0]||''; u.st=_twUdSales[0]||''; u.ot=_twUdOps[0]||'';
-        showToast('User saved','success');
+        // BUGFIX (confirmed real gap — multi-Location/multi-Team mapping
+        // never persisted): this used to only ever mutate local twUsers
+        // state — nothing reached the server, so every selected location/
+        // team chip was lost on refresh. Resolves the name-based chips
+        // (_twUdLocs etc.) to real database ids via the already-synced
+        // twLocations/twSalesTeams/twLoginTeams arrays' _apiId fields, then
+        // pushes the FULL set to the new, dedicated sync endpoints.
+        if (u._apiId && typeof window.apiReq === 'function') {
+          var locIds = _twUdLocs.map(function(nm) {
+            var m = (window.twLocations||[]).find(function(l){ return l.name === nm; });
+            return m && m._apiId;
+          }).filter(function(x){ return !!x; });
+          var salesIds = _twUdSales.map(function(nm) {
+            var m = (window.twSalesTeams||[]).find(function(t){ return t.name === nm; });
+            return m && m._apiId;
+          }).filter(function(x){ return !!x; });
+          var opIds = _twUdOps.map(function(nm) {
+            var m = (window.twLoginTeams||[]).find(function(t){ return t.name === nm; });
+            return m && m._apiId;
+          }).filter(function(x){ return !!x; });
+
+          Promise.all([
+            window.apiReq('PUT', '/users/' + u._apiId + '/locations', locIds),
+            window.apiReq('PUT', '/users/' + u._apiId + '/teams', { salesTeamIds: salesIds, operationTeamIds: opIds })
+          ]).then(function(results) {
+            var failed = results.some(function(r){ return !r || !r.success; });
+            showToast(failed ? '⚠ Saved locally, but database sync failed' : 'User saved to database ✓', failed ? 'warn' : 'success');
+          }).catch(function() { showToast('⚠ Saved locally, but database sync failed', 'warn'); });
+        } else {
+          showToast('User saved (local only — no server record yet)', 'warn');
+        }
       }
       _twEditUserId=null; twRenderUsers(); document.getElementById('tw-user-detail').style.display='none';
       if (typeof persistSave === 'function') { try { persistSave(); } catch(_) {} }
@@ -25148,7 +25318,7 @@ ${printContent}
         }
         // Show/hide Add User button based on role
         const addBtn = document.getElementById('tw-add-user-btn');
-        if (addBtn) addBtn.style.display = (_cu.role==='admin'||_cu.role==='product_team') ? '' : 'none';
+        if (addBtn) { const _cuFix = currentUser || window.currentUser; addBtn.style.display = (_cuFix && (_cuFix.role==='admin'||_cuFix.role==='product_team')) ? '' : 'none'; }
         twRenderUsers();
       }
       else if(pageId==='security-roles') { twRenderSecurity(); }
@@ -27846,6 +28016,39 @@ ${printContent}
           // returned loanId back onto draft._apiId so the next autosave
           // updates the same DB record instead of creating a new one.
           if (typeof window._pushWizardDraft === 'function') window._pushWizardDraft(draft);
+          // BUGFIX (confirmed real gap — draft resume losing uploaded
+          // documents): window._BFP_STORE holds files entirely in browser
+          // memory (base64 dataUrl, from FileReader) until final submit —
+          // nothing pushes them to the server during the draft stage, so a
+          // document uploaded then resumed on another device/session was
+          // simply gone, never having reached the backend at all. Once
+          // this draft has a real server record (_apiId), push any
+          // not-yet-uploaded slot to the same real, already-working
+          // document endpoint every other part of the app uses — tagged
+          // "wizard-<slotId>" so a resume can find and re-attach them (see
+          // _restoreDraftIntoWizard). Best-effort and silent (no toast) —
+          // this runs on every autosave tick, and a failed background
+          // upload here shouldn't interrupt the user; the file remains
+          // available locally and simply gets retried on the next tick.
+          if (draft._apiId && window._BFP_STORE && typeof window.apiReq === 'function') {
+            Object.keys(window._BFP_STORE).forEach(function(slotId) {
+              var store = window._BFP_STORE[slotId];
+              if (!store || store._uploaded || !store.dataUrl) return;
+              store._uploaded = true; // mark immediately — avoid re-sending on the next tick while this one is still in flight
+              fetch(store.dataUrl).then(function(res) { return res.blob(); }).then(function(blob) {
+                var file = new File([blob], store.name || (slotId + '.dat'), { type: store.mimetype || blob.type });
+                var formData = new FormData();
+                formData.append('file', file);
+                formData.append('documentType', 'wizard-' + slotId);
+                var tok = (typeof _lsGet === 'function') ? _lsGet('loanms_token') : localStorage.getItem('loanms_token');
+                var headers = tok ? { 'Authorization': 'Bearer ' + tok } : {};
+                return fetch('/api/loans/' + draft._apiId + '/documents', { method: 'POST', headers: headers, body: formData });
+              }).catch(function(e) {
+                console.warn('[Draft Documents] background upload failed for', slotId, e);
+                store._uploaded = false; // allow retry on the next autosave tick
+              });
+            });
+          }
         } catch (e) { /* autosave must never break the wizard */ }
       }
 
@@ -27871,6 +28074,27 @@ ${printContent}
             if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!draft[el.id];
             else el.value = draft[el.id];
           });
+          // BUGFIX (confirmed real gap): w-sales (and any other select whose
+          // <option> list is built dynamically from w-location, via
+          // wLocationChange/wsddRebuild) has its options populated by
+          // LOCATION, not by this generic restore-loop. If the loop above
+          // set el.value on w-sales BEFORE its real option list existed for
+          // this location, that assignment silently did nothing (a native
+          // <select>.value = X with no matching <option value="X"> is a
+          // no-op) — so a resumed draft's Sales Person appeared blank even
+          // though it actually was saved. Re-run the location→sales cascade
+          // now that w-location has its restored value, then re-apply the
+          // saved w-sales value against the now-correct option list.
+          if (draft['w-location'] && typeof wLocationChange === 'function') {
+            try { wLocationChange(); } catch (e) {}
+          }
+          if (draft['w-sales']) {
+            var salesEl = document.getElementById('w-sales');
+            if (salesEl) salesEl.value = draft['w-sales'];
+          }
+          if (typeof wsddRebuild === 'function') {
+            try { wsddRebuild('sales'); } catch (e) {}
+          }
           if (window.KYC) {
             if (draft._kycPanData)    KYC.pan.data    = draft._kycPanData;
             if (draft._kycAadharData) KYC.aadhar.data = draft._kycAadharData;
@@ -27888,6 +28112,42 @@ ${printContent}
             // skipped.
             if (draft._kycPanData    && typeof kycRenderPanExtracted    === 'function') kycRenderPanExtracted(draft._kycPanData);
             if (draft._kycAadharData && typeof kycRenderAadharExtracted === 'function') kycRenderAadharExtracted(draft._kycAadharData);
+          }
+          // BUGFIX (confirmed real gap — draft resume losing uploaded
+          // documents): fetches whatever wizardAutoSaveDraft's background
+          // upload already pushed to the server (tagged "wizard-<slotId>")
+          // and reconstructs a minimal _BFP_STORE[slotId] entry so the
+          // Documents step correctly shows "already uploaded" instead of
+          // an empty slot. Uses the real server URL for viewing/download
+          // (not a re-fetched dataUrl — the file content itself doesn't
+          // need to round-trip back into browser memory just to show
+          // "this slot is filled").
+          if (draft._apiId && typeof window.apiReq === 'function') {
+            window.apiReq('GET', '/loans/' + draft._apiId + '/documents').then(function(r) {
+              if (!r || !r.success || !Array.isArray(r.data)) return;
+              if (!window._BFP_STORE) window._BFP_STORE = {};
+              r.data.forEach(function(doc) {
+                var docType = doc.documentType || '';
+                if (!docType.indexOf || docType.indexOf('wizard-') !== 0) return;
+                var slotId = docType.substring('wizard-'.length);
+                if (window._BFP_STORE[slotId]) return; // already has a local (unsaved-this-session) copy — don't clobber it
+                // fileRef is "{loanId}/{guid}.ext" (see LoansController.
+                // UploadDocument) — DownloadDocument's {fileName} route
+                // param is just the final segment, not the whole fileRef.
+                var storedFileName = (doc.fileRef || '').split('/').pop() || '';
+                window._BFP_STORE[slotId] = {
+                  name: doc.documentName || 'document',
+                  mimetype: '',
+                  url: storedFileName ? ('/api/loans/' + draft._apiId + '/documents/' + storedFileName) : '',
+                  isImage: /\.(jpe?g|png|gif|webp)$/i.test(storedFileName),
+                  isPdf: /\.pdf$/i.test(storedFileName),
+                  pdfPassword: null, files: [],
+                  _uploaded: true, _fromServer: true
+                };
+              });
+              if (typeof window._docUpdateProgress === 'function') { try { window._docUpdateProgress(); } catch (e) {} }
+              if (typeof window.renderWizard === 'function') { try { window.renderWizard(); } catch (e) {} }
+            }).catch(function(e) { console.warn('[Draft Documents] restore fetch failed:', e); });
           }
           if (window.PSE && draft._pseAnalysis) PSE.analysisResult = draft._pseAnalysis;
           // Restore Step 9's previously-selected bank(s), if the resumed
@@ -28426,7 +28686,12 @@ ${printContent}
       // Reset fields
       ['tw-um-name','tw-um-email','tw-um-mobile','tw-um-password'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
       const uidDisp = document.getElementById('tw-um-uid-display');
-      if (uidDisp) uidDisp.textContent = 'USR-' + String(twUsers.length + 1).padStart(4,'0') + ' (preview)';
+      // The real Employee Code (MH-{ROLE}-{LOCATION}-{RANDOM4}) is
+      // generated server-side, randomly, at save time — it genuinely can't
+      // be predicted here (that's the whole point: unpredictable, not
+      // sequential). Showing the format itself, not a fake guessed value,
+      // avoids this preview ever contradicting what the user actually gets.
+      if (uidDisp) uidDisp.textContent = 'MH-XXX-XXX-#### (auto-generated on save)';
       document.getElementById('tw-user-modal-title').textContent = '＋ Create New User';
       const editInfo = document.getElementById('tw-um-edit-info');
       if (editInfo) editInfo.style.display = 'none';
@@ -37341,6 +37606,23 @@ function _stgReadMailFormCfg() {
 //    so the form and the "is invitation enabled" pre-checks don't need a
 //    round-trip on every page load. ──
 async function stgSaveMailConfig() {
+  // BUGFIX (confirmed real UX bug): no double-submit guard existed — a
+  // user clicking Save multiple times while the async request was still
+  // in flight (e.g. slow network) fired this function once per click,
+  // each showing its own "Settings saved" toast (harmless, since every
+  // call saves the same data — but confusing to see stacked 2-3x).
+  // Disabling the button for the duration of the save prevents that.
+  const saveBtn = document.querySelector('[onclick="stgSaveMailConfig()"]');
+  if (saveBtn && saveBtn.disabled) return; // already saving — ignore extra clicks
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    await _stgSaveMailConfigInner();
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+async function _stgSaveMailConfigInner() {
   const cfg = _stgReadMailFormCfg();
 
   // Validation
@@ -37603,21 +37885,10 @@ function invHandlePhoto(input) {
   reader.readAsDataURL(file);
 }
 
-function invApplyUID() {
-  if (_invTargetIdx === null) return;
-  const raw = (document.getElementById('inv-custom-uid')?.value || '').trim();
-  if (!raw) { showToast('Enter a custom ID first', 'warn'); return; }
-  // Check uniqueness
-  if (twUsers.some((u, i) => i !== _invTargetIdx && u.uid === raw)) {
-    showToast('This User ID is already in use', 'error'); return;
-  }
-  twUsers[_invTargetIdx].uid = raw;
-  const uidDisplay = document.getElementById('inv-uid-display');
-  const summaryUID = document.getElementById('inv-summary-uid');
-  if (uidDisplay) uidDisplay.textContent = raw;
-  if (summaryUID) summaryUID.textContent = raw;
-  showToast('User ID updated to ' + raw, 'success');
-}
+// invApplyUID() removed — see the HTML comment above where its "Apply"
+// button used to be, in the same modal. The function itself only ever
+// mutated the in-memory twUsers array (never persisted), and conflicted
+// with the new server-generated, immutable Employee Code.
 
 function invTogglePass(id) {
   const el = document.getElementById(id);

@@ -613,6 +613,10 @@ public class WizardController : BaseController
     {
         var loan = await _db.Loans
             .Include(l => l.Customer)
+            .Include(l => l.AssignedTo)
+            .Include(l => l.Dsa)
+            .Include(l => l.Partner)
+            .Include(l => l.Location)
             .FirstOrDefaultAsync(l => l.Id == loanId && !l.IsDeleted && l.Status == LoanStatus.Draft);
 
         if (loan == null)
@@ -665,7 +669,39 @@ public class WizardController : BaseController
             DsaId       = loan.DsaId,
             PartnerId   = loan.PartnerId,
             LocationId  = loan.LocationId,
+            DsaName       = loan.Dsa?.Name,
+            PartnerName   = loan.Partner?.Name,
+            LocationName  = loan.Location?.Name,
             EfinId      = loan.LoanNumber,
+            // BUGFIX (confirmed real gap — draft resume losing Insurance/
+            // Property/Vehicle/Education fields): Loan.ProductDataJson was
+            // already correctly saved by ApplyMapping, but GetDraft never
+            // read it back — the frontend's own restore path (see
+            // _fetchWizardDraftFields in api-bridge.js) already spreads
+            // dto.ProductData back onto individual app.insXxx/propXxx/
+            // carXxx/eduXxx fields when present, so this alone completes
+            // that round-trip.
+            ProductData = string.IsNullOrWhiteSpace(loan.ProductDataJson)
+                ? null
+                : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(loan.ProductDataJson),
+            // BUGFIX (confirmed real gap — draft resume losing Channel/
+            // Source): both are saved, but only ever packed into Remarks
+            // as "Source: X | Channel: Y" (see ApplyMapping/Submit's own
+            // Remarks-construction, unchanged) — parsed back out with the
+            // exact same fixed format, not guessed at. Correctly yields
+            // null (not a wrong value) if Remarks doesn't match the
+            // expected shape, e.g. an older draft saved before this
+            // format existed.
+            Source  = System.Text.RegularExpressions.Regex.Match(loan.Remarks ?? "", @"Source:\s*([^|]+?)\s*(\||$)").Groups[1].Value is { Length: > 0 } _src ? _src : null,
+            Channel = System.Text.RegularExpressions.Regex.Match(loan.Remarks ?? "", @"Channel:\s*([^|]+?)\s*(\||$)").Groups[1].Value is { Length: > 0 } _chn ? _chn : null,
+            // BUGFIX (confirmed real gap — draft resume losing Sales Person):
+            // DsaId/PartnerId/LocationId were already correctly saved and
+            // returned here, but SalesPerson never was, even though the
+            // WizardSubmitDto property has existed all along — resolve it
+            // from the same AssignedToUserId the rest of the app already
+            // uses for "Sales Person" (see LoanDto's own Sales Person
+            // resolution for the equivalent pattern).
+            SalesPerson = loan.AssignedTo?.FullName,
             // Round-trips Step 9's previously-selected bank(s) back to the
             // wizard on resume — see Loan.SelectedLenderNames's own doc
             // comment for why this is a dedicated field rather than parsed

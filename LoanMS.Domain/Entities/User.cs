@@ -30,6 +30,16 @@ public class User : BaseEntity
     // their Location.
     public int? LocationId { get; set; }
 
+    // Unique, permanent Employee Code / User ID: MH-{ROLE}-{LOCATION}-{RANDOM4}
+    // (e.g. "MH-ADM-HO-5832"). Generated once, server-side, at creation time
+    // by EmployeeCodeGenerator — never regenerated on role/location change,
+    // since it's a permanent identifier, not a live label. Nullable only to
+    // support existing users created before this column existed; the
+    // backfill migration fills these in, but the column itself stays
+    // nullable rather than a NOT NULL default so a failed/skipped backfill
+    // row is visibly "not yet assigned" rather than silently wrong.
+    public string? EmployeeCode { get; set; }
+
     // Profile photo (base64 data URL, e.g. "data:image/png;base64,...") set
     // via the self-service PUT /api/users/profile endpoint. Previously only
     // ever stored in browser localStorage (user-profile.js / USER_PROFILES),

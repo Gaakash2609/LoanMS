@@ -9,11 +9,15 @@ public class LoanService : ILoanService
 {
     private readonly IUnitOfWork   _uow;
     private readonly ICacheService _cache;
+    private readonly IEmailService _emailService;
+    private readonly IEmailTemplateProvider _emailTemplates;
 
-    public LoanService(IUnitOfWork uow, ICacheService cache)
+    public LoanService(IUnitOfWork uow, ICacheService cache, IEmailService emailService, IEmailTemplateProvider emailTemplates)
     {
         _uow   = uow;
         _cache = cache;
+        _emailService = emailService;
+        _emailTemplates = emailTemplates;
     }
 
     // Roles that may see internal routing data (Remarks field contains lender/channel/source).
@@ -210,7 +214,86 @@ public class LoanService : ILoanService
         // No list/dashboard cache to invalidate — see CreateAsync comment above.
 
         var updated = await _uow.Loans.GetWithDetailsAsync(id);
+
+        // BUGFIX (confirmed real gap — "Stage notification emails not
+        // being sent"): the "stage" template (and the status-specific
+        // approval/disburse/rejection templates) existed and were fully
+        // editable in Settings, but nothing on the backend ever actually
+        // called IEmailService on a status change — this is the missing
+        // trigger. Non-fatal by design — a failed/unconfigured email must
+        // never roll back an already-successful status change.
+        try
+        {
+            await SendStageNotificationEmailAsync(updated!, request.NewStatus, request.Comment);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Stage Notification Email] failed for loan {id}: {ex.Message}");
+        }
+
         return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), $"Loan status updated to {request.NewStatus}.");
+    }
+
+    /// <summary>
+    /// Sends the general "stage" notification for every status change, plus
+    /// the status-specific "approval"/"disburse"/"rejection" template when
+    /// the new status matches one of those three. Both use DB-saved
+    /// overrides (Settings → All Email Templates) when present, falling
+    /// back to a built-in default otherwise — same reasoning as
+    /// UsersController.SendInvitationEmailAsync (this server-side trigger
+    /// has no access to the frontend's own default template text).
+    /// </summary>
+    private async Task SendStageNotificationEmailAsync(Loan loan, LoanStatus newStatus, string? comment)
+    {
+        if (loan.Customer == null || string.IsNullOrWhiteSpace(loan.Customer.Email)) return;
+
+        var vars = new Dictionary<string, string>
+        {
+            ["{{name}}"] = loan.Customer.FullName ?? "",
+            ["{{app_id}}"] = loan.LoanNumber ?? loan.Id.ToString(),
+            ["{{stage}}"] = newStatus.ToString(),
+            ["{{amount}}"] = (loan.ApprovedAmount ?? loan.RequestedAmount).ToString("N0"),
+            ["{{loan_type}}"] = loan.LoanType.ToString(),
+            ["{{roi}}"] = loan.InterestRate.ToString("0.0") + "%",
+            ["{{emi}}"] = (loan.MonthlyEmi ?? 0).ToString("N0"),
+            ["{{emi_date}}"] = (loan.DisbursedAt ?? DateTime.UtcNow).AddMonths(1).ToString("dd MMM yyyy"),
+            ["{{reason}}"] = comment ?? "",
+            ["{{signature}}"] = "LoanMS Team"
+        };
+
+        async Task SendOne(string templateKey, string defaultSubject, string defaultBody)
+        {
+            var (dbSubject, dbBody) = await _emailTemplates.GetTemplateAsync(templateKey);
+            var subject = dbSubject ?? defaultSubject;
+            var body    = dbBody ?? defaultBody;
+            foreach (var kv in vars) { subject = subject.Replace(kv.Key, kv.Value); body = body.Replace(kv.Key, kv.Value); }
+            await _emailService.SendAsync(loan.Customer.Email!, loan.Customer.FullName ?? "", subject, body);
+        }
+
+        // General "stage" notification — every status change.
+        await SendOne("stage",
+            "Your Loan Application {{app_id}} — Status Update",
+            "<p>Dear {{name}},</p><p>Your loan application <strong>{{app_id}}</strong> has moved to stage: <strong>{{stage}}</strong>.</p><p style=\"color:#9ca3af;font-size:12px\">{{signature}}</p>");
+
+        // Status-specific template, on top of (not instead of) the general one.
+        if (newStatus == LoanStatus.Approved)
+        {
+            await SendOne("approval",
+                "Your Loan {{app_id}} Has Been Approved ✅",
+                "<p>Dear {{name}},</p><p>Congratulations! Your {{loan_type}} application <strong>{{app_id}}</strong> for ₹{{amount}} at {{roi}} has been approved.</p><p style=\"color:#9ca3af;font-size:12px\">{{signature}}</p>");
+        }
+        else if (newStatus == LoanStatus.Disbursed)
+        {
+            await SendOne("disburse",
+                "Loan {{app_id}} Disbursed 🏦",
+                "<p>Dear {{name}},</p><p>Your {{loan_type}} amount of ₹{{amount}} has been disbursed. Your first EMI of ₹{{emi}} is due on {{emi_date}}.</p><p style=\"color:#9ca3af;font-size:12px\">{{signature}}</p>");
+        }
+        else if (newStatus == LoanStatus.Rejected)
+        {
+            await SendOne("rejection",
+                "Update on Your Loan Application {{app_id}}",
+                "<p>Dear {{name}},</p><p>We regret to inform you that your {{loan_type}} application <strong>{{app_id}}</strong> could not be approved at this time.{{reason}}</p><p style=\"color:#9ca3af;font-size:12px\">{{signature}}</p>");
+        }
     }
 
     /// <summary>

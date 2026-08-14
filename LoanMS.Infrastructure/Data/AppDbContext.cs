@@ -26,6 +26,7 @@ public class AppDbContext : DbContext
     public DbSet<Location>          Locations           => Set<Location>();
     public DbSet<Team>              Teams               => Set<Team>();
     public DbSet<TeamMember>        TeamMembers         => Set<TeamMember>();
+    public DbSet<UserLocation>      UserLocations       => Set<UserLocation>();
     public DbSet<DsaPartner>        DsaPartners         => Set<DsaPartner>();
     public DbSet<DsaDocument>       DsaDocuments        => Set<DsaDocument>();
     public DbSet<AppSetting>        AppSettings         => Set<AppSetting>();
@@ -69,6 +70,7 @@ public class AppDbContext : DbContext
             e.HasKey(u => u.Id);
             e.HasIndex(u => u.Email).IsUnique();
             e.HasIndex(u => u.LocationId);
+            e.HasIndex(u => u.EmployeeCode).IsUnique();
             e.Property(u => u.FullName).HasMaxLength(150).IsRequired();
             e.Property(u => u.Email).HasMaxLength(200).IsRequired();
             e.Property(u => u.PasswordHash).IsRequired();
@@ -77,6 +79,7 @@ public class AppDbContext : DbContext
             e.Property(u => u.LocationName).HasMaxLength(150);
             e.Property(u => u.SalesTeam).HasMaxLength(150);
             e.Property(u => u.OpTeam).HasMaxLength(150);
+            e.Property(u => u.EmployeeCode).HasMaxLength(40);
             e.HasQueryFilter(u => !u.IsDeleted);
             e.HasOne(u => u.Location).WithMany(loc => loc.Users).HasForeignKey(u => u.LocationId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
         });
@@ -253,6 +256,7 @@ public class AppDbContext : DbContext
         mb.Entity<Location>(e => {
             e.HasKey(l => l.Id);
             e.Property(l => l.Name).HasMaxLength(100).IsRequired();
+            e.Property(l => l.Code).HasMaxLength(20).IsRequired();
             e.HasQueryFilter(l => !l.IsDeleted);
         });
 
@@ -341,6 +345,7 @@ public class AppDbContext : DbContext
         mb.Entity<Team>(e => {
             e.HasKey(t => t.Id);
             e.Property(t => t.Name).HasMaxLength(100).IsRequired();
+            e.Property(t => t.IsActive).HasDefaultValue(true);
             e.HasQueryFilter(t => !t.IsDeleted);
             e.HasOne(t => t.Location).WithMany().HasForeignKey(t => t.LocationId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
             e.HasOne(t => t.TeamLead).WithMany().HasForeignKey(t => t.TeamLeadUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
@@ -351,6 +356,14 @@ public class AppDbContext : DbContext
             e.HasQueryFilter(m => !m.IsDeleted);
             e.HasOne(m => m.Team).WithMany(t => t.Members).HasForeignKey(m => m.TeamId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(m => m.User).WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        mb.Entity<UserLocation>(e => {
+            e.HasKey(m => m.Id);
+            e.HasQueryFilter(m => !m.IsDeleted);
+            e.HasIndex(m => new { m.UserId, m.LocationId }).IsUnique();
+            e.HasOne(m => m.User).WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(m => m.Location).WithMany().HasForeignKey(m => m.LocationId).OnDelete(DeleteBehavior.Restrict);
         });
 
         mb.Entity<DsaPartner>(e => {

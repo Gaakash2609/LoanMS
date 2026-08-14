@@ -67,20 +67,46 @@ try
     );
 
     // ── Data Protection ───────────────────────────────────────────────────────
-    // MUST persist keys to disk, in the same place the SQLite DB already lives
-    // (so it survives every restart/redeploy exactly as reliably as the DB does).
-    // Without this, ASP.NET Core generates a brand-new, ephemeral key ring on
-    // every process start — every secret encrypted with the OLD ring (Gmail SMTP
-    // password, InCred client secret, and the Gemini/OpenAI AI keys saved via
-    // Settings) silently fails to decrypt after that. AiKeyStore/EmailConfigStore
-    // catch that failure quietly and fall back to appsettings.json, which has no
-    // OpenAI key at all — so "the key saves fine but extraction still doesn't
-    // work" kept happening after every restart, no matter how many times a key
-    // was re-saved.
+    // Encrypts things like the AI-provider keys, SMTP password, and InCred
+    // client secret saved via Settings. Persistence target depends on the
+    // database provider — see the branch below and PostgresXmlRepository.cs's
+    // doc comment for the full history of why this matters (TL;DR: on
+    // PostgreSQL/ECS, local-disk persistence meant every redeploy silently
+    // broke decryption of every previously-saved secret).
     var dataProtectionBuilder = builder.Services.AddDataProtection()
-        .SetApplicationName("LoanMS")
-        .PersistKeysToFileSystem(new DirectoryInfo(
+        .SetApplicationName("LoanMS");
+
+    // BUGFIX (confirmed real bug — AI/SMTP/InCred keys "randomly vanishing"):
+    // on PostgreSQL (i.e. real ECS/RDS deployments), persist the key ring to
+    // the database instead of local disk — see PostgresXmlRepository.cs for
+    // the full "why". SQLite/dev mode keeps the original file-system
+    // persistence, where the comment's original reasoning (single local
+    // machine, disk is as durable as the DB) still genuinely holds.
+    var _dpDbProvider = (builder.Configuration["Database:Provider"] ?? "sqlite").ToLowerInvariant();
+    if (_dpDbProvider is "postgresql" or "postgres")
+    {
+        var _dpConnStr = builder.Configuration.GetConnectionString("PostgreSQL")
+                       ?? builder.Configuration.GetConnectionString("DefaultConnection");
+        if (!string.IsNullOrWhiteSpace(_dpConnStr))
+        {
+            dataProtectionBuilder.AddKeyManagementOptions(o =>
+                o.XmlRepository = new LoanMS.API.PostgresXmlRepository(_dpConnStr));
+        }
+        else
+        {
+            // No connection string available yet at this point — fail loud
+            // rather than silently falling back to the ephemeral local-disk
+            // behavior this fix exists to eliminate.
+            throw new InvalidOperationException(
+                "Data Protection is configured for PostgreSQL persistence but no " +
+                "PostgreSQL/DefaultConnection connection string was found.");
+        }
+    }
+    else
+    {
+        dataProtectionBuilder.PersistKeysToFileSystem(new DirectoryInfo(
             Path.Combine(builder.Environment.ContentRootPath, "dataprotection-keys")));
+    }
 
     // Encrypt the key ring at rest so it isn't stored as plain XML on disk.
     // DPAPI ties encryption to the current Windows user/machine — fine for a
@@ -166,6 +192,8 @@ try
     builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
     builder.Services.AddScoped<LoanMS.Infrastructure.Services.IEmailConfigStore, LoanMS.Infrastructure.Services.EmailConfigStore>();
     builder.Services.AddScoped<IEmailService, LoanMS.Infrastructure.Services.EmailService>();
+    builder.Services.AddScoped<LoanMS.Application.Interfaces.IEmailTemplateProvider, LoanMS.Infrastructure.Services.EmailTemplateProvider>();
+    builder.Services.AddScoped<LoanMS.Application.Interfaces.IEmployeeCodeGenerator, LoanMS.Infrastructure.Services.EmployeeCodeGenerator>();
     builder.Services.AddScoped<ICibilAnalysisService, CibilAnalysisService>();
 
     // ── SLA breach + task follow-up automation (🔴 CRITICAL item #4/#9) ──────
@@ -642,6 +670,27 @@ try
             }
             db.SaveChanges();
             logger.LogInformation("Seed users created.");
+
+            // ── Backfill Employee Codes for existing users ──────────────────────
+            // Confirmed real gap (Employee Code feature build): users created
+            // before this feature existed have EmployeeCode = NULL. Runs on
+            // every startup but is a no-op once every user has one — cheap to
+            // leave in place rather than a one-shot migration, and correctly
+            // covers new default-seed users created just above too. Reuses
+            // IEmployeeCodeGenerator (same service UserService.CreateAsync
+            // uses) rather than duplicating its random+uniqueness-retry logic
+            // here, so there is exactly one place that logic lives.
+            var codeGen = scope.ServiceProvider.GetRequiredService<LoanMS.Application.Interfaces.IEmployeeCodeGenerator>();
+            var usersNeedingCode = db.Users.Where(u => u.EmployeeCode == null || u.EmployeeCode == "").ToList();
+            if (usersNeedingCode.Count > 0)
+            {
+                foreach (var u in usersNeedingCode)
+                {
+                    u.EmployeeCode = await codeGen.GenerateAsync(u.Role, u.LocationName);
+                }
+                db.SaveChanges();
+                logger.LogInformation("Backfilled Employee Codes for {Count} existing user(s).", usersNeedingCode.Count);
+            }
 
 
             // Seed payout rules

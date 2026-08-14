@@ -362,9 +362,38 @@ public class SettingsController : BaseController
         return Ok(ApiResponseDto<object>.Ok(settings));
     }
 
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     [HttpGet("{key}")]
     public async Task<IActionResult> Get(string key)
     {
+        // BUGFIX (confirmed real bug — 403s reported in live console for
+        // every non-Admin role): this generic GET-by-key endpoint inherited
+        // the class-level [Authorize(Roles="Admin")], meaning ONLY Admin
+        // could read ANY setting through it — including branding keys
+        // (efin_logo, efin_banner_logo, efin_brand_name, etc.) that every
+        // role, and even the pre-login page, needs to render the logo.
+        // Method-level [AllowAnonymous] overrides the class attribute, but
+        // to avoid turning this into "any key readable by anyone" (which
+        // would leak things like incred_credentials or efin_role_permissions
+        // to non-Admins), only this small, explicit whitelist of genuinely
+        // public branding keys bypasses the check; everything else still
+        // enforces the exact same Admin-only rule as before, just done
+        // manually here instead of via the attribute.
+        var publicKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "efin_logo", "efin_banner_logo", "efin_logo_icon_size",
+            "efin_logo_banner_size", "efin_brand_name", "efin_brand_sub",
+            // These two are read (not written) by every role during normal
+            // use — CAM salary-band display, InCred comment-template
+            // picker — not Admin-only data, just Admin-editable.
+            "efin_cam_matrix", "efin_incred_comment_templates"
+        };
+        if (!publicKeys.Contains(key))
+        {
+            if (!(User.Identity?.IsAuthenticated ?? false) || !User.IsInRole("Admin"))
+                return Forbid();
+        }
+
         var setting = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == key);
         if (setting == null) return NotFound(ApiResponseDto<bool>.Fail("Setting not found."));
         return Ok(ApiResponseDto<object>.Ok(new { setting.Key, setting.Value, setting.Category }));

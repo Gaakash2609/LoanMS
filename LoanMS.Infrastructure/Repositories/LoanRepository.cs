@@ -74,15 +74,105 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
     /// reuse this exact rule set to scope customers via their loans, instead
     /// of re-implementing the Sales/Dsa/Partner/Manager rules a second time.
     /// </summary>
-    internal static IQueryable<Loan> ApplyVisibilityScope(AppDbContext ctx, IQueryable<Loan> query, int currentUserId, string? currentUserRole)
+    // BUGFIX (confirmed real access-control bypass — ReportsController used
+    // _db.Loans directly, unscoped, in 7 endpoints): changed from `internal`
+    // to `public` ONLY — no logic change — so ReportsController (a
+    // different assembly, LoanMS.API) can call this exact same, single,
+    // centralized method instead of ReportsController inventing its own,
+    // second visibility-rule. Every other caller (LoansController,
+    // DashboardController, SearchController) is completely unaffected by
+    // this visibility widening.
+    public static IQueryable<Loan> ApplyVisibilityScope(AppDbContext ctx, IQueryable<Loan> query, int currentUserId, string? currentUserRole)
     {
         var role = currentUserRole ?? string.Empty;
 
         if (string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase))
             return query;
 
+        // ── Admin-assigned scope expansion (explicit system-owner override) ─────
+        // Supersedes the earlier, narrower conclusion that "Manager/TeamLeader =
+        // team-only, LocationHead = location-only" — those role-specific base
+        // rules below are PRESERVED (nothing removed), but for every restricted
+        // role, an Admin can now ALSO explicitly assign additional Locations
+        // (UserLocations) and/or Sales/Operation Teams (TeamMembers, same table
+        // Manager/OperationManager already correctly used) to widen that user's
+        // authorized scope — combined via OR, never AND, per the explicit
+        // requirement that a user must not need to match every mapping
+        // simultaneously.
+        //
+        // BUGFIX (confirmed real risk during focused EF Core-translatability
+        // verification, fixed before any actual runtime failure was
+        // observed): the first version of this expansion built a separate,
+        // pre-filtered IQueryable<Loan> per role, then tried to fold it into
+        // the final query via `baseFiltered.Any(b => b.Id == l.Id)` inside
+        // another .Where() lambda. That's a correlated-subquery-of-a-
+        // subquery pattern (several roles' base rules are themselves built
+        // from nested Union/Contains subqueries) that EF Core is not
+        // guaranteed to translate — it risks throwing "The LINQ expression
+        // could not be translated" at runtime for some role branches.
+        // Rewritten below so every role writes ONE single, flat .Where()
+        // lambda combining its own base condition with the same four
+        // admin-scope OR-terms directly, inline — no nested-IQueryable
+        // composition at all, which is the standard, guaranteed-safe EF
+        // Core pattern (at the small cost of repeating those four terms
+        // per role instead of factoring them into a shared helper).
+        //
+        // A user with zero admin-assigned mappings gets zero additional
+        // scope from this — adminAssignedTeamUserIds/adminAssignedLocationIds
+        // are empty in that case, so .Contains() on them never matches
+        // anything, and each role's own base condition (still present via
+        // ||) is unaffected. This keeps "no mappings" secure-by-default
+        // (Case 5 in the original spec) while letting explicit mappings
+        // expand access when present.
+        // BUGFIX (confirmed real precision issue during focused Team-schema
+        // verification — Sales vs Login team category check): the original
+        // version combined Sales- and Login-type admin-assigned teams into
+        // one undifferentiated "team-mates" list, checked against all three
+        // of CreatedByUserId/AssignedToUserId/LoginUserId uniformly. That
+        // let a user admin-assigned to ONLY a Sales Team incidentally gain
+        // visibility into an unrelated Login/processing queue, if one of
+        // their Sales-teammates happened to ALSO independently belong to
+        // some Login-type team elsewhere — a real over-grant the spec's own
+        // distinct "Sales Teams" vs "Operation Teams" categorization does
+        // not intend. Split into two separate sets, matching the same
+        // Type == "Sales" / Type == "Login" distinction the existing
+        // Manager and OperationManager base rules below already correctly
+        // maintain — Sales-team admin-assignments only ever expand
+        // Created/AssignedTo visibility; Login-team admin-assignments only
+        // ever expand LoginUserId visibility.
+        var adminAssignedSalesTeamUserIds = ctx.Set<TeamMember>()
+            .Where(tm => !tm.IsDeleted && tm.Team.Type == "Sales" && ctx.Set<TeamMember>()
+                .Any(mine => mine.UserId == currentUserId && !mine.IsDeleted && mine.TeamId == tm.TeamId))
+            .Select(tm => tm.UserId)
+            .Union(ctx.Set<Team>()
+                .Where(t => t.Type == "Sales" && t.TeamLeadUserId != null && ctx.Set<TeamMember>()
+                    .Any(mine => mine.UserId == currentUserId && !mine.IsDeleted && mine.TeamId == t.Id))
+                .Select(t => t.TeamLeadUserId!.Value));
+
+        var adminAssignedLoginTeamUserIds = ctx.Set<TeamMember>()
+            .Where(tm => !tm.IsDeleted && tm.Team.Type == "Login" && ctx.Set<TeamMember>()
+                .Any(mine => mine.UserId == currentUserId && !mine.IsDeleted && mine.TeamId == tm.TeamId))
+            .Select(tm => tm.UserId)
+            .Union(ctx.Set<Team>()
+                .Where(t => t.Type == "Login" && t.TeamLeadUserId != null && ctx.Set<TeamMember>()
+                    .Any(mine => mine.UserId == currentUserId && !mine.IsDeleted && mine.TeamId == t.Id))
+                .Select(t => t.TeamLeadUserId!.Value));
+
+        var adminAssignedLocationIds = ctx.Set<UserLocation>()
+            .Where(ul => ul.UserId == currentUserId && !ul.IsDeleted)
+            .Select(ul => ul.LocationId);
+
+        // Local bool functions are avoided entirely here — see the BUGFIX
+        // comment above for why: every role below writes one flat,
+        // self-contained .Where() lambda instead.
+
         if (string.Equals(role, "Sales", StringComparison.OrdinalIgnoreCase))
-            return query.Where(l => l.CreatedByUserId == currentUserId || l.AssignedToUserId == currentUserId);
+            return query.Where(l =>
+                l.CreatedByUserId == currentUserId || l.AssignedToUserId == currentUserId ||
+                adminAssignedSalesTeamUserIds.Contains(l.CreatedByUserId) ||
+                (l.AssignedToUserId.HasValue && adminAssignedSalesTeamUserIds.Contains(l.AssignedToUserId.Value)) ||
+                (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
+                (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
 
         if (string.Equals(role, "Dsa", StringComparison.OrdinalIgnoreCase))
             // Own DSA cases: never compare currentUserId directly to
@@ -98,22 +188,30 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
             return query.Where(l =>
                 (l.DsaId != null && l.Dsa != null && l.Dsa.LinkedUserId == currentUserId) ||
                 (l.PartnerId != null && l.Partner != null && l.Partner.MappedDsa != null &&
-                 l.Partner.MappedDsa.LinkedUserId == currentUserId));
+                 l.Partner.MappedDsa.LinkedUserId == currentUserId) ||
+                adminAssignedSalesTeamUserIds.Contains(l.CreatedByUserId) ||
+                (l.AssignedToUserId.HasValue && adminAssignedSalesTeamUserIds.Contains(l.AssignedToUserId.Value)) ||
+                (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
+                (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
 
         if (string.Equals(role, "Partner", StringComparison.OrdinalIgnoreCase))
             // Same rule for Partner: never compare currentUserId directly to Loan.PartnerId.
-            return query.Where(l => l.PartnerId != null && l.Partner != null && l.Partner.LinkedUserId == currentUserId);
+            return query.Where(l =>
+                (l.PartnerId != null && l.Partner != null && l.Partner.LinkedUserId == currentUserId) ||
+                adminAssignedSalesTeamUserIds.Contains(l.CreatedByUserId) ||
+                (l.AssignedToUserId.HasValue && adminAssignedSalesTeamUserIds.Contains(l.AssignedToUserId.Value)) ||
+                (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
+                (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
 
-        // Manager / TeamLeader (Sales hierarchy) — corrected to a
-        // team-MEMBERSHIP rule, verified against the reference Odoo project's
-        // actual security.xml record rule: `salles_id in user.team_sales_ids`
-        // (Team Leader/Manager see every loan tagged to a Sales Team they
-        // belong to — as leader OR member — not just loans at "their"
-        // Location). LoanMS's Loan entity has no direct Sales-Team tag field
-        // (unlike Odoo's `salles_id`), so this is derived at query time:
-        // a loan counts if its creator or assignee is themselves a member
-        // (or the lead) of any Sales-type Team the current user also
-        // belongs to.
+        // Manager / TeamLeader (Sales hierarchy) — base rule is team-
+        // MEMBERSHIP (Team Leader/Manager see every loan tagged to a Sales
+        // Team they belong to, as leader OR member), same derivation as
+        // before. An Admin can now ALSO explicitly widen this user's scope
+        // with additional Locations/Teams (the same OR-terms every other
+        // role branch uses) — the old conclusion that this role is "team-
+        // only" no longer holds as the sole rule, per the explicit system-
+        // owner override; the team-membership rule itself is preserved as
+        // the base, not replaced.
         if (string.Equals(role, "Manager", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(role, "TeamLeader", StringComparison.OrdinalIgnoreCase))
         {
@@ -132,21 +230,28 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
 
             return query.Where(l =>
                 teamUserIds.Contains(l.CreatedByUserId) ||
-                (l.AssignedToUserId.HasValue && teamUserIds.Contains(l.AssignedToUserId.Value)));
+                (l.AssignedToUserId.HasValue && teamUserIds.Contains(l.AssignedToUserId.Value)) ||
+                adminAssignedSalesTeamUserIds.Contains(l.CreatedByUserId) ||
+                (l.AssignedToUserId.HasValue && adminAssignedSalesTeamUserIds.Contains(l.AssignedToUserId.Value)) ||
+                (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
+                (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
         }
 
-        // LoginTeam — corrected per the final spec, now that Loan.LoginUserId
-        // exists: an individual Login Team member sees only their OWN
-        // personally-assigned processing queue (mirrors the Sales rule's
-        // AssignedToUserId check, but for the Login/processing stage).
+        // LoginTeam — base rule: an individual Login Team member sees their
+        // OWN personally-assigned processing queue. Admin-assigned Location/
+        // Team mappings can now additionally widen this via the same OR-terms.
         if (string.Equals(role, "LoginTeam", StringComparison.OrdinalIgnoreCase))
-            return query.Where(l => l.LoginUserId == currentUserId);
+            return query.Where(l =>
+                l.LoginUserId == currentUserId ||
+                adminAssignedSalesTeamUserIds.Contains(l.CreatedByUserId) ||
+                (l.AssignedToUserId.HasValue && adminAssignedSalesTeamUserIds.Contains(l.AssignedToUserId.Value)) ||
+                (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
+                (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
 
-        // OperationManager — corrected per the final spec: sees every loan
-        // assigned (LoginUserId) to any member of an Operation/Login-type
-        // Team this user leads or belongs to — i.e. supervises their whole
-        // team's queue, not just their own. Same team-membership derivation
-        // used for Manager/TeamLeader above, applied to Login-type teams.
+        // OperationManager — base rule: every loan assigned (LoginUserId) to
+        // any member of an Operation/Login-type Team this user leads or
+        // belongs to. Admin-assigned Location/Team mappings can now
+        // additionally widen this via the same OR-terms.
         if (string.Equals(role, "OperationManager", StringComparison.OrdinalIgnoreCase))
         {
             var myLoginTeamIds = ctx.Set<Team>()
@@ -162,22 +267,32 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                     .Where(t => myLoginTeamIds.Contains(t.Id) && t.TeamLeadUserId != null)
                     .Select(t => t.TeamLeadUserId!.Value));
 
-            return query.Where(l => l.LoginUserId.HasValue && teamUserIds.Contains(l.LoginUserId.Value));
+            return query.Where(l =>
+                (l.LoginUserId.HasValue && teamUserIds.Contains(l.LoginUserId.Value)) ||
+                adminAssignedSalesTeamUserIds.Contains(l.CreatedByUserId) ||
+                (l.AssignedToUserId.HasValue && adminAssignedSalesTeamUserIds.Contains(l.AssignedToUserId.Value)) ||
+                (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
+                (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
         }
 
-        // LocationHead — corrected per the final spec, now that User.LocationId
-        // exists: sees every loan at their assigned Location, independent of
-        // team — cuts across Source/Process/Operation, unlike Manager/
-        // TeamLeader/OperationManager which are all team-scoped.
+        // LocationHead — base rule: every loan at any Admin-assigned
+        // Location (UserLocations — already many-to-many), independent of
+        // team. Also gets the same OR-terms so an Admin can ALSO grant this
+        // user extra Team-based scope on top of their Location scope, per
+        // the same union-everything principle (the Location-term below is
+        // therefore redundant with this role's own base rule, which is
+        // harmless — OR of the same condition twice is a no-op).
         if (string.Equals(role, "LocationHead", StringComparison.OrdinalIgnoreCase))
         {
-            var myLocationId = ctx.Set<User>()
-                .Where(u => u.Id == currentUserId)
-                .Select(u => u.LocationId)
-                .FirstOrDefault();
-            if (myLocationId == null)
-                return query.Where(l => false);
-            return query.Where(l => l.LocationId == myLocationId);
+            var myLocationIds = ctx.Set<UserLocation>()
+                .Where(ul => ul.UserId == currentUserId && !ul.IsDeleted)
+                .Select(ul => ul.LocationId);
+            return query.Where(l =>
+                (l.LocationId != null && myLocationIds.Contains(l.LocationId.Value)) ||
+                adminAssignedSalesTeamUserIds.Contains(l.CreatedByUserId) ||
+                (l.AssignedToUserId.HasValue && adminAssignedSalesTeamUserIds.Contains(l.AssignedToUserId.Value)) ||
+                (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
+                (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
         }
 
         // ProductTeam: no existing field ties a User to a specific

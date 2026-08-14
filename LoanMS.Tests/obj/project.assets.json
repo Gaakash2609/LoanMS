@@ -7227,11 +7227,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Tests\\LoanMS.Tests.csproj",
+      "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj",
       "projectName": "LoanMS.Tests",
-      "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Tests\\LoanMS.Tests.csproj",
+      "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj",
       "packagesPath": "C:\\Users\\Aakash Gupta\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Tests\\obj\\",
+      "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Tests\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\Aakash Gupta\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -7247,17 +7247,17 @@
           "framework": "net10.0",
           "targetAlias": "net10.0",
           "projectReferences": {
-            "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.API\\LoanMS.API.csproj": {
-              "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.API\\LoanMS.API.csproj"
+            "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.API\\LoanMS.API.csproj": {
+              "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.API\\LoanMS.API.csproj"
             },
-            "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Application\\LoanMS.Application.csproj": {
-              "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Application\\LoanMS.Application.csproj"
+            "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj": {
+              "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj"
             },
-            "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Domain\\LoanMS.Domain.csproj": {
-              "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Domain\\LoanMS.Domain.csproj"
+            "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj": {
+              "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj"
             },
-            "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj": {
-              "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\LoanMS-Final-Updated\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj"
+            "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj": {
+              "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj"
             }
           }
         }

@@ -58,6 +58,14 @@ public class WizardSubmitDto
     public int? DsaId          { get; set; }
     public int? PartnerId      { get; set; }
     public int? LocationId     { get; set; }
+    // Response-only (GetDraft never reads these from the request body,
+    // only ever sets them when building its response) — the resumed
+    // wizard's hidden fields (w-location, w-dsa-name-val, w-partner-name-val)
+    // hold NAMES, not raw ids, so a draft-resume needs the name back, not
+    // just the id ApplyMapping already saves correctly.
+    public string? DsaName      { get; set; }
+    public string? PartnerName  { get; set; }
+    public string? LocationName { get; set; }
 
     /// <summary>Product-specific fields (Insurance/Property/Vehicle/
     /// Education) — confirmed never captured server-side at all. Generic
