@@ -334,6 +334,16 @@ public class UsersController : BaseController
     /// was previously only ever driven by the single-team-name fields on
     /// Create/Update, via ApplyOneTeamTypeAsync below).
     /// </summary>
+    private async Task<string> ApplyTeamMembershipAsync(int userId, string? newSalesTeam, string? newOpTeam, string? oldSalesTeam, string? oldOpTeam)
+    {
+        var notes = new List<string>();
+        var salesNote = await ApplyOneTeamTypeAsync(userId, "Sales", newSalesTeam, oldSalesTeam);
+        if (salesNote != null) notes.Add(salesNote);
+        var opNote = await ApplyOneTeamTypeAsync(userId, "Login", newOpTeam, oldOpTeam);
+        if (opNote != null) notes.Add(opNote);
+        return string.Join(" ", notes);
+    }
+
     public class SetTeamsRequestDto
     {
         public List<int> SalesTeamIds { get; set; } = new();
@@ -370,16 +380,6 @@ public class UsersController : BaseController
         {
             _db.TeamMembers.Add(new TeamMember { TeamId = teamId, UserId = userId, CreatedAt = DateTime.UtcNow });
         }
-    }
-
-
-    {
-        var notes = new List<string>();
-        var salesNote = await ApplyOneTeamTypeAsync(userId, "Sales", newSalesTeam, oldSalesTeam);
-        if (salesNote != null) notes.Add(salesNote);
-        var opNote = await ApplyOneTeamTypeAsync(userId, "Login", newOpTeam, oldOpTeam);
-        if (opNote != null) notes.Add(opNote);
-        return string.Join(" ", notes);
     }
 
     private async Task<string?> ApplyOneTeamTypeAsync(int userId, string teamType, string? newTeamName, string? oldTeamName)
