@@ -1508,11 +1508,32 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     };
   }
 
+  // Rebuild LA_DB.productBanks (the per-product "Assigned Banks" Sets used by
+  // the Lender Configuration screen) from each bank's server-persisted
+  // loanTypes. Without this, productBanks only ever gets populated by clicks
+  // made in the current tab (lcSelectProduct/Add Bank), so a fresh
+  // login/refresh always renders "0 banks assigned" even though the
+  // assignment was already saved to the server by lcSaveProductBanks's
+  // PUT /banks/{id}. This is the missing read-side half of that sync.
+  function _rebuildProductBanks(mappedBanks) {
+    if (typeof window.LA_DB === 'undefined') return;
+    if (!LA_DB.productBanks) LA_DB.productBanks = {};
+    Object.keys(LA_DB.productBanks).forEach(function(k) { LA_DB.productBanks[k] = new Set(); });
+    mappedBanks.forEach(function(b) {
+      (b.loanTypes || []).forEach(function(pk) {
+        if (!LA_DB.productBanks[pk]) LA_DB.productBanks[pk] = new Set();
+        LA_DB.productBanks[pk].add(b.id);
+      });
+    });
+  }
+  window._apiRebuildProductBanks = _rebuildProductBanks;
+
   function _syncAnalyticBanks() {
     return apiReq('GET', '/banks').then(function(res) {
       if (!res || !res.success || !res.data || typeof window.LA_DB === 'undefined') return;
       var mapped = res.data.map(_analyticBankToLocal);
       LA_DB.banks = mapped;
+      _rebuildProductBanks(mapped);
       try {
         var mx = mapped.reduce(function(m, b) { return Math.max(m, b.id || 0); }, 0);
         LA_DB.nextId.bank = mx + 1;
@@ -1521,6 +1542,11 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       } catch (e) {}
       if (typeof window.laRenderBanks === 'function') { try { window.laRenderBanks(); } catch (e) {} }
       if (typeof window.laLoadEligibility === 'function') { try { window.laLoadEligibility(); } catch (e) {} }
+      // Refresh the "Assigned Banks" panel too, in case sync lands while the
+      // Lender Configuration screen is already open on a selected product.
+      if (typeof window.lcRenderProductBanks === 'function' && window._lcActiveProduct) {
+        try { window.lcRenderProductBanks(window._lcActiveProduct); } catch (e) {}
+      }
     }).catch(function(e) { console.warn('[Bridge] syncAnalyticBanks:', e); });
   }
   window._apiSyncAnalyticBanks = _syncAnalyticBanks;
@@ -3635,6 +3661,11 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     }).catch(function(e) { console.warn('[Bridge] syncWizardDrafts:', e); });
   }
   window._syncWizardDrafts = _syncWizardDrafts;
+  // Exposed so other scripts (efin-improvements.js's twSaveUser patch) can
+  // trigger an immediate DSA/Partner Management refresh right after a
+  // Dsa/Partner-role user is saved, instead of waiting for the 60s poll —
+  // same reasoning as _syncWizardDrafts/_syncPayoutClaimsFromServer above.
+  window._syncDsaPartners = _syncDsaPartners;
 
   /* ══════════════════════════════════════════════════════════
      CIBIL AUTO-CHECK on PAN entry (KYC step)
