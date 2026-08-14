@@ -1258,21 +1258,8 @@
       // ── Core items (always visible) — no change needed ──
       // Overview, Applications, EMI Calculator, Tasks, My Payout are always shown.
 
-      // ── Admin-controlled items: show/hide based on canNav* role keys (Admin
-      //    Master Control) AND roleMenuVisibility (Settings → Roles &
-      //    Permissions → Menu Access Control) ──
-      // BUGFIX (confirmed real bug — "changes not reflecting on the user
-      // dashboard even after modifying permissions" in Menu Access Control):
-      // every item here has a NAV_PERM_MAP entry, and every role in ROLES
-      // always defines that canNav* key — so `typeof rd[permKey] !== 'undefined'`
-      // was ALWAYS true, meaning the `else` branch that actually reads
-      // roleMenuVisibility could never run. Toggling anything in the Menu
-      // Access Control grid (and clicking Apply Changes / saving it to the
-      // server) had zero effect on any user's sidebar — this function only
-      // ever consulted the OTHER permissions screen (Admin Master Control /
-      // Access Rights). Now both are checked: an item only shows if NEITHER
-      // system has hidden it for this role, so an explicit toggle in either
-      // screen actually takes effect.
+      // ── Admin-controlled items: show/hide based on canNav* role keys (Admin Master Control)
+      //    with fallback to roleMenuVisibility for backward compat ──
       const NAV_PERM_MAP = {
         'banks':          'canNavBanks',
         'incred':         'canNavIncred',
@@ -1290,9 +1277,15 @@
       };
       ALL_MENU_ITEMS.filter(m => m.canHide).forEach(m => {
         const permKey = NAV_PERM_MAP[m.id];
-        const allowedByMaster = (permKey && typeof rd[permKey] !== 'undefined') ? !!rd[permKey] : true;
-        const allowedByMenu   = roleMenuVisibility[m.id] ? roleMenuVisibility[m.id].has(role) : false;
-        const visible = isAdmin || (allowedByMaster && allowedByMenu);
+        let visible;
+        if (permKey && typeof rd[permKey] !== 'undefined') {
+          // Use Admin Master Control key
+          visible = isAdmin ? true : !!rd[permKey];
+        } else {
+          // Fallback to legacy roleMenuVisibility
+          const allowed = roleMenuVisibility[m.id] ? roleMenuVisibility[m.id].has(role) : false;
+          visible = isAdmin || allowed;
+        }
         document.querySelectorAll(`[data-menu-id="${m.id}"]`).forEach(el => {
           el.style.display = visible ? '' : 'none';
         });
@@ -2081,7 +2074,7 @@
       <td>${a.date || '—'}</td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">
         <button onclick="resumeDraftFromList('${a.id}')" style="display:inline-flex;align-items:center;gap:5px;padding:5px 14px;border-radius:8px;font-size:12px;font-weight:600;border:1.5px solid var(--accent);background:var(--surface2);color:var(--accent);cursor:pointer">${isOwnDraft ? '▶ Continue' : '👁 View/Continue'}</button>
-        ${isAdmin ? `<button onclick="if(typeof deleteDraftById==='function'){deleteDraftById('${a.id}');}" style="display:inline-flex;align-items:center;gap:4px;padding:5px 12px;background:rgba(192,57,43,.08);border:1px solid rgba(192,57,43,.25);color:var(--danger);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer" title="Delete draft">🗑 Delete</button>` : ''}
+        ${isAdmin ? `<button onclick="if(typeof deleteDraftById==='function'){deleteDraftById('${a.id}');renderTable();}" style="display:inline-flex;align-items:center;gap:4px;padding:5px 12px;background:rgba(192,57,43,.08);border:1px solid rgba(192,57,43,.25);color:var(--danger);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer" title="Delete draft">🗑 Delete</button>` : ''}
       </td>
     </tr>
   `;
@@ -15866,7 +15859,6 @@ ${printContent}
 
     function lcShowProductPicker() {
       _lcActiveProduct = null;
-      window._lcActiveProduct = null;
       document.getElementById('lc-product-picker').style.display = '';
       document.getElementById('lc-workspace').style.display = 'none';
       document.getElementById('lc-back-btn').style.display = 'none';
@@ -15882,7 +15874,6 @@ ${printContent}
       // Commit any pending toggle changes for the outgoing product before switching
       if (_lcActiveProduct && _lcActiveProduct !== key) lcSaveProductBanks();
       _lcActiveProduct = key;
-      window._lcActiveProduct = key;
       // Highlight selected card
       document.querySelectorAll('.lc-prod-card').forEach(c => c.classList.remove('selected'));
       if (cardEl) cardEl.classList.add('selected');
@@ -24450,39 +24441,10 @@ ${printContent}
       const loc=document.getElementById('tw-st-loc').value;
       const active=document.getElementById('tw-st-active').value==='true';
       const members=[...(document.getElementById('tw-st-members')?.querySelectorAll('[data-member]')||[])].map(el=>el.dataset.member);
-      let t, isNew = false;
-      if(_twEditSalesId){t=_twFindTeamById(twSalesTeams,_twEditSalesId);if(t){t.name=name;t.leader=leader;t.location=loc;t.active=active;t.members=members;}showToast('Sales Team saved','success');}
-      else{t={id:Date.now(),name,leader,location:loc,members,active};isNew=true;twSalesTeams.unshift(t);twUpdateCounts();showToast(`Team "${name}" created`,'success');}
+      if(_twEditSalesId){const t=_twFindTeamById(twSalesTeams,_twEditSalesId);if(t){t.name=name;t.leader=leader;t.location=loc;t.active=active;t.members=members;}showToast('Sales Team saved','success');}
+      else{twSalesTeams.unshift({id:Date.now(),name,leader,location:loc,members,active});twUpdateCounts();showToast(`Team "${name}" created`,'success');}
       _twEditSalesId=null; twRenderSalesTeams(); document.getElementById('tw-sales-team-detail').style.display='none';
       if (typeof persistSave === 'function') persistSave();
-
-      // BUGFIX (confirmed real gap — same class as twSaveTeamModal above):
-      // this detail/edit panel is a second, separate save path for Sales
-      // Teams and was entirely local-only (persistSave() is localStorage
-      // only) — neither creating nor editing a team here ever reached the
-      // server, so changes made here always reverted for every other
-      // admin/device and on refresh.
-      if (t && typeof window.apiReq === 'function') {
-        var locObj = (window.twLocations || []).find(function(l){ return l.name === loc; });
-        var leadObj = (window.twUsers || []).find(function(u){ return u.name === leader; });
-        var payload = { name: name, type: 'Sales', locationId: locObj ? locObj._apiId : null, teamLeadUserId: leadObj ? leadObj._apiId : null };
-        var req = (t._apiId) ? window.apiReq('PUT', '/teams/' + t._apiId, payload)
-                              : window.apiReq('POST', '/teams', payload);
-        req.then(function(r) {
-          if (r && r.success) {
-            if (!t._apiId && r.data) t._apiId = r.data.id;
-          } else {
-            var msg = (r && r.message) ? r.message : (r && Array.isArray(r.errors) && r.errors.length) ? r.errors.join(' ') : 'Failed to save to the server.';
-            showToast('⚠ "' + name + '" was NOT saved to the server — ' + msg, 'error');
-            if (isNew) { var idx = twSalesTeams.indexOf(t); if (idx >= 0) twSalesTeams.splice(idx, 1); twRenderSalesTeams(); twUpdateCounts(); }
-          }
-        }).catch(function() {
-          showToast('⚠ "' + name + '" was NOT saved to the server — check your connection and try again.', 'error');
-          if (isNew) { var idx = twSalesTeams.indexOf(t); if (idx >= 0) twSalesTeams.splice(idx, 1); twRenderSalesTeams(); twUpdateCounts(); }
-        });
-      } else if (t) {
-        showToast('⚠ Could not reach the server — this change to "' + name + '" exists only in this browser.', 'error');
-      }
     }
     function twCloseTeamDetail(type) {
       const vid = type==='sales' ? 'tw-st-view-body' : 'tw-lt-view-body';
@@ -24532,37 +24494,10 @@ ${printContent}
       const loc=document.getElementById('tw-lt-loc').value;
       const active=document.getElementById('tw-lt-active').value==='true';
       const members=[...(document.getElementById('tw-lt-members')?.querySelectorAll('[data-member]')||[])].map(el=>el.dataset.member);
-      let t, isNew = false;
-      if(_twEditLoginId){t=_twFindTeamById(twLoginTeams,_twEditLoginId);if(t){t.name=name;t.leader=leader;t.location=loc;t.active=active;t.members=members;}showToast('Login Team saved','success');}
-      else{t={id:Date.now(),name,leader,location:loc,members,active};isNew=true;twLoginTeams.unshift(t);twUpdateCounts();showToast(`Team "${name}" created`,'success');}
+      if(_twEditLoginId){const t=_twFindTeamById(twLoginTeams,_twEditLoginId);if(t){t.name=name;t.leader=leader;t.location=loc;t.active=active;t.members=members;}showToast('Login Team saved','success');}
+      else{twLoginTeams.unshift({id:Date.now(),name,leader,location:loc,members,active});twUpdateCounts();showToast(`Team "${name}" created`,'success');}
       _twEditLoginId=null; twRenderLoginTeams(); document.getElementById('tw-login-team-detail').style.display='none';
       if (typeof persistSave === 'function') persistSave();
-
-      // BUGFIX (confirmed real gap — same class as twSaveTeamModal /
-      // twSaveSalesTeamDetail above): entirely local-only (persistSave() is
-      // localStorage only). Neither creating nor editing a Login/Operation
-      // team here ever reached the server.
-      if (t && typeof window.apiReq === 'function') {
-        var locObj = (window.twLocations || []).find(function(l){ return l.name === loc; });
-        var leadObj = (window.twUsers || []).find(function(u){ return u.name === leader; });
-        var payload = { name: name, type: 'Login', locationId: locObj ? locObj._apiId : null, teamLeadUserId: leadObj ? leadObj._apiId : null };
-        var req = (t._apiId) ? window.apiReq('PUT', '/teams/' + t._apiId, payload)
-                              : window.apiReq('POST', '/teams', payload);
-        req.then(function(r) {
-          if (r && r.success) {
-            if (!t._apiId && r.data) t._apiId = r.data.id;
-          } else {
-            var msg = (r && r.message) ? r.message : (r && Array.isArray(r.errors) && r.errors.length) ? r.errors.join(' ') : 'Failed to save to the server.';
-            showToast('⚠ "' + name + '" was NOT saved to the server — ' + msg, 'error');
-            if (isNew) { var idx = twLoginTeams.indexOf(t); if (idx >= 0) twLoginTeams.splice(idx, 1); twRenderLoginTeams(); twUpdateCounts(); }
-          }
-        }).catch(function() {
-          showToast('⚠ "' + name + '" was NOT saved to the server — check your connection and try again.', 'error');
-          if (isNew) { var idx = twLoginTeams.indexOf(t); if (idx >= 0) twLoginTeams.splice(idx, 1); twRenderLoginTeams(); twUpdateCounts(); }
-        });
-      } else if (t) {
-        showToast('⚠ Could not reach the server — this change to "' + name + '" exists only in this browser.', 'error');
-      }
     }
     function twViewTeamDetail(type, id) {
       const arr = type==='sales' ? twSalesTeams : twLoginTeams;
@@ -24807,44 +24742,8 @@ ${printContent}
     function twSaveLocation() {
       const name=document.getElementById('tw-loc-name')?.value.trim(); if(!name){showToast('Location name required','error');return;}
       if(twLocations.find(l=>l.name.toLowerCase()===name.toLowerCase())){showToast('Location already exists','warn');return;}
-      const newLoc = {id:Date.now(),name};
-      twLocations.push(newLoc); twRenderLocations(); twUpdateCounts();
+      twLocations.push({id:Date.now(),name}); twRenderLocations(); twUpdateCounts();
       closeModal('tw-loc-modal'); document.getElementById('tw-loc-name').value=''; showToast(`"${name}" added`,'success');
-
-      // BUGFIX (confirmed real gap — same class as twSaveUser/twSaveLocation
-      // audit): "+ Add Location" only ever pushed into the in-browser
-      // twLocations array. It looked added (toast, row appears in this
-      // tab) but nothing reached the database — invisible on any other
-      // device/admin, and gone on refresh. Backend already exposes
-      // POST /api/locations (LocationsController.Create); now actually
-      // calls it and backfills the real DB id (_apiId) onto this same
-      // object, same pattern the Location rename/delete paths already use
-      // (see twRenameLocation/twDeleteLocation's l._apiId checks below).
-      if (typeof window.apiReq === 'function') {
-        var parts = name.split('-').map(s => s.trim());
-        window.apiReq('POST', '/locations', {
-          name: name, city: parts[0] || name, state: '', code: ''
-        }).then(function(r) {
-          if (r && r.success && r.data) {
-            newLoc._apiId = r.data.id;
-          } else {
-            var msg = (r && r.message) ? r.message
-                    : (r && Array.isArray(r.errors) && r.errors.length) ? r.errors.join(' ')
-                    : 'Failed to save to the server.';
-            showToast('⚠ "' + name + '" was NOT saved to the server — ' + msg, 'error');
-            var idx = twLocations.indexOf(newLoc);
-            if (idx >= 0) twLocations.splice(idx, 1);
-            twRenderLocations(); twUpdateCounts();
-          }
-        }).catch(function() {
-          showToast('⚠ "' + name + '" was NOT saved to the server — check your connection and try again.', 'error');
-          var idx = twLocations.indexOf(newLoc);
-          if (idx >= 0) twLocations.splice(idx, 1);
-          twRenderLocations(); twUpdateCounts();
-        });
-      } else {
-        showToast('⚠ Could not reach the server — "' + name + '" exists only in this browser.', 'error');
-      }
     }
 
     // ── Row action dropdown menu helper ──
@@ -25226,25 +25125,6 @@ ${printContent}
       }
     }
 
-    // Maps the "Locations & Teams" panel's Role dropdown labels (display
-    // strings shown to the user, e.g. "Sales Person") to the backend
-    // UserRole enum names the API actually expects (e.g. "Sales"). Needed
-    // because the panel's <select> reuses the human-readable labels as its
-    // option values, not the enum names.
-    var TW_UD_ROLE_TO_ENUM = {
-      'Location Head':     'LocationHead',
-      'Admin':             'Admin',
-      'Partner':           'Partner',
-      'Sales Person':      'Sales',
-      'Team Leader':       'TeamLeader',
-      'Manager':           'Manager',
-      'Login Team':        'LoginTeam',
-      'Operation Manager': 'OperationManager',
-      'Accounts':          'Accounts',
-      'Product Team':      'ProductTeam',
-      'DSA User':          'Dsa'
-    };
-
     function twSaveUserDetail() {
       const name=document.getElementById('tw-ud-name').value.trim(), email=document.getElementById('tw-ud-email').value.trim(), role=document.getElementById('tw-ud-role').value;
       if(!name||!email){showToast('Name and email are required','error');return;}
@@ -25273,32 +25153,7 @@ ${printContent}
             return m && m._apiId;
           }).filter(function(x){ return !!x; });
 
-          // BUGFIX (confirmed real bug — Role/Name/Email silently reverting
-          // after Save): this panel's form lets you edit Name/Email/Role,
-          // but only ever pushed Locations and Teams to the server — the
-          // Role change was applied to local state only, so the very next
-          // GET /users refresh (page reload, or just reopening this panel)
-          // pulled the untouched old Role back from the database and it
-          // looked like the selection "reset itself". PUT /users/{id} is
-          // the actual endpoint that persists Name/Role/etc.; call it
-          // alongside the existing Locations/Teams syncs so all three save
-          // together as one action, matching what "Save User" looks like
-          // it should do. IsActive is round-tripped from the user's current
-          // local status so a Role/Location edit here never accidentally
-          // flips their active/suspended state.
-          var roleEnum = TW_UD_ROLE_TO_ENUM[role] || role;
-          var isActive = (u.status || 'active') === 'active';
-
           Promise.all([
-            window.apiReq('PUT', '/users/' + u._apiId, {
-              fullName:     name,
-              isActive:     isActive,
-              role:         roleEnum,
-              phoneNumber:  u.mobile || '',
-              locationName: _twUdLocs[0] || '',
-              salesTeam:    _twUdSales[0] || '',
-              opTeam:       _twUdOps[0] || ''
-            }),
             window.apiReq('PUT', '/users/' + u._apiId + '/locations', locIds),
             window.apiReq('PUT', '/users/' + u._apiId + '/teams', { salesTeamIds: salesIds, operationTeamIds: opIds })
           ]).then(function(results) {
@@ -25334,16 +25189,6 @@ ${printContent}
 
       const rd = ROLES[roleKey];
       const roleLabel = rd ? rd.label : roleKey;
-      // Backend UserRole enum name — the inverse of api-bridge.js's ROLE_MAP,
-      // needed because Create/Update take the real enum string, not this
-      // screen's internal roleKey.
-      const ROLE_KEY_TO_ENUM = {
-        admin: 'Admin', manager: 'Manager', sales_executive: 'Sales', dsa_user: 'Dsa',
-        partner: 'Partner', login_team: 'LoginTeam', team_leader: 'TeamLeader',
-        accounts: 'Accounts', location_head: 'LocationHead',
-        operation_manager: 'OperationManager', product_team: 'ProductTeam'
-      };
-      const roleEnum = ROLE_KEY_TO_ENUM[roleKey] || 'Sales';
 
       if (_twEditUserId !== null && twUsers[_twEditUserId]) {
         // Edit existing
@@ -25357,74 +25202,14 @@ ${printContent}
         if (password) u._password = password;
         showToast('User "' + name + '" updated', 'success');
         pushActivity('var(--accent)', '<strong>Updated user</strong>: ' + name + ' (' + roleLabel + ')');
-
-        // BUGFIX (confirmed real gap — Users edit was browser-memory-only):
-        // push the change to the real backend record so it survives a
-        // refresh and is visible to every other admin/device.
-        if (u._apiId && typeof window.apiReq === 'function') {
-          window.apiReq('PUT', '/users/' + u._apiId, {
-            fullName: name, isActive: status === 'active', role: roleEnum,
-            phoneNumber: mobile, locationName: loc || null,
-            salesTeam: st || null, opTeam: ot || null
-          }).then(function(r) {
-            if (!r || !r.success) showToast('⚠ "' + name + '" was updated here but the server rejected it — it may revert on refresh.', 'error');
-          }).catch(function() {
-            showToast('⚠ Could not reach the server — this change to "' + name + '" will be lost on refresh.', 'error');
-          });
-        } else if (!u._apiId) {
-          showToast('⚠ "' + name + '" has no backend account — this change exists only in this browser.', 'warn');
-        }
       } else {
         // Create new
         const uid = 'USR-' + String(twUsers.length + 1).padStart(4, '0');
-        const newUser = { uid, name, email, role: roleLabel, roleKey, mobile, status,
+        twUsers.unshift({ uid, name, email, role: roleLabel, roleKey, mobile, status,
           locs: loc ? [loc] : [], salesTeams: st ? [st] : [], opTeams: ot ? [ot] : [],
-          loc, st, ot, _password: password };
-        twUsers.unshift(newUser);
+          loc, st, ot, _password: password });
         showToast('User "' + name + '" created (ID: ' + uid + ')', 'success');
         pushActivity('var(--accent)', '<strong>Created user</strong>: ' + name + ' — ' + uid + ' (' + roleLabel + ')');
-
-        // BUGFIX (confirmed real gap — "+ Add User" never reached the
-        // server): this used to only ever push into the in-browser twUsers
-        // array. The user *looked* created (toast, row appears, invitation
-        // modal opens) but no account existed in the database — invisible
-        // to every other device/admin, gone on refresh, and (per
-        // invSaveSetup's own !u._apiId check) the invitation modal's
-        // password step silently failed for it every time. Now actually
-        // calls the real POST /api/users the backend already exposes
-        // (UsersController.Create), and backfills _apiId/employeeCode onto
-        // this same object so the invitation modal (opened ~220ms later)
-        // can use it. On failure, the optimistic local row is rolled back
-        // instead of being left behind as a fake, unsaved "ghost" user —
-        // this is also what produced duplicate-looking rows in the Users
-        // list once a real account for the same person existed too.
-        if (typeof window.apiReq === 'function') {
-          window.apiReq('POST', '/users', {
-            fullName: name, email: email, password: password, role: roleEnum,
-            phoneNumber: mobile, locationName: loc || null,
-            salesTeam: st || null, opTeam: ot || null
-          }).then(function(r) {
-            if (r && r.success && r.data) {
-              newUser._apiId = r.data.id;
-              newUser.uid = r.data.employeeCode || newUser.uid;
-            } else {
-              var msg = (r && r.message) ? r.message
-                      : (r && Array.isArray(r.errors) && r.errors.length) ? r.errors.join(' ')
-                      : 'Failed to save to the server.';
-              showToast('⚠ "' + name + '" was NOT saved to the server — ' + msg, 'error');
-              var idx = twUsers.indexOf(newUser);
-              if (idx >= 0) twUsers.splice(idx, 1);
-              twRenderUsers();
-            }
-          }).catch(function() {
-            showToast('⚠ "' + name + '" was NOT saved to the server — check your connection and try again.', 'error');
-            var idx = twUsers.indexOf(newUser);
-            if (idx >= 0) twUsers.splice(idx, 1);
-            twRenderUsers();
-          });
-        } else {
-          showToast('⚠ Could not reach the server — "' + name + '" exists only in this browser.', 'error');
-        }
       }
 
       _twEditUserId = null;
@@ -25513,55 +25298,10 @@ ${printContent}
     }
     function twSaveTeamModal() {
       const name=document.getElementById('tw-tm-name')?.value.trim(); if(!name){showToast('Team name is required','error');return;}
-      const leaderName = document.getElementById('tw-tm-leader')?.value||'';
-      const locName     = document.getElementById('tw-tm-loc')?.value||'';
-      const t={id:Date.now(),name,leader:leaderName,location:locName,members:[],active:true};
+      const t={id:Date.now(),name,leader:document.getElementById('tw-tm-leader')?.value||'',location:document.getElementById('tw-tm-loc')?.value||'',members:[],active:true};
       if(_twTeamType==='sales'){twSalesTeams.unshift(t);twRenderSalesTeams();}else{twLoginTeams.unshift(t);twRenderLoginTeams();}
       closeModal('tw-team-modal'); document.getElementById('tw-tm-name').value=''; twUpdateCounts(); showToast(`"${name}" created`,'success');
       if (typeof persistSave === 'function') persistSave();
-
-      // BUGFIX (confirmed real gap — same class as twSaveUser/twSaveLocation
-      // audit): "+ New Team" only ever pushed into twSalesTeams/twLoginTeams
-      // in browser memory (persistSave() only writes localStorage). It
-      // looked created here but no Team row existed in the database —
-      // invisible to any other device/admin, gone on refresh. Backend
-      // already exposes POST /api/teams (TeamsController.Create); now
-      // actually calls it, resolving the modal's Location/Leader dropdowns
-      // (which hold NAMEs, per twLocations/twUsers option values) to the
-      // real ids the API needs, and backfills the real DB id (_apiId) onto
-      // this same object — same pattern _syncTeams already keys rows on.
-      if (typeof window.apiReq === 'function') {
-        var locObj = (window.twLocations || []).find(function(l){ return l.name === locName; });
-        var leadObj = (window.twUsers || []).find(function(u){ return u.name === leaderName; });
-        window.apiReq('POST', '/teams', {
-          name: name, type: _twTeamType === 'sales' ? 'Sales' : 'Login',
-          locationId: locObj ? locObj._apiId : null,
-          teamLeadUserId: leadObj ? leadObj._apiId : null
-        }).then(function(r) {
-          if (r && r.success && r.data) {
-            t._apiId = r.data.id;
-          } else {
-            var msg = (r && r.message) ? r.message
-                    : (r && Array.isArray(r.errors) && r.errors.length) ? r.errors.join(' ')
-                    : 'Failed to save to the server.';
-            showToast('⚠ "' + name + '" was NOT saved to the server — ' + msg, 'error');
-            var store = _twTeamType === 'sales' ? twSalesTeams : twLoginTeams;
-            var idx = store.indexOf(t);
-            if (idx >= 0) store.splice(idx, 1);
-            (_twTeamType === 'sales' ? twRenderSalesTeams : twRenderLoginTeams)();
-            twUpdateCounts();
-          }
-        }).catch(function() {
-          showToast('⚠ "' + name + '" was NOT saved to the server — check your connection and try again.', 'error');
-          var store = _twTeamType === 'sales' ? twSalesTeams : twLoginTeams;
-          var idx = store.indexOf(t);
-          if (idx >= 0) store.splice(idx, 1);
-          (_twTeamType === 'sales' ? twRenderSalesTeams : twRenderLoginTeams)();
-          twUpdateCounts();
-        });
-      } else {
-        showToast('⚠ Could not reach the server — "' + name + '" exists only in this browser.', 'error');
-      }
     }
 
     function twOnPageShow(pageId) {
@@ -28312,61 +28052,12 @@ ${printContent}
         } catch (e) { /* autosave must never break the wizard */ }
       }
 
-      function deleteDraftById(id, skipServerDelete) {
+      function deleteDraftById(id) {
         if (!window.APPLICATIONS || !id) return;
         var idx = APPLICATIONS.findIndex(function(a){ return a.id === id; });
-        var draft = idx >= 0 ? APPLICATIONS[idx] : null;
-
-        function finishLocalDraftDelete() {
-          var i = APPLICATIONS.findIndex(function(a){ return a.id === id; });
-          if (i >= 0) APPLICATIONS.splice(i, 1);
-          if (_activeDraftId === id) _activeDraftId = null;
-          if (typeof persistSave === 'function') persistSave();
-          if (typeof renderTable === 'function') renderTable();
-        }
-
-        // BUGFIX: a draft that has already been pushed to the server
-        // (draft._apiId set by _pushWizardDraft — see autosave above) is a
-        // real Draft-status Loan row in the database. Removing it only from
-        // the in-memory APPLICATIONS array (as this used to do) left the
-        // server record untouched, so the next _syncWizardDrafts() call —
-        // on hard refresh, on another device, or even just the next
-        // periodic sync — pulled GET /api/wizard/drafts again, found the
-        // "deleted" draft still there, and re-inserted it right back into
-        // the list. Same DELETE /api/loans/{id} endpoint deleteApplication()
-        // already uses handles Draft-status loans (see LoansController.
-        // Delete / LoanService.DeleteAsync), so route through it here too,
-        // and only drop the row locally once the server confirms deletion.
-        //
-        // skipServerDelete is used by the post-submit cleanup path below:
-        // once a draft is submitted, _buildWizardPayload sends the SAME
-        // loanId (app._draftLoanId) so the backend resumes/completes that
-        // exact Draft-status row into the submitted application, in place —
-        // there is no separate orphaned record left on the server to
-        // delete, and the backend would reject the delete anyway (only
-        // Draft-status loans are deletable) since the status has already
-        // moved on. Only the leftover local placeholder row needs removing.
-        if (!skipServerDelete && draft && draft._apiId && typeof window.apiReq === 'function') {
-          if (typeof showToast === 'function') showToast('Deleting draft…', 'info');
-          window.apiReq('DELETE', '/loans/' + draft._apiId).then(function (r) {
-            if (r && r.success === false) {
-              var msg = (r.message || (r.errors && r.errors.join(' ')) || 'Delete was rejected by the server.');
-              if (typeof showToast === 'function') showToast('⚠ Draft NOT deleted: ' + msg, 'error');
-              return;
-            }
-            finishLocalDraftDelete();
-            if (typeof window._apiSyncLoans === 'function') window._apiSyncLoans();
-            if (typeof window._syncWizardDrafts === 'function') window._syncWizardDrafts();
-            if (typeof showToast === 'function') showToast('Draft deleted', 'warn');
-          }).catch(function () {
-            if (typeof showToast === 'function') showToast('⚠ Draft NOT deleted — could not reach the server.', 'error');
-          });
-        } else {
-          // No _apiId — this draft was never synced to the backend
-          // (pure local, not-yet-autosaved draft), so there's nothing to
-          // delete server-side.
-          finishLocalDraftDelete();
-        }
+        if (idx >= 0) APPLICATIONS.splice(idx, 1);
+        if (_activeDraftId === id) _activeDraftId = null;
+        if (typeof persistSave === 'function') persistSave();
       }
       window.deleteDraftById = deleteDraftById;
 
@@ -28600,11 +28291,7 @@ ${printContent}
           if (_submitSucceeded && draftApiIdBefore && window.APPLICATIONS && window.APPLICATIONS[0]) {
             window.APPLICATIONS[0]._draftLoanId = draftApiIdBefore;
           }
-          // skipServerDelete=true: submit resumes/completes this exact
-          // Draft-status loan row server-side (see draftApiIdBefore /
-          // _draftLoanId above), so there is nothing left to delete on the
-          // server — only the local placeholder row needs clearing.
-          if (draftIdBefore && _submitSucceeded) deleteDraftById(draftIdBefore, true);
+          if (draftIdBefore && _submitSucceeded) deleteDraftById(draftIdBefore);
           // Record success so the wizardNav wrapper (which always runs right
           // after this) knows not to immediately auto-save a fresh Draft.
           _lastSubmitSucceeded = _submitSucceeded;

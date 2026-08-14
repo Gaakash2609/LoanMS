@@ -323,15 +323,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   ══════════════════════════════════════════════════════════ */
   function _syncUsers() {
     return apiReq('GET', '/users').then(function(res) {
-      // GET /api/users is Admin-only (403 for every other role). Previously
-      // that 403 was silently swallowed by apiReq's catch, leaving twUsers
-      // permanently empty for non-Admin logins — which is why the wizard's
-      // Location -> Sales Person dropdown always showed "No Sales Person
-      // found for this location" for anyone but Admin, even when Sales
-      // Person users existed for that location. Fall back to the
-      // non-Admin-safe /users/lookup endpoint (id/fullName/role/location
-      // only) so every authenticated role gets a populated list.
-      if (!res || !res.success || !res.data) return _syncUsersLookupFallback();
+      if (!res || !res.success || !res.data) return;
       var apiUsers = res.data.map(function(u) {
         var roleKey = ROLE_MAP[u.role] || 'sales_executive';
         var roleLabel = (typeof window.ROLES !== 'undefined' && window.ROLES[roleKey] && window.ROLES[roleKey].label) || u.role || roleKey;
@@ -376,43 +368,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         if (typeof window.twRenderUsers === 'function') { try { window.twRenderUsers(); } catch(e){} }
       }
     }).catch(function(e){ console.warn('[Bridge] syncUsers:',e); });
-  }
-
-  // Minimal, non-Admin-safe replacement for _syncUsers() above — same
-  // merge/replace logic, just sourced from /users/lookup (id, fullName,
-  // role, locationName only, no email/mobile/isActive/etc.) since that's
-  // all any non-Admin role is authorized to see.
-  function _syncUsersLookupFallback() {
-    return apiReq('GET', '/users/lookup').then(function(res) {
-      if (!res || !res.success || !res.data) return;
-      var apiUsers = res.data.map(function(u) {
-        var roleKey = ROLE_MAP[u.role] || 'sales_executive';
-        var roleLabel = (typeof window.ROLES !== 'undefined' && window.ROLES[roleKey] && window.ROLES[roleKey].label) || u.role || roleKey;
-        return {
-          id: 'API' + u.id, _apiId: u.id,
-          name: u.fullName, email: '',
-          role: roleLabel, roleKey: roleKey,
-          mobile: '',
-          loc: u.locationName || '', st: '', ot: '',
-          locs: u.locationName ? [u.locationName] : [],
-          salesTeams: [], opTeams: [],
-          status: 'active', joinDate: '', uid: null
-        };
-      });
-      if (typeof window.twUsers !== 'undefined' && Array.isArray(window.twUsers)) {
-        var freshUserIds = new Set(apiUsers.map(function(u){ return u._apiId; }));
-        for (var ui = window.twUsers.length - 1; ui >= 0; ui--) {
-          var urow = window.twUsers[ui];
-          if (urow._apiId && !freshUserIds.has(urow._apiId)) window.twUsers.splice(ui, 1);
-        }
-        apiUsers.forEach(function(au) {
-          var existing = window.twUsers.findIndex(function(u){ return u._apiId === au._apiId; });
-          if (existing >= 0) { window.twUsers[existing] = Object.assign(window.twUsers[existing], au); }
-          else { window.twUsers.push(au); }
-        });
-        if (typeof window.twRenderUsers === 'function') { try { window.twRenderUsers(); } catch(e){} }
-      }
-    }).catch(function(e){ console.warn('[Bridge] syncUsersLookup:',e); });
   }
 
   // Frontend snake_case role key (ROLES config in efin-app.js) → backend
@@ -526,25 +481,41 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     window._bridgeTwSaveUserDetailPatched = true;
     var _orig = window.twSaveUserDetail;
     if (typeof _orig !== 'function') return;
-    // BUGFIX (confirmed real bug — "select Location Head, save, it becomes
-    // Sales Person"): twSaveUserDetail() in efin-app.js now already sends
-    // the authoritative PUT /users/{id} (with the CORRECT role mapped from
-    // the panel's actual <select> option values, e.g. "Location Head") plus
-    // the Locations/Teams syncs, all in one place. This patch used to fire
-    // a SECOND, competing PUT /users/{id} right after it, built from
-    // ROLE_KEY_TO_ENUM — a snake_case-keyed map (location_head, etc.) that
-    // was never going to match this panel's label-valued <select> ("Location
-    // Head", with a space and capitals). That lookup always missed and
-    // silently fell back to 'Sales', so this second call clobbered whatever
-    // correct role the first call had just saved — the user would pick
-    // "Location Head", watch it save, and see "Sales Person" stick instead.
-    // Just delegate to the (now-authoritative) original; no second save.
     window.twSaveUserDetail = function() {
+      var nameEl  = document.getElementById('tw-ud-name');
+      var emailEl = document.getElementById('tw-ud-email');
+      var roleEl  = document.getElementById('tw-ud-role');
+      var editingUser = (typeof window._twEditUserId === 'number' && window.twUsers && window.twUsers[window._twEditUserId])
+        ? window.twUsers[window._twEditUserId] : null;
+      var locVal   = (window._twUdLocs  || [])[0] || '';
+      var stVal    = (window._twUdSales || [])[0] || '';
+      var otVal    = (window._twUdOps   || [])[0] || '';
+
       var result = _orig.apply(this, arguments);
-      // Original already PUTs the full, correct payload (role/name/locations/
-      // teams) straight to the server — just pull the canonical post-save
-      // state back down afterward, same as every other save path here.
-      setTimeout(_syncUsers, 700);
+
+      if (!editingUser || !editingUser._apiId || !nameEl || !nameEl.value.trim() || !emailEl || !emailEl.value.trim()) {
+        _syncUsers();
+        return result;
+      }
+      var payload = {
+        fullName: nameEl.value.trim(),
+        email: emailEl.value.trim().toLowerCase(),
+        role: ROLE_KEY_TO_ENUM[roleEl ? roleEl.value : ''] || 'Sales',
+        phoneNumber: editingUser.mobile || '',
+        locationName: locVal,
+        salesTeam: stVal,
+        opTeam: otVal,
+        isActive: editingUser.status !== 'inactive' && editingUser.status !== 'suspended'
+      };
+      apiReq('PUT', '/users/' + editingUser._apiId, payload).then(function(r) {
+        if (r && r.success) {
+          if (typeof window.showToast === 'function') window.showToast('User saved to database ✓', 'success');
+          setTimeout(_syncUsers, 500);
+        } else if (typeof window.showToast === 'function') {
+          var msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+          window.showToast('⚠ User saved locally, but database sync failed: ' + msg, 'warn');
+        }
+      });
       return result;
     };
   }
@@ -1508,32 +1479,11 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     };
   }
 
-  // Rebuild LA_DB.productBanks (the per-product "Assigned Banks" Sets used by
-  // the Lender Configuration screen) from each bank's server-persisted
-  // loanTypes. Without this, productBanks only ever gets populated by clicks
-  // made in the current tab (lcSelectProduct/Add Bank), so a fresh
-  // login/refresh always renders "0 banks assigned" even though the
-  // assignment was already saved to the server by lcSaveProductBanks's
-  // PUT /banks/{id}. This is the missing read-side half of that sync.
-  function _rebuildProductBanks(mappedBanks) {
-    if (typeof window.LA_DB === 'undefined') return;
-    if (!LA_DB.productBanks) LA_DB.productBanks = {};
-    Object.keys(LA_DB.productBanks).forEach(function(k) { LA_DB.productBanks[k] = new Set(); });
-    mappedBanks.forEach(function(b) {
-      (b.loanTypes || []).forEach(function(pk) {
-        if (!LA_DB.productBanks[pk]) LA_DB.productBanks[pk] = new Set();
-        LA_DB.productBanks[pk].add(b.id);
-      });
-    });
-  }
-  window._apiRebuildProductBanks = _rebuildProductBanks;
-
   function _syncAnalyticBanks() {
     return apiReq('GET', '/banks').then(function(res) {
       if (!res || !res.success || !res.data || typeof window.LA_DB === 'undefined') return;
       var mapped = res.data.map(_analyticBankToLocal);
       LA_DB.banks = mapped;
-      _rebuildProductBanks(mapped);
       try {
         var mx = mapped.reduce(function(m, b) { return Math.max(m, b.id || 0); }, 0);
         LA_DB.nextId.bank = mx + 1;
@@ -1542,11 +1492,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
       } catch (e) {}
       if (typeof window.laRenderBanks === 'function') { try { window.laRenderBanks(); } catch (e) {} }
       if (typeof window.laLoadEligibility === 'function') { try { window.laLoadEligibility(); } catch (e) {} }
-      // Refresh the "Assigned Banks" panel too, in case sync lands while the
-      // Lender Configuration screen is already open on a selected product.
-      if (typeof window.lcRenderProductBanks === 'function' && window._lcActiveProduct) {
-        try { window.lcRenderProductBanks(window._lcActiveProduct); } catch (e) {}
-      }
     }).catch(function(e) { console.warn('[Bridge] syncAnalyticBanks:', e); });
   }
   window._apiSyncAnalyticBanks = _syncAnalyticBanks;
@@ -2788,16 +2733,8 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           // only synced when the Settings → Access tab was opened, so a
           // permission change made by one admin didn't apply anywhere else
           // until that tab happened to be visited. Now part of the regular
-          // boot sync, same as every other entity above. Re-run
-          // applySession() once the pull resolves so the sidebar (already
-          // built once, above, from defaults) picks up whatever the server
-          // actually has — otherwise a fresh login still shows the stale
-          // pre-sync nav until the next full page reload.
-          if (typeof window.stgSyncPermissionsFromServer === 'function') {
-            window.stgSyncPermissionsFromServer().then(function() {
-              if (typeof window.applySession === 'function') window.applySession();
-            });
-          }
+          // boot sync, same as every other entity above.
+          if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer();
           // Profile (PhoneNumber/PhotoData, DB-backed) — one-shot pull on
           // login, same as every other entity above. Function itself is
           // defined in user-profile.js and exposed on window.
@@ -2924,11 +2861,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
             _syncProductOfferMatrix();
             // See the matching comment in the login-success sync block above.
             _syncWizardDrafts();
-            if (typeof window.stgSyncPermissionsFromServer === 'function') {
-              window.stgSyncPermissionsFromServer().then(function() {
-                if (typeof window.applySession === 'function') window.applySession();
-              });
-            }
+            if (typeof window.stgSyncPermissionsFromServer === 'function') window.stgSyncPermissionsFromServer();
             if (typeof window._pullProfileFromServer === 'function') window._pullProfileFromServer();
             setTimeout(function() { _syncPayoutClaimsFromServer().then(_syncOwnPayoutClaims); }, 1500);
             setTimeout(tkMigrateLegacyLocalTickets, 1400);
@@ -3661,11 +3594,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     }).catch(function(e) { console.warn('[Bridge] syncWizardDrafts:', e); });
   }
   window._syncWizardDrafts = _syncWizardDrafts;
-  // Exposed so other scripts (efin-improvements.js's twSaveUser patch) can
-  // trigger an immediate DSA/Partner Management refresh right after a
-  // Dsa/Partner-role user is saved, instead of waiting for the 60s poll —
-  // same reasoning as _syncWizardDrafts/_syncPayoutClaimsFromServer above.
-  window._syncDsaPartners = _syncDsaPartners;
 
   /* ══════════════════════════════════════════════════════════
      CIBIL AUTO-CHECK on PAN entry (KYC step)

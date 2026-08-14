@@ -8,15 +8,28 @@ import PageHeader from '@/components/shared/PageHeader'
 import { formatDate } from '@/utils/format'
 import { CheckCircle, Circle } from 'lucide-react'
 
+const PAGE_SIZE = 20
+
 export default function TasksPage() {
   const [page, setPage] = useState(1)
   const [filter, setFilter] = useState('')
   const qc = useQueryClient()
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['tasks', page, filter],
-    queryFn: () => tasksApi.getAll({ page, pageSize: 20, isCompleted: filter === 'completed' ? true : filter === 'pending' ? false : undefined }).then(r => r.data.data),
+  // BUGFIX (confirmed real, pre-existing gap — Phase 5 audit): see
+  // tasksApi.ts's getAll() doc-comment. The `completed` value IS a real
+  // server-side filter TasksController.GetAll honors, so it's still sent
+  // to the backend — only page/pageSize (which the backend never read)
+  // are dropped, with pagination now done client-side on the returned
+  // array, same pattern already proven in UsersPage.tsx (Phase 4 Part C).
+  const completedParam = filter === 'completed' ? true : filter === 'pending' ? false : undefined
+  const { data: allTasks, isLoading } = useQuery({
+    queryKey: ['tasks', completedParam],
+    queryFn: () => tasksApi.getAll({ completed: completedParam }).then(r => r.data.data),
   })
+
+  const totalCount = (allTasks ?? []).length
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const pageItems = (allTasks ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const complete = useMutation({
     mutationFn: (id: number) => tasksApi.complete(id),
@@ -42,7 +55,10 @@ export default function TasksPage() {
     { key: 'priority', label: 'Priority', render: (t: Task) => (
       <Badge variant={PRIORITY_VARIANT[t.priority] ?? 'default'}>{t.priority}</Badge>
     )},
-    { key: 'assignedToName', label: 'Assigned To' },
+    // BUGFIX (Phase 5): was 'assignedToName', a field that never existed
+    // in the actual API response (see tasksApi.ts's doc-comment) — the
+    // column always rendered blank. Corrected to the real field, assignedTo.
+    { key: 'assignedTo', label: 'Assigned To' },
     { key: 'dueDate', label: 'Due', render: (t: Task) => t.dueDate ? (
       <span className={new Date(t.dueDate) < new Date() && !t.isCompleted ? 'text-red-600 font-medium' : ''}>
         {formatDate(t.dueDate)}
@@ -54,7 +70,7 @@ export default function TasksPage() {
     <div>
       <PageHeader
         title="Tasks"
-        subtitle={`${data?.totalCount ?? 0} tasks`}
+        subtitle={`${totalCount} tasks`}
         action={
           <select value={filter} onChange={e => { setFilter(e.target.value); setPage(1) }}
             className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -65,9 +81,9 @@ export default function TasksPage() {
         }
       />
       <Card>
-        <DataTable columns={columns} data={data?.items}
-          isLoading={isLoading} totalPages={data?.totalPages}
-          currentPage={page} onPageChange={setPage} totalCount={data?.totalCount}
+        <DataTable columns={columns} data={pageItems}
+          isLoading={isLoading} totalPages={totalPages}
+          currentPage={page} onPageChange={setPage} totalCount={totalCount}
         />
       </Card>
     </div>

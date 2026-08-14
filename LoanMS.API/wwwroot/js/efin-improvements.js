@@ -796,7 +796,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
         }
       }
 
-      // twSaveUser persist + Dsa/Partner Management refresh
+      // twSaveUser persist
       if (!window._efinTwSavePatched) {
         window._efinTwSavePatched = true;
         var _twSaveOrig = window.twSaveUser;
@@ -804,12 +804,6 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           window.twSaveUser = function () {
             var result = _twSaveOrig.apply(this, arguments);
             setTimeout(persistSave, 100);
-            // Backend now auto-creates/updates a linked DsaPartner record
-            // when a user is saved with role Dsa/Partner (see
-            // UsersController.SyncLinkedDsaPartnerAsync) — without this,
-            // that new/updated record only appeared on the DSA/Partner
-            // Management pages after the next 60s auto-poll.
-            if (typeof window._syncDsaPartners === 'function') setTimeout(window._syncDsaPartners, 300);
             return result;
           };
         }

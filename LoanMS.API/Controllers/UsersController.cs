@@ -140,23 +140,6 @@ public class UsersController : BaseController
         // remains available to complete it.
         var mappingNote = await ApplyTeamMembershipAsync(result.Data!.Id, request.SalesTeam, request.OpTeam, null, null);
 
-        // Users(role=Dsa/Partner) ↔ Partner Management linkage (confirmed
-        // real gap — a user created here with role Dsa/Partner is a login
-        // account only; it never showed up on the DSA/Partner Management
-        // pages because those read from the separate DsaPartner table).
-        // Non-fatal by design, same reasoning as team-mapping/invitation-
-        // email above — a DsaPartner sync issue must never roll back an
-        // otherwise-successful user creation.
-        try
-        {
-            await SyncLinkedDsaPartnerAsync(result.Data!.Id, request.Role, result.Data!.FullName,
-                result.Data!.Email, request.PhoneNumber);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[DsaPartner Sync] failed for user {result.Data!.Id}: {ex.Message}");
-        }
-
         // BUGFIX (confirmed real gap — "Invitation emails not being sent"):
         // the "User Invitation" template existed and was fully editable in
         // Settings, but nothing on the backend ever actually called
@@ -241,78 +224,10 @@ public class UsersController : BaseController
         if (!result.Success) return ApiResult(result);
 
         var mappingNote = await ApplyTeamMembershipAsync(id, request.SalesTeam, request.OpTeam, oldSalesTeam, oldOpTeam);
-
-        // Same Users ↔ Partner Management linkage as Create() above — also
-        // needed here so that editing an existing user's role TO Dsa/Partner
-        // (not just creating one that way) gets a DsaPartner record too, and
-        // so a name/phone edit on an already-linked Dsa/Partner user stays
-        // in sync on the Management page instead of drifting apart. Non-fatal,
-        // same reasoning as Create().
-        try
-        {
-            await SyncLinkedDsaPartnerAsync(id, request.Role, request.FullName,
-                existingUser?.Email, request.PhoneNumber);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[DsaPartner Sync] failed for user {id}: {ex.Message}");
-        }
-
         if (!string.IsNullOrEmpty(mappingNote))
             return Ok(ApiResponseDto<UserDto>.Ok(result.Data, (result.Message ?? "User updated.") + " " + mappingNote));
 
         return ApiResult(result);
-    }
-
-    /// <summary>
-    /// Users(role=Dsa/Partner) ↔ Partner Management linkage. A user created
-    /// or edited on this page with role Dsa/Partner is only ever a login
-    /// account (Users table) — the DSA/Partner Management pages read from
-    /// the separate DsaPartner table (see DsaController), and nothing
-    /// previously bridged the two, so such a user never appeared there.
-    /// DsaPartner.LinkedUserId already existed for exactly this purpose but
-    /// was unused. Only fires for role Dsa/Partner — every other role is
-    /// untouched, and switching a linked user's role AWAY from Dsa/Partner
-    /// deliberately leaves the existing DsaPartner record alone (it may
-    /// carry business data — commission history, DSA mapping — that
-    /// shouldn't vanish just because the login role changed).
-    /// </summary>
-    private async Task SyncLinkedDsaPartnerAsync(int userId, LoanMS.Domain.Enums.UserRole role, string fullName, string? email, string? phone)
-    {
-        if (role != LoanMS.Domain.Enums.UserRole.Dsa && role != LoanMS.Domain.Enums.UserRole.Partner)
-            return;
-
-        var partnerType = role == LoanMS.Domain.Enums.UserRole.Dsa
-            ? LoanMS.Domain.Enums.PartnerType.Dsa
-            : LoanMS.Domain.Enums.PartnerType.Partner;
-
-        var linked = await _db.DsaPartners.FirstOrDefaultAsync(d => d.LinkedUserId == userId);
-        if (linked == null)
-        {
-            // "DSA-"/"PAR-" + userId — well under DsaPartner.Code's 20-char
-            // limit (HasMaxLength(20), see AppDbContext), and unique because
-            // userId is unique and each user links to at most one DsaPartner.
-            var prefix = partnerType == LoanMS.Domain.Enums.PartnerType.Dsa ? "DSA-" : "PAR-";
-            _db.DsaPartners.Add(new DsaPartner
-            {
-                Name = fullName, Code = prefix + userId, Email = email, Phone = phone,
-                PartnerType = partnerType, LinkedUserId = userId, IsActive = true,
-                CreatedAt = DateTime.UtcNow
-            });
-        }
-        else
-        {
-            // Already linked — keep the record's display name/contact info
-            // in sync with the user account (e.g. edited via Users page),
-            // but never touch PartnerType/Code/DSA-mapping/business fields
-            // that only the Partner Management page's own Edit form owns.
-            linked.Name = fullName;
-            linked.Email = email;
-            linked.Phone = phone;
-            linked.UpdatedAt = DateTime.UtcNow;
-        }
-
-        await _db.SaveChangesAsync();
     }
 
     /// <summary>
@@ -419,16 +334,6 @@ public class UsersController : BaseController
     /// was previously only ever driven by the single-team-name fields on
     /// Create/Update, via ApplyOneTeamTypeAsync below).
     /// </summary>
-    private async Task<string> ApplyTeamMembershipAsync(int userId, string? newSalesTeam, string? newOpTeam, string? oldSalesTeam, string? oldOpTeam)
-    {
-        var notes = new List<string>();
-        var salesNote = await ApplyOneTeamTypeAsync(userId, "Sales", newSalesTeam, oldSalesTeam);
-        if (salesNote != null) notes.Add(salesNote);
-        var opNote = await ApplyOneTeamTypeAsync(userId, "Login", newOpTeam, oldOpTeam);
-        if (opNote != null) notes.Add(opNote);
-        return string.Join(" ", notes);
-    }
-
     public class SetTeamsRequestDto
     {
         public List<int> SalesTeamIds { get; set; } = new();
@@ -465,6 +370,16 @@ public class UsersController : BaseController
         {
             _db.TeamMembers.Add(new TeamMember { TeamId = teamId, UserId = userId, CreatedAt = DateTime.UtcNow });
         }
+    }
+
+
+    {
+        var notes = new List<string>();
+        var salesNote = await ApplyOneTeamTypeAsync(userId, "Sales", newSalesTeam, oldSalesTeam);
+        if (salesNote != null) notes.Add(salesNote);
+        var opNote = await ApplyOneTeamTypeAsync(userId, "Login", newOpTeam, oldOpTeam);
+        if (opNote != null) notes.Add(opNote);
+        return string.Join(" ", notes);
     }
 
     private async Task<string?> ApplyOneTeamTypeAsync(int userId, string teamType, string? newTeamName, string? oldTeamName)

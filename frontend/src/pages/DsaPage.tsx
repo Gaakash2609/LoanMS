@@ -13,6 +13,22 @@ import { Plus, UserCheck, UserX } from 'lucide-react'
 interface DsaPartner {
   id: number; name: string; code: string; email?: string
   phone?: string; city?: string; isActive: boolean; createdAt: string
+  // BUGFIX (Phase 6): these were already present in the actual GET
+  // /api/dsa response (DsaController.GetAll's Select) but never captured
+  // in this type — needed now because DsaController.Update (PUT, the
+  // only endpoint that can change IsActive — there is no dedicated
+  // status-only endpoint for this module) unconditionally overwrites
+  // every one of these fields from the request body, with no per-field
+  // null-check. Sending only { isActive } would have silently wiped
+  // Name/Code/PartnerType/etc back to empty/default. mappedSalesUserId is
+  // deliberately NOT added here — confirmed it genuinely is not part of
+  // the GetAll response at all (only the resolved name, MappedSalesUser,
+  // is) — see toggle's own comment below for how that one field is
+  // handled.
+  partnerType?: string
+  linkedUserId?: number | null
+  pan?: string; officeAddress?: string; officeState?: string; officePin?: string
+  officeAddressType?: string; category?: string; mappedDsaId?: number | null
 }
 
 export default function DsaPage() {
@@ -32,9 +48,38 @@ export default function DsaPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['dsa'] }); setShowForm(false); setForm({ name: '', code: '', email: '', phone: '', city: '' }) },
   })
 
+  // BUGFIX (confirmed real, pre-existing bug — Phase 6 audit): called
+  // PATCH /api/dsa/{id}/toggle-active, a route that never existed in
+  // DsaController.cs — every click genuinely 404'd. There is no
+  // dedicated status-only endpoint for this module (unlike Users' PATCH
+  // /{id}/status) — the only endpoint that can change IsActive is the
+  // full PUT /{id} (DsaController.Update), which unconditionally
+  // overwrites every field from the request body. Sends back the row's
+  // own current values for every field the list-response actually
+  // provides, with only isActive flipped — preserves the record instead
+  // of wiping it.
+  //
+  // mappedSalesUserId is the one field genuinely NOT recoverable here —
+  // confirmed the list-response only exposes the resolved name
+  // (MappedSalesUser), never the raw id — omitting it from this payload
+  // means the backend's unconditional `dsa.MappedSalesUserId =
+  // dto.MappedSalesUserId` will reset it to null if a mapping was
+  // previously set. This is a genuine, narrow, pre-existing API-shape
+  // limitation (no GET /dsa/{id} endpoint exists either) that can't be
+  // fixed from this file alone without a backend change, which is out of
+  // this phase's scope — flagged, not silently fixed.
+  const [toggleError, setToggleError] = useState('')
   const toggle = useMutation({
-    mutationFn: (id: number) => api.patch(`/api/dsa/${id}/toggle-active`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['dsa'] }),
+    mutationFn: (d: DsaPartner) => api.put(`/api/dsa/${d.id}`, {
+      name: d.name, code: d.code, email: d.email, phone: d.phone, city: d.city,
+      partnerType: d.partnerType, linkedUserId: d.linkedUserId,
+      isActive: !d.isActive,
+      pan: d.pan, officeAddress: d.officeAddress, officeState: d.officeState,
+      officePin: d.officePin, officeAddressType: d.officeAddressType,
+      category: d.category, mappedDsaId: d.mappedDsaId,
+    }),
+    onSuccess: () => { setToggleError(''); qc.invalidateQueries({ queryKey: ['dsa'] }) },
+    onError: () => setToggleError('Could not update DSA status. Please try again.'),
   })
 
   const columns: Column<DsaPartner>[] = [
@@ -50,7 +95,7 @@ export default function DsaPage() {
     )},
     { key: 'createdAt', label: 'Joined', render: d => formatDate(d.createdAt) },
     { key: 'actions', label: '', render: d => (
-      <button onClick={() => toggle.mutate(d.id)}
+      <button onClick={() => toggle.mutate(d)}
         className={`p-1.5 rounded-lg ${d.isActive ? 'text-red-500 hover:bg-red-50' : 'text-green-500 hover:bg-green-50'}`}>
         {d.isActive ? <UserX size={14} /> : <UserCheck size={14} />}
       </button>
@@ -90,6 +135,11 @@ export default function DsaPage() {
       )}
 
       <Card>
+        {toggleError && (
+          <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            {toggleError}
+          </div>
+        )}
         <DataTable columns={columns} data={data?.items} isLoading={isLoading}
           totalPages={data?.totalPages} currentPage={page} onPageChange={setPage} totalCount={data?.totalCount} />
       </Card>

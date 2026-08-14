@@ -51,10 +51,9 @@ public class UserService : IUserService
 
         return ApiResponseDto<IEnumerable<UserLookupDto>>.Ok(users.Select(u => new UserLookupDto
         {
-            Id           = u.Id,
-            FullName     = u.FullName,
-            Role         = u.Role.ToString(),
-            LocationName = u.LocationName
+            Id       = u.Id,
+            FullName = u.FullName,
+            Role     = u.Role.ToString()
         }));
     }
 
