@@ -787,6 +787,23 @@ try
     app.UseMiddleware<LoanMS.API.Middleware.ExceptionMiddleware>();
     app.UseMiddleware<LoanMS.API.Middleware.AuditMiddleware>();
 
+    // ── SPA fallback guard ──────────────────────────────────────────────────
+    // A request for an actual asset file (.js/.css/.map/.png/.jpg/.svg/.ico/
+    // .woff/.woff2/etc.) must NEVER be answered with index.html — if such a
+    // path reaches this point, the real file was not found by the static
+    // file middleware above, so this must return a genuine 404, not a
+    // 200 text/html page. Only extension-less (client-route) paths fall
+    // back to the SPA shell. This is what was producing "text/html" for
+    // .js/.css asset requests: those requests were reaching the fallback
+    // and being served index.html instead of 404ing.
+    static bool LooksLikeStaticFile(PathString path)
+    {
+        var value = path.Value;
+        if (string.IsNullOrEmpty(value)) return false;
+        var lastSegment = value[(value.LastIndexOf('/') + 1)..];
+        return lastSegment.Contains('.');
+    }
+
     // Serve React app from /app path (the only frontend now — legacy shell
     // retired in this phase; wwwroot/index.html no longer exists, "/" 302s
     // to "/app" via the redirect middleware above).
@@ -812,6 +829,11 @@ try
 
         app.MapFallback("/app/{**path}", context =>
         {
+            if (LooksLikeStaticFile(context.Request.Path))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return Task.CompletedTask;
+            }
             context.Response.ContentType = "text/html";
             return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
         });
@@ -829,6 +851,11 @@ try
     // as "/app/{**path}" above.
     app.MapFallback(context =>
     {
+        if (LooksLikeStaticFile(context.Request.Path))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return Task.CompletedTask;
+        }
         context.Response.ContentType = "text/html";
         return context.Response.SendFileAsync(Path.Combine(app.Environment.WebRootPath, "react", "index.html"));
     });
