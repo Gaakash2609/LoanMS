@@ -52,6 +52,8 @@ export interface LoanStatusHistory {
   comment?: string; changedBy: string; changedAt: string
 }
 
+export interface LoanBankLine { id: number; bankName: string; tempApplicationNumber: string; applicationNumber?: string; approvedLoan?: number; remarks?: string }
+
 export interface Loan {
   id: number; loanNumber: string; loanType: string; status: LoanStatus
   requestedAmount: number; approvedAmount?: number; interestRate: number
@@ -59,6 +61,13 @@ export interface Loan {
   approvedAt?: string; disbursedAt?: string; createdAt: string
   customer: Customer; createdBy: User; assignedTo?: User
   statusHistory: LoanStatusHistory[]
+  // Confirmed already present in the backend's LoanDetailDto
+  // (LoanMS.Application/DTOs/LoanBankLineDto.cs) and already returned by
+  // GET /api/loans/{id} — matches legacy's app.bank (bank/lender the
+  // application was submitted to), except this data model supports
+  // multiple simultaneous bank submissions per loan instead of a single
+  // bank field.
+  bankLines?: LoanBankLine[]
 }
 
 export interface LoanListItem {

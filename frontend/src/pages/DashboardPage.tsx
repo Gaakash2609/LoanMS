@@ -3,8 +3,55 @@ import { Card, CardHeader } from '@/components/ui/Card'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { StatusBadge } from '@/components/ui/Badge'
 import { formatCurrency, formatDate } from '@/utils/format'
-import { TrendingUp, Users, CreditCard, CheckCircle, XCircle, Banknote } from 'lucide-react'
+import { TrendingUp, Users, CreditCard, CheckCircle, XCircle, Banknote, Brain } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { expertExportApi } from '@/api/expertExportApi'
+import { Button } from '@/components/ui/Button'
+import { useState } from 'react'
+
+// ── Expert Export button — ExpertExportController's /access gate (matches
+// legacy's expertExportCheckAccess/_expertExportApplyVisibility: hidden
+// entirely if not allowed) + /data download (matches expertExportRun:
+// disable-while-pending, blob download, same filename pattern, distinct
+// 403 vs generic-failure messaging).
+function ExpertExportButton() {
+  const [error, setError] = useState('')
+  const { data: access } = useQuery({
+    queryKey: ['expertExportAccess'],
+    queryFn: () => expertExportApi.access().then(r => r.data),
+    staleTime: 30_000, // matches legacy's 30s access-check cache
+  })
+
+  const download = useMutation({
+    mutationFn: () => expertExportApi.downloadData(),
+    onSuccess: (res) => {
+      const blob = new Blob([res.data], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `expert-export-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setError('')
+    },
+    onError: (e: unknown) => {
+      const status = (e as { response?: { status?: number } })?.response?.status
+      setError(status === 403 ? 'You do not have permission for Expert Export' : 'Expert Export failed')
+    },
+  })
+
+  if (!access?.allowed) return null
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button size="sm" loading={download.isPending} onClick={() => download.mutate()}>
+        <Brain size={14} className="mr-1.5" />Expert Export
+      </Button>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
 
 export default function DashboardPage() {
   const { data: stats, isLoading } = useDashboard()
@@ -24,9 +71,12 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">Welcome back, {user?.fullName}</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-1">Welcome back, {user?.fullName}</p>
+        </div>
+        <ExpertExportButton />
       </div>
 
       {/* Stat cards */}

@@ -8,7 +8,8 @@ import { Badge } from '@/components/ui/Badge'
 import DataTable, { type Column } from '@/components/shared/DataTable'
 import PageHeader from '@/components/shared/PageHeader'
 import { formatDate } from '@/utils/format'
-import { Plus, UserCheck, UserX } from 'lucide-react'
+import { Plus, UserCheck, UserX, Download } from 'lucide-react'
+import { buildCsv, downloadCsv } from '@/utils/loanExport'
 
 interface DsaPartner {
   id: number; name: string; code: string; email?: string
@@ -53,6 +54,15 @@ export default function DsaPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['dsa'] }); setShowForm(false); setForm({ name: '', code: '', email: '', phone: '', city: '' }) },
   })
 
+  function exportCsv() {
+    if (dsaList.length === 0) return
+    const csv = buildCsv(
+      ['Name', 'Code', 'Email', 'Phone', 'City', 'Active', 'Created At'],
+      dsaList.map(d => [d.name, d.code, d.email ?? '', d.phone ?? '', d.city ?? '', d.isActive ? 'Yes' : 'No', formatDate(d.createdAt)]),
+    )
+    downloadCsv(csv, `dsa-export-${new Date().toISOString().slice(0, 10)}.csv`)
+  }
+
   // BUGFIX (Phase 6, corrected — kept fully intact, untouched by this
   // Phase 9 fix): the first Phase 6 attempt called PATCH
   // /api/dsa/{id}/toggle-active (a route that never existed — every click
@@ -93,7 +103,14 @@ export default function DsaPage() {
   return (
     <div>
       <PageHeader title="DSA Management" subtitle={`${totalCount} partners`}
-        action={<Button size="sm" onClick={() => setShowForm(true)}><Plus size={14} className="mr-1" />Add DSA</Button>} />
+        action={
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" disabled={dsaList.length === 0} onClick={exportCsv}>
+              <Download size={14} className="mr-1" />Export CSV
+            </Button>
+            <Button size="sm" onClick={() => setShowForm(true)}><Plus size={14} className="mr-1" />Add DSA</Button>
+          </div>
+        } />
 
       {showForm && (
         <Card className="mb-5 p-5">

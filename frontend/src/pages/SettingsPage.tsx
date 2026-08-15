@@ -8,6 +8,9 @@ import PageHeader from '@/components/shared/PageHeader'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { useAuthStore } from '@/store/authStore'
 import { Sparkles, Shield } from 'lucide-react'
+import BrandingCard from '@/components/shared/BrandingCard'
+import ExpertExportAccessCard from '@/components/shared/ExpertExportAccessCard'
+import EmailConfigCard from '@/components/shared/EmailConfigCard'
 
 export default function SettingsPage() {
   const user = useAuthStore(s => s.user)
@@ -65,12 +68,17 @@ export default function SettingsPage() {
     )
   }
 
-  const groupedSettings = (settings ?? []).reduce<Record<string, AppSetting[]>>((acc, s) => {
-    const cat = s.category ?? 'General'
-    if (!acc[cat]) acc[cat] = []
-    acc[cat].push(s)
-    return acc
-  }, {})
+  // Branding keys are edited via the dedicated BrandingCard below (with
+  // image upload/preview), not the generic raw key/value editor — excluded
+  // here so a base64 logo string never gets truncated-and-shown as text.
+  const groupedSettings = (settings ?? [])
+    .filter(s => s.category !== 'branding')
+    .reduce<Record<string, AppSetting[]>>((acc, s) => {
+      const cat = s.category ?? 'General'
+      if (!acc[cat]) acc[cat] = []
+      acc[cat].push(s)
+      return acc
+    }, {})
 
   return (
     <div className="space-y-6">
@@ -95,6 +103,17 @@ export default function SettingsPage() {
             : 'To enable AI, set AI:Enabled=true and AI:ApiKey in your environment variables, then restart the server.'}
         </p>
       </Card>
+
+      {/* Branding */}
+      <BrandingCard settings={settings ?? []} />
+
+      {/* Expert Export Access — Admin only, matches ExpertExportController's
+          [Authorize(Roles = "Admin")] on GET/POST /config. */}
+      {user?.role === 'Admin' && <ExpertExportAccessCard />}
+
+      {/* Mail & Email — Admin only, matches SettingsController's class-level
+          [Authorize(Roles = "Admin")]. */}
+      {user?.role === 'Admin' && <EmailConfigCard />}
 
       {/* App Settings */}
       {isLoading ? <LoadingSpinner /> : Object.entries(groupedSettings).map(([category, items]) => (

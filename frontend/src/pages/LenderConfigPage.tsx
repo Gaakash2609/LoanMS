@@ -10,7 +10,8 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import PageHeader from '@/components/shared/PageHeader'
-import { Plus, Trash2, Pencil, Search } from 'lucide-react'
+import { Plus, Trash2, Pencil, Search, Download } from 'lucide-react'
+import { buildCsv, downloadCsv } from '@/utils/loanExport'
 
 type Tab = 'companies' | 'categories' | 'lines' | 'match'
 
@@ -67,13 +68,29 @@ function CompaniesTab({ canManage }: { canManage: boolean }) {
     remove.mutate(id)
   }
 
+  function exportCsv() {
+    if (!companies || companies.length === 0) return
+    const csv = buildCsv(
+      ['Name', 'Employment Types', 'Company Type'],
+      companies.map(c => {
+        let empTypes = ''
+        try { empTypes = (JSON.parse(c.empTypesJson || '[]') as string[]).join('; ') } catch { /* leave blank on parse failure */ }
+        return [c.name, empTypes, c.compType ?? '']
+      }),
+    )
+    downloadCsv(csv, `lender-companies-export-${new Date().toISOString().slice(0, 10)}.csv`)
+  }
+
   return (
     <div>
-      {canManage && (
-        <div className="mb-4">
+      <div className="mb-4 flex items-center gap-2">
+        {canManage && (
           <Button size="sm" onClick={() => { closeForm(); setShowForm(true) }}><Plus size={14} className="mr-1" />Add Company</Button>
-        </div>
-      )}
+        )}
+        <Button size="sm" variant="secondary" disabled={!companies?.length} onClick={exportCsv}>
+          <Download size={14} className="mr-1" />Export CSV
+        </Button>
+      </div>
 
       {showForm && (
         <Card className="mb-4 p-5">
@@ -171,13 +188,23 @@ function CategoriesTab({ canManage }: { canManage: boolean }) {
     remove.mutate(id)
   }
 
+  function exportCsv() {
+    if (!categories || categories.length === 0) return
+    const csv = buildCsv(['Name', 'Salary Threshold'], categories.map(c => [c.name, c.salary]))
+    downloadCsv(csv, `lender-categories-export-${new Date().toISOString().slice(0, 10)}.csv`)
+  }
+
   return (
     <div>
-      {canManage && (
-        <div className="mb-4">
+      <div className="mb-4 flex items-center gap-2">
+        {canManage && (
           <Button size="sm" onClick={() => { closeForm(); setShowForm(true) }}><Plus size={14} className="mr-1" />Add Category</Button>
-        </div>
-      )}
+        )}
+        <Button size="sm" variant="secondary" disabled={!categories?.length} onClick={exportCsv}>
+          <Download size={14} className="mr-1" />Export CSV
+        </Button>
+      </div>
+
 
       {showForm && (
         <Card className="mb-4 p-5">
@@ -284,13 +311,26 @@ function LinesTab({ canManage }: { canManage: boolean }) {
   const isLoading = loadingBanks
   const banksWithLines = (banks ?? []).filter(b => b.lines.length > 0)
 
+  function exportCsv() {
+    if (banksWithLines.length === 0) return
+    const rows: (string | number)[][] = []
+    banksWithLines.forEach(b => b.lines.forEach(l => {
+      rows.push([b.bankName, companyName(l.companyId), categoryName(l.categoryId), l.pinCode ?? '', l.pf ? 'Yes' : 'No'])
+    }))
+    const csv = buildCsv(['Bank', 'Company', 'Category', 'Pin Code', 'PF'], rows)
+    downloadCsv(csv, `lender-lines-export-${new Date().toISOString().slice(0, 10)}.csv`)
+  }
+
   return (
     <div>
-      {canManage && (
-        <div className="mb-4">
+      <div className="mb-4 flex items-center gap-2">
+        {canManage && (
           <Button size="sm" onClick={() => setShowForm(s => !s)}><Plus size={14} className="mr-1" />Add Line</Button>
-        </div>
-      )}
+        )}
+        <Button size="sm" variant="secondary" disabled={banksWithLines.length === 0} onClick={exportCsv}>
+          <Download size={14} className="mr-1" />Export CSV
+        </Button>
+      </div>
 
       {showForm && (
         <Card className="mb-4 p-5">

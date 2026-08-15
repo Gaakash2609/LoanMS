@@ -19,4 +19,19 @@ export const settingsApi = {
   // setting's current category back, not just the new value.
   update: (key: string, value: string, category?: string) =>
     api.post<ApiResponse<boolean>>('/api/settings', { key, value, category }),
+  // Dedicated GET-by-key route. Most keys are Admin-only there, but a
+  // small explicit whitelist (branding + efin_cam_matrix +
+  // efin_incred_comment_templates) is readable by any authenticated user —
+  // see SettingsController.Get's doc comment.
+  getByKey: (key: string) =>
+    api.get<ApiResponse<AppSetting>>(`/api/settings/${key}`),
+  // Sign-in logo has its own dedicated endpoint (SettingsController's
+  // GetSigninLogoPublic/SaveSigninLogo) — AllowAnonymous on GET since the
+  // login page needs it before authentication, unlike the generic
+  // /api/settings/{key} route.
+  signinLogo: {
+    get: () => api.get<{ logo: string | null }>('/api/settings/signin-logo'),
+    set: (logo: string) => api.post<ApiResponse<boolean>>('/api/settings/signin-logo', { logo }),
+  },
 }
+

@@ -488,6 +488,12 @@ function Step2({ data, onChange, errors, touch, touched }: {
 }) {
   const [panImages, setPanImages] = useState<File[]>([])
   const [aadhaarImages, setAadhaarImages] = useState<File[]>([])
+  const [showKycReport, setShowKycReport] = useState(false)
+  // Extra fields used only for Cross-Validate (kycCrossValidate in legacy
+  // kyc.js) — not part of WizardData/submission, same as extractionStatus
+  // above: purely local, derived from the AI response text.
+  const [panNumberExtracted, setPanNumberExtracted] = useState('')
+  const [aadhaarFullNameExtracted, setAadhaarFullNameExtracted] = useState('')
   const [extractionStatus, setExtractionStatus] = useState<{
     pan?: { status: 'idle' | 'loading' | 'success' | 'error'; message?: string }
     aadhaar?: { status: 'idle' | 'loading' | 'success' | 'error'; message?: string }
@@ -526,6 +532,7 @@ function Step2({ data, onChange, errors, touch, touched }: {
 FIRST NAME: <first name>
 LAST NAME: <last name>
 FATHER'S NAME: <father's name>
+PAN NUMBER: <10-character PAN, 5 letters+4 digits+1 letter>
 
 Extract exactly what is on the card. Be accurate.`,
         })
@@ -536,6 +543,7 @@ Extract exactly what is on the card. Be accurate.`,
 
         // Parse extracted text
         const panData = extractPanData(response.data.text || '')
+        setPanNumberExtracted(panData.panNumber)
         // 🟠 KYC Auto-fill improvement (item #6): only fill a field the user
         // hasn't already deliberately edited themselves (Step2's `touched`
         // prop — set by each field's own onBlur, same mechanism every other
@@ -581,6 +589,7 @@ Extract exactly what is on the card. Be accurate.`,
             data,
           })),
           prompt: `Extract Aadhaar card information. Return ONLY the following fields in this exact format:
+FULL NAME: <full name as printed>
 AADHAAR NUMBER: <12 digit number>
 DATE OF BIRTH: <DD/MM/YYYY>
 GENDER: <Male/Female/Other>
@@ -598,6 +607,7 @@ Extract exactly what is on the card. Be accurate.`,
 
         // Parse extracted text
         const aadhaarData = extractAadhaarData(response.data.text || '')
+        setAadhaarFullNameExtracted(aadhaarData.fullName)
         // Same touched-field precedence as extractPan above.
         onChange({
           kycAadhar: aadhaarData.aadhaarNumber,
@@ -639,6 +649,62 @@ Extract exactly what is on the card. Be accurate.`,
     if (!files) return
     setAadhaarImages(Array.from(files))
     setExtractionStatus(s => ({ ...s, aadhaar: { status: 'idle' } }))
+  }
+
+  // ── Cross-Validate — matches legacy kycCrossValidate exactly: (1) PAN name
+  // (composed from the already-extracted first/last name) vs Aadhaar full
+  // name, word-subset match either direction; (2) wizard-entered PAN number
+  // vs PAN-extracted PAN number, exact match. Runs once both PAN and
+  // Aadhaar have been extracted (legacy: `if (panData && aadharData)
+  // kycCrossValidate(...)`).
+  const crossValidateChecks: { label: string; ok: boolean }[] = []
+  if (extractionStatus.pan?.status === 'success' && extractionStatus.aadhaar?.status === 'success') {
+    const panName = `${data.kycFirstName} ${data.kycLastName}`.toUpperCase().replace(/\s+/g, ' ').trim()
+    const aadhaarName = aadhaarFullNameExtracted.toUpperCase().replace(/\s+/g, ' ').trim()
+    if (panName && aadhaarName) {
+      const panWords = panName.split(' ')
+      const aadhaarWords = aadhaarName.split(' ')
+      const nameOk = panWords.every(w => aadhaarName.includes(w)) || aadhaarWords.every(w => panName.includes(w))
+      crossValidateChecks.push({ label: `Name ${nameOk ? 'matches' : 'differs'} — PAN: ${panName} | Aadhaar: ${aadhaarName}`, ok: nameOk })
+    }
+    const wizardPan = (data.pan || '').trim().toUpperCase()
+    const extractedPan = panNumberExtracted.replace(/\s/g, '').toUpperCase()
+    if (wizardPan && extractedPan) {
+      const panOk = wizardPan === extractedPan
+      crossValidateChecks.push({ label: `PAN ${panOk ? 'matches' : 'mismatch'} Step 1 entry — entered: ${wizardPan} | extracted: ${extractedPan}`, ok: panOk })
+    }
+  }
+  const crossValidatePassed = crossValidateChecks.length > 0 && crossValidateChecks.every(c => c.ok)
+
+  // ── KYC Report — matches legacy kycBuildReport's row set (upload status +
+  // extracted fields), built from data already held in wizard state.
+  const kycReportRows: { label: string; value: string; ok: boolean }[] = [
+    { label: 'PAN Card Upload', value: panImages[0]?.name || 'Not uploaded', ok: panImages.length > 0 },
+    { label: 'Aadhaar Upload', value: aadhaarImages[0]?.name || 'Not uploaded', ok: aadhaarImages.length > 0 },
+    { label: 'First Name', value: data.kycFirstName || '—', ok: !!data.kycFirstName },
+    { label: 'Last Name', value: data.kycLastName || '—', ok: !!data.kycLastName },
+    { label: "Father's Name", value: data.kycFather || '—', ok: !!data.kycFather },
+    { label: 'Aadhaar Number', value: data.kycAadhar || '—', ok: !!data.kycAadhar },
+    { label: 'Date of Birth', value: data.kycDob || '—', ok: !!data.kycDob },
+    { label: 'Gender', value: data.kycGender || '—', ok: !!data.kycGender },
+    { label: 'City / District', value: data.kycCity || '—', ok: !!data.kycCity },
+    { label: 'State', value: data.kycState || '—', ok: !!data.kycState },
+    { label: 'PIN Code', value: data.kycPin || '—', ok: !!data.kycPin },
+  ]
+
+  function downloadKycReport() {
+    const ts = new Date()
+    const lines = [
+      `KYC Report | Generated: ${ts.toLocaleString('en-IN')}`,
+      '---',
+      ...kycReportRows.map(r => `${r.label}: ${r.value}`),
+    ]
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `KYC_Report_${ts.toISOString().slice(0, 10)}.txt`
+    a.click()
+    URL.revokeObjectURL(a.href)
   }
 
   return (
@@ -845,6 +911,52 @@ Extract exactly what is on the card. Be accurate.`,
               placeholder="6-digit PIN" maxLength={6} minLength={6}
               inputMode="numeric" pattern="\d{6}" digitsOnly />
           </FormGroup>
+        </div>
+
+        {/* Cross-Validate — matches legacy kycCrossValidate; shown once both
+            documents are extracted. */}
+        {crossValidateChecks.length > 0 && (
+          <div className={`mt-5 p-3 rounded-lg border text-xs ${crossValidatePassed ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
+            <p className={`font-semibold mb-1.5 ${crossValidatePassed ? 'text-green-700' : 'text-yellow-700'}`}>
+              {crossValidatePassed ? '✅ Cross-Validation Passed' : '⚠ Review Required'}
+            </p>
+            <div className="space-y-1">
+              {crossValidateChecks.map((c, i) => (
+                <p key={i} className={c.ok ? 'text-green-700' : 'text-yellow-700'}>
+                  {c.ok ? '✅' : '⚠️'} {c.label}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* KYC Report / Download — reproduces legacy kyc.js's kycBuildReport/
+            kycDownloadReport exactly: a plain-text summary of what was
+            uploaded/extracted, downloaded as a .txt file. Built entirely
+            from data already in wizard state (no backend call — legacy's
+            versions were pure client-side too). */}
+        <div className="mt-5 pt-4 border-t border-gray-100">
+          <button type="button" onClick={() => setShowKycReport(v => !v)}
+            className="text-xs font-semibold text-blue-600">
+            {showKycReport ? 'Hide' : 'Show'} KYC Report
+          </button>
+          {showKycReport && (
+            <div className="mt-3 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <div className="text-xs text-gray-500 mb-3">Generated: {new Date().toLocaleString('en-IN')}</div>
+              <div className="space-y-1.5 text-xs">
+                {kycReportRows.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 py-1 border-b border-gray-100 last:border-0">
+                    <span className="text-gray-500">{r.label}</span>
+                    <span className={r.ok ? 'text-green-700 font-medium' : 'text-gray-400'}>{r.value}</span>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={downloadKycReport}
+                className="mt-3 text-xs font-semibold text-blue-600 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50">
+                Download Report
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

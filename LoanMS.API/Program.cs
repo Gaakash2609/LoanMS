@@ -745,6 +745,24 @@ try
 
     app.UseCors("RestrictedCors");
 
+    // ── Legacy root retirement (Phase 1: redirect only, no deletion) ───────
+    // Root "/" would otherwise be served directly as a static file by
+    // UseDefaultFiles()+UseStaticFiles() below (wwwroot/index.html, the
+    // legacy app) — that happens before endpoint routing/MapFallback ever
+    // runs, so redirecting "/" has to happen here, ahead of static files.
+    // Scoped to the EXACT root path only: "/app", "/api/*", "/swagger",
+    // "/health", and every other static asset path are untouched and fall
+    // straight through to the existing pipeline unchanged.
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path == "/" && context.Request.Method == "GET")
+        {
+            context.Response.Redirect("/app", permanent: false);
+            return;
+        }
+        await next();
+    });
+
     // ── Static files MUST come before Auth/Security middleware ─────────────
     // UseDefaultFiles enables serving index.html at "/"
     app.UseDefaultFiles();
@@ -769,8 +787,9 @@ try
     app.UseMiddleware<LoanMS.API.Middleware.ExceptionMiddleware>();
     app.UseMiddleware<LoanMS.API.Middleware.AuditMiddleware>();
 
-    // Serve React app from /app path (new frontend)
-    // Existing wwwroot/index.html is still served at root for backward compatibility
+    // Serve React app from /app path (the only frontend now — legacy shell
+    // retired in this phase; wwwroot/index.html no longer exists, "/" 302s
+    // to "/app" via the redirect middleware above).
     if (Directory.Exists(Path.Combine(app.Environment.WebRootPath, "react")))
     {
         var reactRoot = Path.Combine(app.Environment.WebRootPath, "react");
@@ -802,7 +821,17 @@ try
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
-    app.MapFallbackToFile("index.html");
+    // Final catch-all for any request that matched no static file, no /app
+    // route, and no API controller. Previously served the legacy
+    // wwwroot/index.html (MapFallbackToFile("index.html")); that file is
+    // deleted in this phase, so this now resolves into the React app
+    // instead of 404ing on a stray/legacy bookmark — same fallback target
+    // as "/app/{**path}" above.
+    app.MapFallback(context =>
+    {
+        context.Response.ContentType = "text/html";
+        return context.Response.SendFileAsync(Path.Combine(app.Environment.WebRootPath, "react", "index.html"));
+    });
 
     Log.Information(
         "LoanMS API started | DB={Provider} | AI={AI} ({AIProvider}) | Redis={Redis} | Env={Env}",

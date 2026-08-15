@@ -6,7 +6,8 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import DataTable, { type Column } from '@/components/shared/DataTable'
 import PageHeader from '@/components/shared/PageHeader'
-import { Plus, Trash2, Pencil } from 'lucide-react'
+import { Plus, Trash2, Pencil, Download } from 'lucide-react'
+import { buildCsv, downloadCsv } from '@/utils/loanExport'
 
 interface Bank {
   id: number; bankName: string; ifscPrefix?: string; empCode?: string
@@ -47,6 +48,15 @@ export default function BanksPage() {
     setEditingId(null)
     setForm({})
     setShowForm(true)
+  }
+
+  function exportCsv() {
+    if (!banks || banks.length === 0) return
+    const csv = buildCsv(
+      ['Bank Name', 'IFSC Prefix', 'Emp Code', 'Location', 'RM Name', 'RM Mobile', 'Email', 'Remarks'],
+      banks.map(b => [b.bankName, b.ifscPrefix ?? '', b.empCode ?? '', b.location ?? '', b.rmName ?? '', b.rmMobile ?? '', b.email ?? '', b.remarks ?? '']),
+    )
+    downloadCsv(csv, `banks-export-${new Date().toISOString().slice(0, 10)}.csv`)
   }
 
   function openEdit(bank: Bank) {
@@ -96,7 +106,14 @@ export default function BanksPage() {
   return (
     <div>
       <PageHeader title="Banks" subtitle={`${banks?.length ?? 0} banks`}
-        action={<Button size="sm" onClick={openCreate}><Plus size={14} className="mr-1" />Add Bank</Button>} />
+        action={
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" disabled={!banks?.length} onClick={exportCsv}>
+              <Download size={14} className="mr-1" />Export CSV
+            </Button>
+            <Button size="sm" onClick={openCreate}><Plus size={14} className="mr-1" />Add Bank</Button>
+          </div>
+        } />
 
       {showForm && (
         <Card className="mb-5 p-5">

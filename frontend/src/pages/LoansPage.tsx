@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/Button'
 import { StatusBadge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency, formatDate } from '@/utils/format'
-import { Plus, Search, RefreshCw, ChevronLeft, ChevronRight, FileClock, Play, Trash2 } from 'lucide-react'
+import { Plus, Search, RefreshCw, ChevronLeft, ChevronRight, FileClock, Play, Trash2, Download } from 'lucide-react'
 import { listDraftMetas, deleteDraftMeta, type WizardDraftSummary } from '@/utils/draftStorage'
+import ExportLoansModal from '@/components/shared/ExportLoansModal'
 
 const STATUSES = ['', 'Draft', 'Submitted', 'UnderReview', 'Approved', 'Disbursed', 'Rejected', 'Closed']
 
@@ -17,6 +18,7 @@ export default function LoansPage() {
   const { data, isLoading, refetch } = useLoans(filter)
   const [search, setSearch] = useState(filter.search ?? '')
   const [section, setSection] = useState<'applications' | 'drafts'>('applications')
+  const [showExport, setShowExport] = useState(false)
   const [drafts, setDrafts] = useState<WizardDraftSummary[]>([])
   const [draftsLoading, setDraftsLoading] = useState(false)
 
@@ -56,6 +58,9 @@ export default function LoansPage() {
           <Button variant="secondary" size="sm" onClick={() => refetch()}>
             <RefreshCw size={14} className="mr-1.5" />Refresh
           </Button>
+          <Button variant="secondary" size="sm" onClick={() => setShowExport(true)}>
+            <Download size={14} className="mr-1.5" />Export
+          </Button>
           <Link to="/loans/new">
             <Button size="sm">
               <Plus size={14} className="mr-1.5" />New Loan
@@ -63,6 +68,8 @@ export default function LoansPage() {
           </Link>
         </div>
       </div>
+
+      {showExport && <ExportLoansModal filter={filter} onClose={() => setShowExport(false)} />}
 
       {/* Section tabs */}
       <div className="flex gap-2">

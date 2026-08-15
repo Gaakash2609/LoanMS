@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { UserRole } from '@/types'
+import NotificationBell from '@/components/shared/NotificationBell'
 
 // Turns "Admin General" -> "AG", "System" -> "SY", "" -> "?"
 function getInitials(fullName?: string) {
@@ -251,6 +252,8 @@ export default function AppLayout() {
           >
             {searchOpen ? <X size={18} /> : <Search size={18} />}
           </button>
+
+          <NotificationBell />
 
           <div
             className="flex w-8 h-8 shrink-0 rounded-full bg-efin-red text-white items-center justify-center text-xs font-semibold"

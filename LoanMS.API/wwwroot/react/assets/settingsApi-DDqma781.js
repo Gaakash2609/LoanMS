@@ -1,0 +1,1 @@
+import{a as s}from"./axios-D8_tum83.js";const n={getAll:()=>s.get("/api/settings"),update:(t,i,g)=>s.post("/api/settings",{key:t,value:i,category:g}),getByKey:t=>s.get(`/api/settings/${t}`),signinLogo:{get:()=>s.get("/api/settings/signin-logo"),set:t=>s.post("/api/settings/signin-logo",{logo:t})}};export{n as s};

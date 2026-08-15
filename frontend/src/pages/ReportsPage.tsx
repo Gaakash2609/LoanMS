@@ -1,15 +1,19 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { reportsApi } from '@/api/reportsApi'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import PageHeader from '@/components/shared/PageHeader'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency } from '@/utils/format'
-import { TrendingUp, BarChart3, Users, Award, Clock, Zap, Target, Check, AlertTriangle } from 'lucide-react'
+import { TrendingUp, BarChart3, Users, Award, Clock, Zap, Target, Check, AlertTriangle, Download } from 'lucide-react'
+import { buildReportCsv, buildReportExcelHtml, buildReportPdfHtml, downloadBlob, openReportPdfPreview } from '@/utils/reportExport'
+import { loansApi } from '@/api/loansApi'
+import type { LoanListItem } from '@/types'
 
 export default function ReportsPage() {
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
+  const [showExportMenu, setShowExportMenu] = useState(false)
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['reports', dateRange],
@@ -17,6 +21,73 @@ export default function ReportsPage() {
       .then(r => r.data.data),
     staleTime: 120_000,
   })
+
+  const scopeLabel = dateRange.from || dateRange.to
+    ? `${dateRange.from || '…'} to ${dateRange.to || '…'}` : 'All Time'
+
+  // Row-level application data for export only — fetched on demand (not on
+  // every render) via the existing GET /api/loans endpoint, scoped to the
+  // same date range currently applied to the aggregate report above.
+  // useMutation (rather than a plain async click handler) guards against a
+  // duplicate fetch firing while one is already in flight.
+  const fetchExportRows = useMutation({
+    mutationFn: () => loansApi.getAll({
+      dateFrom: dateRange.from || undefined,
+      dateTo: dateRange.to || undefined,
+      page: 1, pageSize: 5000,
+    }).then(r => r.data.data?.items ?? []),
+  })
+
+  // ── Export — matches legacy's toggleRptExportMenu/exportReportCSV/Excel/
+  // PDF/Print exactly in technique (plain CSV, HTML-table-as-.xls, print-
+  // styled HTML + window.print() for "PDF", scoped browser print for
+  // "Print") — built from the same aggregate summary already loaded above,
+  // since that's the only report data this page has (see reportExport.ts
+  // doc comment for why legacy's per-application row columns aren't here).
+  async function withExportRows(fn: (rows: LoanListItem[]) => void) {
+    if (fetchExportRows.isPending) return // guard against duplicate export clicks
+    const rows = await fetchExportRows.mutateAsync()
+    fn(rows)
+  }
+  function handleExportCsv() {
+    if (!data) return
+    withExportRows(rows => {
+      downloadBlob(buildReportCsv(data, scopeLabel, rows), `LoanMS_Report_${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8;')
+      setShowExportMenu(false)
+    })
+  }
+  function handleExportExcel() {
+    if (!data) return
+    withExportRows(rows => {
+      downloadBlob('\uFEFF' + buildReportExcelHtml(data, scopeLabel, rows), `LoanMS_Report_${new Date().toISOString().slice(0, 10)}.xls`, 'application/vnd.ms-excel;charset=utf-8')
+      setShowExportMenu(false)
+    })
+  }
+  function handleExportPdf() {
+    if (!data) return
+    withExportRows(rows => {
+      const html = buildReportPdfHtml(data, scopeLabel, rows)
+      const result = openReportPdfPreview(html)
+      if (result === 'blocked') downloadBlob(html, `LoanMS_Report_${new Date().toISOString().slice(0, 10)}.html`, 'text/html;charset=utf-8')
+      setShowExportMenu(false)
+    })
+  }
+  function handlePrint() {
+    setShowExportMenu(false)
+    const style = document.createElement('style')
+    style.id = 'reports-print-style'
+    style.textContent = `@media print {
+      body > *:not(#root) { display: none !important; }
+      #root > *:not(#reports-print-area-portal) { display: none !important; }
+      body * { visibility: hidden; }
+      #reports-print-area, #reports-print-area * { visibility: visible; }
+      #reports-print-area { position: absolute; left: 0; top: 0; width: 100%; }
+    }`
+    document.head.appendChild(style)
+    const cleanup = () => { style.remove(); window.removeEventListener('afterprint', cleanup) }
+    window.addEventListener('afterprint', cleanup)
+    window.print()
+  }
 
   const totalByStatus = data?.loansByStatus ?? []
   const totalByType   = data?.loansByType ?? []
@@ -56,9 +127,24 @@ export default function ReportsPage() {
               onChange={e => setDateRange(p => ({ ...p, to: e.target.value }))}
               className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             <Button size="sm" variant="secondary" onClick={() => refetch()}>Apply</Button>
+            <div className="relative">
+              <Button size="sm" variant="secondary" disabled={!data || fetchExportRows.isPending} onClick={() => setShowExportMenu(v => !v)}>
+                <Download size={14} className="mr-1.5" />{fetchExportRows.isPending ? 'Exporting…' : 'Export'}
+              </Button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-9 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1">
+                  <button onClick={handleExportCsv} className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50">CSV</button>
+                  <button onClick={handleExportExcel} className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50">Excel</button>
+                  <button onClick={handleExportPdf} className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50">PDF</button>
+                  <button onClick={handlePrint} className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50">Print</button>
+                </div>
+              )}
+            </div>
           </div>
         }
       />
+
+      <div id="reports-print-area">
 
       {isLoading ? <LoadingSpinner size="lg" /> : (
         <>
@@ -316,6 +402,7 @@ export default function ReportsPage() {
           </div>
         </>
       )}
+      </div>
     </div>
   )
 }

@@ -7,10 +7,12 @@ export interface PanExtractedData {
   firstName: string
   lastName: string
   fatherName: string
+  panNumber: string
 }
 
 export interface AadhaarExtractedData {
   aadhaarNumber: string
+  fullName: string
   dateOfBirth: string
   gender: string
   city: string
@@ -28,9 +30,14 @@ export function extractPanData(text: string): PanExtractedData {
     firstName: '',
     lastName: '',
     fatherName: '',
+    panNumber: '',
   }
 
   if (!text) return data
+
+  // PAN number: 5 letters + 4 digits + 1 letter (standard PAN format).
+  const panMatch = text.match(/\b([A-Z]{5}[0-9]{4}[A-Z])\b/)
+  if (panMatch) data.panNumber = panMatch[1]
 
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
 
@@ -81,6 +88,7 @@ export function extractPanData(text: string): PanExtractedData {
 export function extractAadhaarData(text: string): AadhaarExtractedData {
   const data: AadhaarExtractedData = {
     aadhaarNumber: '',
+    fullName: '',
     dateOfBirth: '',
     gender: '',
     city: '',
@@ -101,6 +109,19 @@ export function extractAadhaarData(text: string): AadhaarExtractedData {
 
   lines.forEach(line => {
     const lower = line.toLowerCase()
+
+    // Full name (only when the line is genuinely the name field, not
+    // "father's name" or an address line that happens to mention "name").
+    if (
+      (lower.includes('full name') || lower.includes('name')) &&
+      !lower.includes('father')
+    ) {
+      const match = line.match(/:\s*(.+)/i)
+      if (match) {
+        const val = match[1].trim()
+        if (val.length < 100) data.fullName = val
+      }
+    }
 
     // DOB patterns: DD/MM/YYYY or DD-MM-YYYY
     if (lower.includes('dob') || lower.includes('birth')) {
