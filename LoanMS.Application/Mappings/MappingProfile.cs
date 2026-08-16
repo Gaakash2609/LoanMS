@@ -46,6 +46,7 @@ public class MappingProfile : Profile
             .ForMember(d => d.ChangedAt,  o => o.MapFrom(s => s.CreatedAt));
 
         CreateMap<LoanBankLine, LoanBankLineDto>();
+        CreateMap<LoanSanctionDetail, LoanSanctionDetailDto>();
         CreateMap<LoanReference, LoanReferenceDto>();
 
         // ── Loan (no role-based masking — use LoanService.MapToDto for that)
@@ -87,3 +88,4 @@ public class MappingProfile : Profile
             .ForMember(d => d.RiskGrade,     o => o.Ignore());
     }
 }
+
