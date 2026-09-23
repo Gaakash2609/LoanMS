@@ -14,6 +14,20 @@ public class LocationsController : BaseController
     private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
     public LocationsController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
+    /// <summary>Get minimal active-location list (id, name, city, state) for dropdowns like the
+    /// wizard's Location selector. Available to any authenticated role — unlike GetAll below,
+    /// this does not require the "locations-mgmt" menu permission, so non-Admin/ProductTeam
+    /// roles (e.g. Sales) can still pick a location when creating an application. Mirrors the
+    /// existing GET /api/users/lookup pattern used for the wizard's Sales Person dropdown.</summary>
+    [HttpGet("lookup")]
+    public async Task<IActionResult> GetLookup()
+    {
+        var result = await _db.Locations.Where(l => l.IsActive).OrderBy(l => l.Name)
+            .Select(l => new { l.Id, l.Name, l.City, l.State })
+            .ToListAsync();
+        return Ok(ApiResponseDto<object>.Ok(result));
+    }
+
     /// <summary>
     /// Locations list — enriched with each Location's mapped Sales Teams,
     /// Login Teams, and assigned Users (by name), mirroring the vanilla

@@ -139,8 +139,12 @@ export const wizardApi = {
       '/api/wizard/validate', data
     ),
 
+  // Uses the non-Admin-only lookup endpoint (same reasoning as getUsers below) —
+  // GET /api/locations is gated behind the "locations-mgmt" menu permission
+  // (Admin/ProductTeam only by default), which made this dropdown come up empty
+  // for every other role (e.g. Sales) when creating a new application.
   getLocations: () =>
-    api.get<ApiResponse<Array<{ id: number; name: string; city: string; state: string }>>>('/api/locations'),
+    api.get<ApiResponse<Array<{ id: number; name: string; city: string; state: string }>>>('/api/locations/lookup'),
 
   // Uses the non-Admin-only lookup endpoint (id/fullName/role only) so Sales and
   // Manager users can populate the Sales Person dropdown — GET /api/users is
