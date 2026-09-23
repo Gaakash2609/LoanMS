@@ -185,6 +185,13 @@ export function assignedToProduct(b: BankConfig, pk: string): boolean {
 
 export const banksApi = {
   getAll: () => api.get<ApiResponse<BankConfig[]>>('/api/banks'),
+
+  // Same data as getAll, but for wizard/offer-making flows reachable by any role
+  // (e.g. Sales) — GET /api/banks is gated behind the "banks" management menu
+  // permission, which Sales isn't in by default, so BankEligibilityMatch (Step9,
+  // Initial Offer) was silently falling back to no-config defaults on a 403
+  // instead of using real bank eligibility rules.
+  getLookup: () => api.get<ApiResponse<BankConfig[]>>('/api/banks/lookup'),
   create: (data: BankSaveRequest) =>
     api.post<ApiResponse<{ id: number }>>('/api/banks', data),
   update: (id: number, data: BankSaveRequest) =>

@@ -38,6 +38,21 @@ public class DsaController : BaseController
         _rolePerm = rolePerm;
     }
 
+    /// <summary>Get minimal active DSA/Partner list (id, name, code, partnerType) for the wizard's
+    /// DSA/Agent dropdown (Step1, Channel = "DSA"/"Agent"). Available to any authenticated role —
+    /// unlike GetAll below, this does not require the "dsa-mgmt"/"partner-mgmt" menu permission,
+    /// so Sales (which isn't in either menu's default role list) can still record which DSA/Partner
+    /// brought in a lead. Mirrors the existing GET /api/users/lookup and /api/locations/lookup
+    /// pattern used elsewhere in the wizard.</summary>
+    [HttpGet("lookup")]
+    public async Task<IActionResult> GetLookup()
+    {
+        var result = await _db.DsaPartners.Where(d => d.IsActive).OrderBy(d => d.Name)
+            .Select(d => new { d.Id, d.Name, d.Code, PartnerType = d.PartnerType.ToString() })
+            .ToListAsync();
+        return Ok(ApiResponseDto<object>.Ok(result));
+    }
+
     /// <summary>
     /// Phase 4 — role-scoped: Admin/Manager/Sales keep the existing full-list
     /// behavior (unchanged). Partner now only sees their OWN Partner record

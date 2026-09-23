@@ -152,6 +152,10 @@ export const wizardApi = {
   getUsers: () =>
     api.get<ApiResponse<Array<{ id: number; fullName: string; role: string; locationId: number | null }>>>('/api/users/lookup'),
 
+  // Uses the non-Admin-only lookup endpoint (same reasoning as getLocations/getUsers
+  // above) — GET /api/dsa is gated behind the "dsa-mgmt"/"partner-mgmt" menu
+  // permissions (Sales isn't in either default role list), which made this
+  // dropdown come up empty for Sales when Channel = "DSA"/"Agent".
   getDsaPartners: () =>
-    api.get<ApiResponse<Array<{ id: number; name: string; code: string; partnerType: string }>>>('/api/dsa'),
+    api.get<ApiResponse<Array<{ id: number; name: string; code: string; partnerType: string }>>>('/api/dsa/lookup'),
 }

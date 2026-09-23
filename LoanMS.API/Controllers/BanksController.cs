@@ -26,16 +26,13 @@ public class BanksController : BaseController
     private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
     public BanksController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
-    [HttpGet]
-    public async Task<IActionResult> GetAll()
-    {
-        // Server-side enforcement of Menu Access Control (Settings screen)
-        // — same non-invasive, fail-open pattern as LoansController's
-        // action-permission checks (see RolePermissionService).
-        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "banks"))
-            return Forbid();
-
-        var banks = await _db.Banks
+    /// <summary>Same projection as GetAll, but reachable by any authenticated role — used by
+    /// GetLookup below so the wizard's Initial Offer step (Step9: AssignedBanksSection /
+    /// BankEligibilityMatch) can still match a customer against bank eligibility rules even
+    /// when the role isn't in the "banks" management menu's allow-list (e.g. Sales, which needs
+    /// this to make every offer but isn't a Bank/NBFC *master-data* manager).</summary>
+    private IQueryable<object> BankProjection() =>
+        _db.Banks
             .Include(b => b.Lines)
             .OrderBy(b => b.BankName)
             .Select(b => new
@@ -78,8 +75,27 @@ public class BanksController : BaseController
                     r.MinAcctVintage, r.MinAvgBalance, r.MinCreditScore, r.BankStmtMonths, r.BounceTolerance
                 }),
                 Lines = b.Lines.Select(l => new { l.Id, l.CompanyId, l.CategoryId, l.PinCode, l.Pf })
-            })
-            .ToListAsync();
+            });
+
+    /// <summary>Wizard-facing equivalent of GetAll (same fields), gated only by [Authorize] —
+    /// see BankProjection's doc comment for why this needs to bypass the "banks" menu check.</summary>
+    [HttpGet("lookup")]
+    public async Task<IActionResult> GetLookup()
+    {
+        var banks = await BankProjection().ToListAsync();
+        return Ok(ApiResponseDto<object>.Ok(banks));
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetAll()
+    {
+        // Server-side enforcement of Menu Access Control (Settings screen)
+        // — same non-invasive, fail-open pattern as LoansController's
+        // action-permission checks (see RolePermissionService).
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "banks"))
+            return Forbid();
+
+        var banks = await BankProjection().ToListAsync();
         return Ok(ApiResponseDto<object>.Ok(banks));
     }
 

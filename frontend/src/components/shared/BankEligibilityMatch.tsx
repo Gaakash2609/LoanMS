@@ -191,12 +191,12 @@ export default function BankEligibilityMatch({
   // Bank config feeds the per-card figures (interest rate, approval, processing,
   // FOIR limit, InCred/Elite/Open-List tags) — Vanilla derived these from the
   // bank rules it already had in memory (LA_DB.banks). We reuse the existing
-  // /api/banks projection. retry:false + graceful map means a role without the
-  // Banks menu (a 403) simply falls back to Vanilla's no-config defaults rather
-  // than breaking the step.
+  // /api/banks/lookup projection (menu-permission-free — see banksApi.getLookup)
+  // so every role that reaches this wizard step gets real bank eligibility data
+  // instead of falling back to Vanilla's no-config defaults.
   const bankConfigQuery = useQuery({
     queryKey: ['eligibility-bank-configs'],
-    queryFn: () => banksApi.getAll().then(r => r.data.data ?? []),
+    queryFn: () => banksApi.getLookup().then(r => r.data.data ?? []),
     staleTime: 60_000,
     retry: false,
   })
