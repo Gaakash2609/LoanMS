@@ -300,14 +300,17 @@ public class BanksController : BaseController
         var bank = await _db.Banks.FindAsync(id);
         if (bank == null) return NotFound(ApiResponseDto<bool>.Fail("Bank not found."));
 
-        // Soft delete only — same convention as LocationsController/DsaController.
-        // No FK relationships currently reference BankMaster, so nothing downstream
-        // (loans/applications/payouts/reports) can be broken by this.
-        bank.IsDeleted = true;
-        bank.IsActive = false;
-        bank.UpdatedAt = DateTime.UtcNow;
+        // Permanent delete — per product requirement, Admin/Product Team deletions
+        // in Lender Configuration must remove the record entirely, not just flag it
+        // (the previous IsDeleted=true soft delete left it recoverable/still in the
+        // DB, which product flagged as "not actually deleted"). The bank's eligibility
+        // lines, product rules, and product categories cascade-delete with it
+        // (FK OnDelete(Cascade) on all three — see AppDbContext); no other table has
+        // an FK to BankMaster, so nothing downstream (loans/applications/payouts/
+        // reports, which store bank name as a string, not a foreign key) breaks.
+        _db.Banks.Remove(bank);
         await _db.SaveChangesAsync();
-        return Ok(ApiResponseDto<bool>.Ok(true, "Bank deleted."));
+        return Ok(ApiResponseDto<bool>.Ok(true, "Bank permanently deleted."));
     }
 }
 

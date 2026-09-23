@@ -503,6 +503,27 @@ export default function BankProductConfigCard({ companiesTab, categoriesTab, lin
     setOffered.mutate({ bank: b, next })
   }
 
+  // Permanent delete (legacy had no equivalent — this table only ever offered
+  // Edit). Removes the BankMaster row entirely, not a soft/recoverable flag;
+  // its eligibility lines, product rules, and product categories cascade-delete
+  // with it server-side, and it disappears from every product's config at once.
+  const removeBank = useMutation({
+    mutationFn: (id: number) => banksApi.remove(id),
+    onSuccess: (_res, id) => {
+      qc.invalidateQueries({ queryKey: ['banksConfig'] })
+      qc.invalidateQueries({ queryKey: ['banks'] })
+      if (openBankId === id) setOpenBankId(null)
+    },
+    onError: (err: unknown) => {
+      const d = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
+      window.alert(d?.message || d?.errors?.join(' ') || 'Could not delete this bank.')
+    },
+  })
+  function handleDeleteBank(b: BankConfig) {
+    if (!window.confirm(`Permanently delete "${b.bankName}"?\n\nThis removes the bank and all its eligibility rules (Approved Companies, PINs, CIBIL, Bank Rules) across every loan product. This cannot be undone.`)) return
+    removeBank.mutate(b.id)
+  }
+
   const allBanks = useMemo(() => banks ?? [], [banks])
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -761,7 +782,19 @@ export default function BankProductConfigCard({ companiesTab, categoriesTab, lin
                     <td className="px-3 py-2.5">{cibil != null ? <span className="font-bold" style={{ color: cibilColor, fontFamily: 'var(--font-head)' }}>{cibil}{r.acceptNtc ? ' +NTC' : ''}</span> : <span className="text-gray-400">—</span>}</td>
                     <td className="px-3 py-2.5">{rulesSet ? <span className="text-[10.5px] px-2 py-0.5 rounded" style={{ background: 'rgba(8,88,151,.07)', color: 'var(--accent)' }}>₹{((r.maxLoanAmt ?? 0) / 100000).toFixed(0)}L · {r.foirLimit ?? 50}% FOIR</span> : <span className="text-gray-400">Default</span>}</td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                      <button onClick={() => setOpenBankId(openBankId === b.id ? null : b.id)} className="text-[11px] font-semibold text-efin-blue hover:underline">{openBankId === b.id ? 'Close' : '✏ Edit'}</button>
+                      <div className="flex items-center justify-end gap-2.5">
+                        <button onClick={() => setOpenBankId(openBankId === b.id ? null : b.id)} className="text-[11px] font-semibold text-efin-blue hover:underline">{openBankId === b.id ? 'Close' : '✏ Edit'}</button>
+                        {canEdit && (
+                          <button
+                            onClick={() => handleDeleteBank(b)}
+                            disabled={removeBank.isPending && removeBank.variables === b.id}
+                            title={`Permanently delete ${b.bankName}`}
+                            className="p-1 rounded text-[color:var(--danger)] hover:bg-red-50 disabled:opacity-50"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )
