@@ -110,8 +110,15 @@ export default function AppRoutes() {
               <Route path="/reports"             element={<ReportsPage />} />
             </Route>
 
-            {/* Admin/Manager */}
-            <Route element={<ProtectedRoute allowedRoles={['Admin', 'Manager']} />}>
+            {/* Admin/Manager/ProductTeam — Team Management: TeamsController's
+                and LocationsController's mutation endpoints already authorize
+                Admin,ProductTeam (Create/Update/SetStatus/AddMember/
+                RemoveMember/Delete), and TeamsPage's own canManage check
+                already expects ProductTeam too — this route-guard previously
+                only allowed Admin,Manager, blocking ProductTeam from pages
+                the backend already lets them manage (same bug class as the
+                Lender Config route split below, already fixed there). */}
+            <Route element={<ProtectedRoute allowedRoles={['Admin', 'Manager', 'ProductTeam']} />}>
               {/* Vanilla's three separate Team-Management pages
                   (#team-overview / #sales-teams / #login-teams) — one page
                   component parameterised by view, not a single tabbed page. */}
@@ -119,6 +126,10 @@ export default function AppRoutes() {
               <Route path="/sales-teams"         element={<TeamsPage view="sales" />} />
               <Route path="/login-teams"         element={<TeamsPage view="login" />} />
               <Route path="/locations"           element={<LocationsPage />} />
+            </Route>
+
+            {/* Admin/Manager */}
+            <Route element={<ProtectedRoute allowedRoles={['Admin', 'Manager']} />}>
               <Route path="/incred"              element={<IncredPage />} />
             </Route>
 

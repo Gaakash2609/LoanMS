@@ -68,6 +68,18 @@ export interface WizardSubmitPayload {
   // those wizard fields was collected in the UI and then silently dropped
   // before the request was sent.
   productData?: Record<string, string>
+  // Banks picked on Step 9's eligibility matcher (max 2) — persisted directly
+  // by Submit (see backend WizardSubmitDto.SelectedBanks) because the
+  // separate PUT /api/loans/{id}/bank-lines call is role-gated more
+  // narrowly than who may submit a wizard application, so a Sales/Dsa/
+  // Partner-submitted application's bank picks were silently dropped.
+  selectedBanks?: Array<{
+    bankName: string
+    tempApplicationNumber?: string
+    applicationNumber?: string
+    approvedLoan?: number
+    remarks?: string
+  }>
   // Meta
   source?: string
   lenderName?: string

@@ -246,7 +246,10 @@ export default function LoanDocumentsCard({ loanId }: { loanId: number }) {
                     <Badge variant={sb.variant}>{sb.label}</Badge>
                     {(d.version ?? 1) > 1 && <span className="text-[10px] text-gray-400">v{d.version}</span>}
                   </div>
-                  <p className="text-[11px] text-gray-500">{d.documentType}</p>
+                  <p className="text-[11px] text-gray-500">
+                    {d.documentType}
+                    {d.applicantRole === 'CoApplicant' && <span className="ml-1.5"><Badge variant="default">Co-Applicant</Badge></span>}
+                  </p>
                   <p className="text-[11px] text-gray-400 mt-0.5">{fmtSize(d.fileSizeBytes)} · {formatDateTime(d.uploadedAt)}</p>
                   {d.status === 'Rejected' && d.reviewNote && (
                     <p className="text-[11px] text-red-600 mt-1 leading-snug"><span className="font-semibold">Reason:</span> {d.reviewNote}</p>

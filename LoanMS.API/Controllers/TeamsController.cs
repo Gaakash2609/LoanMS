@@ -90,6 +90,7 @@ public class TeamsController : BaseController
         };
         _db.Teams.Add(team);
         await _db.SaveChangesAsync();
+        await EnsureLeaderIsMemberAsync(team.Id, dto.TeamLeadUserId);
         return Ok(ApiResponseDto<object>.Ok(new { team.Id }, "Team created."));
     }
 
@@ -103,7 +104,28 @@ public class TeamsController : BaseController
         team.LocationId = dto.LocationId; team.TeamLeadUserId = dto.TeamLeadUserId;
         team.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
+        await EnsureLeaderIsMemberAsync(id, dto.TeamLeadUserId);
         return Ok(ApiResponseDto<bool>.Ok(true, "Updated."));
+    }
+
+    // BUGFIX (confirmed real gap — "admin picks a Team Leader, it has no
+    // effect"): Team.TeamLeadUserId is a real FK and IS read directly by
+    // LoanRepository.ApplyVisibilityScope for the TeamLeader/Manager/
+    // OperationManager role branches — but the general admin-assigned scope
+    // WIDENING that applies to every OTHER role (Sales/Dsa/Partner/LoginTeam/
+    // LocationHead) only checks TeamMember rows, never TeamLeadUserId
+    // directly (see ApplyVisibilityScope's OR-terms). Create/Update never
+    // added the chosen leader as a member of their own team, so picking a
+    // plain Sales-role rep as Team Leader silently granted them nothing.
+    // Same add-if-not-already-present convention as AddMember above — a
+    // leader who's already a member (the common case) is left untouched.
+    private async Task EnsureLeaderIsMemberAsync(int teamId, int? teamLeadUserId)
+    {
+        if (!teamLeadUserId.HasValue) return;
+        var already = await _db.TeamMembers.AnyAsync(m => m.TeamId == teamId && m.UserId == teamLeadUserId.Value && !m.IsDeleted);
+        if (!already)
+            _db.TeamMembers.Add(new TeamMember { TeamId = teamId, UserId = teamLeadUserId.Value, CreatedAt = DateTime.UtcNow });
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>

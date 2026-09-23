@@ -1,0 +1,11 @@
+node_modules/
+bin/
+obj/
+logs/
+dist-node/
+*.db
+*.db-shm
+*.db-wal
+dataprotection-keys/
+LoanMS.API/wwwroot/react/
+frontend/tsconfig.tsbuildinfo

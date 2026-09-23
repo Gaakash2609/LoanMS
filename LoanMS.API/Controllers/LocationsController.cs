@@ -83,6 +83,22 @@ public class LocationsController : BaseController
     {
         var loc = await _db.Locations.FindAsync(id);
         if (loc == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+        // BUGFIX (confirmed real gap — rename left users' Location stale):
+        // User.LocationName is a free-text COPY of the Location name (written
+        // by the Users form), not a live join like Team.Location.Name — so
+        // renaming a Location here previously left every assigned user showing
+        // the OLD name, which then broke the Users page's exact-string
+        // Location filter (a rename made those users un-findable by the new
+        // name). Propagate the rename to the copies now. Matched on the OLD
+        // name; guarded so it only runs on an actual rename. The authoritative
+        // LocationId/UserLocations links are unaffected (they key on id), so
+        // this is purely fixing the display/filter copy.
+        var oldName = loc.Name;
+        if (!string.IsNullOrWhiteSpace(dto.Name) && !string.Equals(oldName, dto.Name, StringComparison.Ordinal))
+        {
+            var affectedUsers = await _db.Users.Where(u => u.LocationName == oldName && !u.IsDeleted).ToListAsync();
+            foreach (var u in affectedUsers) { u.LocationName = dto.Name; u.UpdatedAt = DateTime.UtcNow; }
+        }
         loc.Name = dto.Name; loc.City = dto.City; loc.State = dto.State;
         loc.PinCode = dto.PinCode;
         // Code is intentionally editable here — unlike a User's own
@@ -123,12 +139,32 @@ public class LocationsController : BaseController
         return Ok(ApiResponseDto<bool>.Ok(true, "Status updated."));
     }
 
+    // BUGFIX (confirmed real gap — deleted Location kept granting access):
+    // the frontend already refuses to delete a Location that's still used by
+    // any team/user ("Cannot delete ... Reassign them first" — LocationsPage.
+    // tsx onDelete), but that check only ever ran against its own cached list
+    // and nothing enforced it server-side — a stale cache, or any direct API
+    // call, could soft-delete a Location while Teams.LocationId and
+    // UserLocations/User.LocationId still pointed at it. Location has a
+    // global query filter (!IsDeleted), so the row then silently vanished
+    // from every list/lookup — but LoanRepository.ApplyVisibilityScope's
+    // LocationHead branch reads UserLocations directly, never joins back to
+    // Location, so an orphaned LocationHead kept FULL, invisible-to-admins
+    // loan visibility forever. Making the frontend's own intended rule
+    // authoritative here, not inventing a new one.
     [HttpDelete("{id:int}")]
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Delete(int id)
     {
         var loc = await _db.Locations.FindAsync(id);
         if (loc == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+
+        var teamCount = await _db.Teams.CountAsync(t => t.LocationId == id && !t.IsDeleted);
+        var userCount = await _db.UserLocations.CountAsync(ul => ul.LocationId == id && !ul.IsDeleted);
+        if (teamCount > 0 || userCount > 0)
+            return BadRequest(ApiResponseDto<bool>.Fail(
+                $"Cannot delete \"{loc.Name}\" — it is used by {teamCount} team(s) and {userCount} user(s). Reassign them first."));
+
         loc.IsDeleted = true; loc.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<bool>.Ok(true, "Deleted."));

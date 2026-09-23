@@ -140,6 +140,22 @@ public class UsersController : BaseController
         // remains available to complete it.
         var mappingNote = await ApplyTeamMembershipAsync(result.Data!.Id, request.SalesTeam, request.OpTeam, null, null);
 
+        // BUGFIX (confirmed real gap — "admin-configured Location doesn't
+        // work on that user's dashboard"): this form's Location field only
+        // ever wrote User.LocationName (display text). The FK that actually
+        // drives visibility — LocationHead's entire loan scope, and every
+        // role's admin-assigned scope widening (LoanRepository.
+        // ApplyVisibilityScope) — is User.LocationId / UserLocations, which
+        // previously only got set through the separate "Manage Locations &
+        // Teams" panel (PUT /{id}/locations). A brand-new user can't even be
+        // sent through that panel until it already exists, so a LocationHead
+        // created here started with zero visibility regardless of the
+        // Location picked on this form. Same auto-sync approach already used
+        // for Sales/Login team above — reuses the existing UserLocations
+        // table, no new schema.
+        var locationNote = await SyncPrimaryLocationAsync(result.Data!.Id, request.LocationName, null);
+        if (!string.IsNullOrEmpty(locationNote)) mappingNote = string.IsNullOrEmpty(mappingNote) ? locationNote : mappingNote + " " + locationNote;
+
         // BUGFIX (confirmed real gap — "Invitation emails not being sent"):
         // the "User Invitation" template existed and was fully editable in
         // Settings, but nothing on the backend ever actually called
@@ -217,13 +233,18 @@ public class UsersController : BaseController
         // stale membership, add the new one, no duplicates) rather than
         // blindly re-adding on every save. Read-only, no side effects.
         var existingUser = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == id);
-        var oldSalesTeam = existingUser?.SalesTeam;
-        var oldOpTeam    = existingUser?.OpTeam;
+        var oldSalesTeam    = existingUser?.SalesTeam;
+        var oldOpTeam       = existingUser?.OpTeam;
+        var oldLocationName = existingUser?.LocationName;
 
         var result = await _userService.UpdateAsync(id, request);
         if (!result.Success) return ApiResult(result);
 
         var mappingNote = await ApplyTeamMembershipAsync(id, request.SalesTeam, request.OpTeam, oldSalesTeam, oldOpTeam);
+        // See the Create action above for why this runs here too — Location
+        // changed on this same form previously never touched LocationId.
+        var locationNote = await SyncPrimaryLocationAsync(id, request.LocationName, oldLocationName);
+        if (!string.IsNullOrEmpty(locationNote)) mappingNote = string.IsNullOrEmpty(mappingNote) ? locationNote : mappingNote + " " + locationNote;
         if (!string.IsNullOrEmpty(mappingNote))
             return Ok(ApiResponseDto<UserDto>.Ok(result.Data, (result.Message ?? "User updated.") + " " + mappingNote));
 
@@ -424,6 +445,62 @@ public class UsersController : BaseController
             // comment) — the user record itself is already safely saved;
             // surface this as a note rather than failing the whole request.
             return $"({teamType} team mapping could not be completed automatically — assign it manually from the Teams page.)";
+        }
+    }
+
+    /// <summary>
+    /// Resolves the Create/Edit User form's free-text Location field to a
+    /// real Location and keeps User.LocationId + the UserLocations table
+    /// (the fields LoanRepository.ApplyVisibilityScope actually reads — see
+    /// the callers above) in sync with it — same add-old-remove-new,
+    /// non-fatal-on-failure convention as ApplyOneTeamTypeAsync, and reuses
+    /// the exact same UserLocations table the dedicated PUT /{id}/locations
+    /// endpoint (SetLocations) already writes, so that panel's "assign
+    /// additional Locations" use case still works unchanged on top of this —
+    /// this only keeps the PRIMARY (first/only) Location this form sets from
+    /// silently going nowhere.
+    /// </summary>
+    private async Task<string?> SyncPrimaryLocationAsync(int userId, string? newLocationName, string? oldLocationName)
+    {
+        newLocationName = string.IsNullOrWhiteSpace(newLocationName) ? null : newLocationName.Trim();
+        oldLocationName = string.IsNullOrWhiteSpace(oldLocationName) ? null : oldLocationName.Trim();
+        if (string.Equals(newLocationName, oldLocationName, StringComparison.OrdinalIgnoreCase))
+            return null; // No change — nothing to do (also covers "still no location selected").
+
+        try
+        {
+            int? newLocationId = null;
+            if (newLocationName != null)
+            {
+                var newLocation = await _db.Locations.FirstOrDefaultAsync(l => l.Name == newLocationName && !l.IsDeleted);
+                if (newLocation == null)
+                    return $"(Location \"{newLocationName}\" not found — assign it manually from the Users page.)";
+                newLocationId = newLocation.Id;
+
+                var already = await _db.UserLocations.AnyAsync(ul => ul.LocationId == newLocationId && ul.UserId == userId && !ul.IsDeleted);
+                if (!already)
+                    _db.UserLocations.Add(new UserLocation { UserId = userId, LocationId = newLocationId.Value, CreatedAt = DateTime.UtcNow });
+            }
+
+            if (oldLocationName != null)
+            {
+                var oldLocation = await _db.Locations.FirstOrDefaultAsync(l => l.Name == oldLocationName && !l.IsDeleted);
+                if (oldLocation != null && oldLocation.Id != newLocationId)
+                {
+                    var oldMember = await _db.UserLocations.FirstOrDefaultAsync(ul => ul.LocationId == oldLocation.Id && ul.UserId == userId && !ul.IsDeleted);
+                    if (oldMember != null) { oldMember.IsDeleted = true; oldMember.UpdatedAt = DateTime.UtcNow; }
+                }
+            }
+
+            var user = await _db.Users.FindAsync(userId);
+            if (user != null) { user.LocationId = newLocationId; user.UpdatedAt = DateTime.UtcNow; }
+
+            await _db.SaveChangesAsync();
+            return null;
+        }
+        catch (Exception)
+        {
+            return "(Location mapping could not be completed automatically — assign it manually from the Users page.)";
         }
     }
 

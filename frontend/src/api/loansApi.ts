@@ -9,6 +9,11 @@ export interface LoanDocument {
   fileRef: string
   fileSizeBytes: number
   uploadedAt: string
+  // Wizard-to-detail-page linking fix: was already saved on upload but never
+  // returned by GetDocuments, so the Documents tab couldn't distinguish a
+  // primary applicant's document from a co-applicant's identically-typed one.
+  applicantRole?: 'Applicant' | 'CoApplicant'
+  applicantKey?: string | null
   // Phase 2/3 (RBAC) verification + versioning surface. Older backends that
   // predate the migration omit these — treat missing status as "Pending".
   status?: 'Pending' | 'Verified' | 'Rejected'

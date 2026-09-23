@@ -250,7 +250,13 @@ public class WizardController : BaseController
                 PanNumber      = dto.Pan?.ToUpper().Trim(),
                 AadhaarNumber  = dto.Aadhar?.Trim(),
                 DateOfBirth    = string.IsNullOrWhiteSpace(dto.Dob) ? null : DateTime.TryParse(dto.Dob, out var dob) ? DateTime.SpecifyKind(dob, DateTimeKind.Utc) : null,
-                Address        = dto.Street1,
+                // House/Flat No. (Street1) and Street & Locality (Street2) are
+                // two separate wizard fields — HouseNo/Address were previously
+                // both fed from Street1 alone (Street2 wasn't even received),
+                // which showed the house number under the "Street & Locality"
+                // label on the Address tab and lost the real street text.
+                HouseNo        = dto.Street1,
+                Address        = dto.Street2,
                 City           = dto.City,
                 State          = dto.State,
                 PinCode        = dto.Zip,
@@ -262,8 +268,15 @@ public class WizardController : BaseController
                 Gender         = NormalizeGender(dto.Gender),
                 FatherName     = dto.FatherName?.Trim(),
                 ResidenceType  = dto.HomeType,
+                // Employment-tab fields the wizard already collects (Step 5:
+                // Designation, Company Type, Official Email) but which were
+                // never written onto the Customer record.
+                Designation    = dto.Desig,
+                CompanyType    = dto.CompType,
+                OfficialEmail  = dto.OfficeEmail,
                 CreatedAt      = DateTime.UtcNow
             };
+            ApplyProductDataCustomerFields(customer, dto.ProductData);
             _db.Customers.Add(customer);
         }
         else
@@ -282,8 +295,20 @@ public class WizardController : BaseController
             // duplicate. Phone has no unique index, so this refresh can't 500 on a
             // duplicate-key violation (unlike PAN/Email below).
             if (!string.IsNullOrWhiteSpace(dto.Mobile)) customer.Phone = dto.Mobile.Trim();
+            // BUGFIX (wizard-to-detail-page linking sweep): the customer is
+            // normally created on the very FIRST autosave (Step 1, as soon as
+            // Mobile is valid) — well before Address (Step 4) or Employment
+            // (Step 5) are ever filled in. Every later save for that same
+            // application therefore goes through THIS update branch, which
+            // previously never touched Address/HouseNo/PIN or the Employment-
+            // tab extras below at all — so those fields stayed permanently
+            // blank on the Loan Detail page for the vast majority of real
+            // submissions, not just the rare draft-less direct-create path.
+            if (!string.IsNullOrWhiteSpace(dto.Street1)) customer.HouseNo = dto.Street1.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Street2)) customer.Address = dto.Street2.Trim();
             if (!string.IsNullOrWhiteSpace(dto.City))   customer.City   = dto.City;
             if (!string.IsNullOrWhiteSpace(dto.State))  customer.State  = dto.State;
+            if (!string.IsNullOrWhiteSpace(dto.Zip))    customer.PinCode = dto.Zip.Trim();
             if (dto.Salary > 0)  customer.MonthlyIncome = dto.Salary;
             if (dto.Obligations > 0) customer.MonthlyObligations = dto.Obligations;
             if (dto.Cibil > 0)   customer.CibilScore    = dto.Cibil;
@@ -291,6 +316,10 @@ public class WizardController : BaseController
             if (!string.IsNullOrWhiteSpace(dto.Gender))     customer.Gender        = NormalizeGender(dto.Gender);
             if (!string.IsNullOrWhiteSpace(dto.FatherName)) customer.FatherName    = dto.FatherName.Trim();
             if (!string.IsNullOrWhiteSpace(dto.HomeType))   customer.ResidenceType = dto.HomeType;
+            if (!string.IsNullOrWhiteSpace(dto.Desig))       customer.Designation   = dto.Desig.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.CompType))    customer.CompanyType   = dto.CompType;
+            if (!string.IsNullOrWhiteSpace(dto.OfficeEmail)) customer.OfficialEmail = dto.OfficeEmail.Trim();
+            ApplyProductDataCustomerFields(customer, dto.ProductData);
             // BUGFIX (draft-resume persistence): the update branch previously
             // dropped these KYC / employment fields. The Customer is created on
             // the FIRST autosave (Step 1, before they're entered), so every later
@@ -369,6 +398,64 @@ public class WizardController : BaseController
         _              => code,
     };
 
+    // Reads the Customer-facing fields that ride inside the wizard's free-form
+    // ProductData bag (Mother's Name, structured Office Address lines, and the
+    // full Permanent Address block) and writes them onto the Customer record.
+    // These already have dedicated Customer/CustomerDto columns and a working
+    // edit path (LoanApplicantTabs.tsx -> PUT /api/customers/{id}) — this only
+    // closes the gap on the WIZARD SUBMIT path, which serialised ProductData
+    // onto Loan.ProductDataJson (via ApplyMapping) but never read any of these
+    // specific keys back out onto the Customer entity itself. Every write here
+    // is guarded (only overwrites when the wizard actually sent that key), so a
+    // save that omits, say, Office Address never blanks an existing value.
+    private static void ApplyProductDataCustomerFields(Customer customer, Dictionary<string, object>? productData)
+    {
+        if (productData == null || productData.Count == 0) return;
+
+        var mother = GetProductDataString(productData, "mother");
+        if (!string.IsNullOrWhiteSpace(mother)) customer.MotherName = mother.Trim();
+
+        // Office address — Step 5 captures it as two lines + PIN (Vanilla
+        // parity), but Customer has a single OfficeAddress column (the same
+        // shape the Employment tab already renders as one field), so the two
+        // lines are combined the same way House No. / Street & Locality are
+        // split for the current address.
+        var officeAddr1 = GetProductDataString(productData, "officeAddr1");
+        var officeAddr2 = GetProductDataString(productData, "officeAddr2");
+        var officeAddress = string.Join(", ", new[] { officeAddr1, officeAddr2 }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        if (!string.IsNullOrWhiteSpace(officeAddress)) customer.OfficeAddress = officeAddress;
+        var officePin = GetProductDataString(productData, "officePin");
+        if (!string.IsNullOrWhiteSpace(officePin)) customer.OfficePinCode = officePin.Trim();
+
+        // Permanent address block (Step 4, second half) — the wizard requires
+        // and validates all six of these whenever "Same as current" isn't
+        // checked, but previously never sent them to the backend at all.
+        var pStreet1 = GetProductDataString(productData, "pStreet1");
+        if (!string.IsNullOrWhiteSpace(pStreet1)) customer.PermanentHouseNo = pStreet1.Trim();
+        var pStreet2 = GetProductDataString(productData, "pStreet2");
+        if (!string.IsNullOrWhiteSpace(pStreet2)) customer.PermanentAddress = pStreet2.Trim();
+        var pCity = GetProductDataString(productData, "pCity");
+        if (!string.IsNullOrWhiteSpace(pCity)) customer.PermanentCity = pCity;
+        var pState = GetProductDataString(productData, "pState");
+        if (!string.IsNullOrWhiteSpace(pState)) customer.PermanentState = pState;
+        var pZip = GetProductDataString(productData, "pZip");
+        if (!string.IsNullOrWhiteSpace(pZip)) customer.PermanentPinCode = pZip.Trim();
+        var pHomeType = GetProductDataString(productData, "pHomeType");
+        if (!string.IsNullOrWhiteSpace(pHomeType)) customer.PermanentResidenceType = pHomeType;
+    }
+
+    // ProductData binds as Dictionary<string, object>, so System.Text.Json
+    // materialises every value as a boxed JsonElement rather than a plain
+    // string — unwrap it the same way regardless of which shape arrives.
+    private static string? GetProductDataString(Dictionary<string, object> productData, string key)
+    {
+        if (!productData.TryGetValue(key, out var raw) || raw == null) return null;
+        if (raw is System.Text.Json.JsonElement je)
+            return je.ValueKind == System.Text.Json.JsonValueKind.String ? je.GetString() : je.ToString();
+        return raw.ToString();
+    }
+
     // Persist the two wizard references (Step 7) onto the loan. Shared by Submit
     // AND SaveDraft so a resumed draft keeps its references instead of losing
     // them — SaveDraft previously never wrote LoanReference rows at all, so a
@@ -396,6 +483,40 @@ public class WizardController : BaseController
                 Name = dto.R2Name, Mobile = dto.R2Mobile,
                 Relation = dto.R2Relation ?? "Other", CreatedAt = DateTime.UtcNow
             });
+    }
+
+    // Persist the banks picked on Step 9's eligibility matcher — see
+    // WizardSubmitDto.SelectedBanks for why this runs here rather than
+    // through the separate bank-lines endpoint. Same whole-set soft-delete +
+    // re-add convention as LoanRepository.ReplaceBankLinesAsync (the
+    // production path other callers use), so a loan's bank-lines history
+    // stays consistent regardless of which path wrote it. No-op when the
+    // wizard sent no bank picks — never clears an already-saved set.
+    private async Task SyncBankLinesAsync(Loan loan, WizardSubmitDto dto)
+    {
+        if (dto.SelectedBanks == null || dto.SelectedBanks.Count == 0) return;
+
+        var existing = await _db.Set<LoanBankLine>()
+            .Where(b => b.LoanId == loan.Id && !b.IsDeleted).ToListAsync();
+        foreach (var line in existing)
+        {
+            line.IsDeleted = true;
+            line.UpdatedAt = DateTime.UtcNow;
+        }
+        foreach (var b in dto.SelectedBanks)
+        {
+            if (string.IsNullOrWhiteSpace(b.BankName)) continue;
+            _db.Set<LoanBankLine>().Add(new LoanBankLine
+            {
+                LoanId = loan.Id,
+                BankName = b.BankName,
+                TempApplicationNumber = b.TempApplicationNumber ?? string.Empty,
+                ApplicationNumber = b.ApplicationNumber,
+                ApprovedLoan = b.ApprovedLoan,
+                Remarks = b.Remarks,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
     }
 
     /// <summary>
@@ -623,6 +744,9 @@ public class WizardController : BaseController
             // final submission never ends up with duplicate reference rows.
             // (Shared with SaveDraft via SyncReferencesAsync.)
             await SyncReferencesAsync(loan, dto, existingLoan != null);
+
+            // ── 5b. Bank lines (Step 9) ───────────────────────────────────────
+            await SyncBankLinesAsync(loan, dto);
 
             // ── 6. Auto-calculate payout (server-side only — not user-submitted) ──
             // Phase 3: generate one claim per eligible claimant tied to this loan —

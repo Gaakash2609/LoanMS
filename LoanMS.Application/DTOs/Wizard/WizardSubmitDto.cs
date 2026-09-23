@@ -24,6 +24,11 @@ public class WizardSubmitDto
     public string? City        { get; set; }
     public string? State       { get; set; }
     public string? Street1     { get; set; }
+    // House/Flat No. (Street1) and Street & Locality (Street2) are two
+    // separate wizard fields (NewApplicationPage.tsx Step4) — Street2 was
+    // missing here entirely, so the frontend's `street2` was silently
+    // dropped by model binding before ever reaching FindOrCreateCustomerAsync.
+    public string? Street2     { get; set; }
     public string? Zip         { get; set; }
     public string? HomeType    { get; set; }
     public string? EmpType     { get; set; }
@@ -74,4 +79,17 @@ public class WizardSubmitDto
     /// frontend already sends these as a flat key/value object, so this
     /// binds directly without needing per-field DTO properties.</summary>
     public Dictionary<string, object>? ProductData { get; set; }
+
+    /// <summary>Banks picked on Step 9's eligibility matcher (max 2). Reuses
+    /// the existing bank-lines DTO shape rather than a new one. Persisted
+    /// directly inside Submit (see SyncBankLinesAsync) instead of relying on
+    /// the separate PUT /api/loans/{id}/bank-lines call the frontend also
+    /// makes — that endpoint is role-gated more narrowly than who may submit
+    /// a wizard application (e.g. Sales/Dsa/Partner can create an application
+    /// but cannot call it directly), so their selected banks were silently
+    /// dropped. This does not change any role/permission logic — it only lets
+    /// the wizard persist its own data through the action it already has
+    /// authority to call. Harmless if the frontend's separate call also
+    /// succeeds afterward — both are whole-set replaces of the same rows.</summary>
+    public List<BankLineItemDto>? SelectedBanks { get; set; }
 }

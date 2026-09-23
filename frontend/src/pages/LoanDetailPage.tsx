@@ -572,6 +572,16 @@ export default function LoanDetailPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { data: loan, isLoading } = useLoan(Number(id))
+  // Lead Source (wizard Step 1, Online channel only) rides Loan.ProductDataJson
+  // like the other extra wizard fields — it was never part of the Remarks
+  // string, so the "Lead Source" row below was parsing a segment
+  // (`fromRemarks(loan.remarks, 'LeadSource')`) that the backend never writes,
+  // always showing "—". Read it from productDataJson instead, the same place
+  // the wizard actually saves it.
+  const overviewProductData = useMemo<Record<string, string>>(() => {
+    try { return loan?.productDataJson ? JSON.parse(loan.productDataJson) : {} }
+    catch { return {} }
+  }, [loan?.productDataJson])
   const user = useAuthStore(s => s.user)
   const [actionError, setActionError] = useState('')
   const [pendingAction, setPendingAction] = useState<HeaderAction | null>(null)
@@ -815,13 +825,20 @@ export default function LoanDetailPage() {
               <FVal emoji="💰" label="Loan Type" value={`${loan.loanType} Loan`} />
               <FVal emoji="💵" label="Loan Amount" value={formatCurrency(loan.requestedAmount)} />
               <FVal emoji="🏦" label="Bank/NBFC" value={loan.bankLines?.[0]?.bankName} />
-              <FVal emoji="👤" label="Sales Person" value={loan.createdBy?.fullName ?? loan.assignedTo?.fullName} />
+              {/* Sales Person = the wizard's resolved Sales Person dropdown
+                  choice (Loan.AssignedToUserId, ResolveSalesPersonAsync), not
+                  whoever physically submitted the form (CreatedByUserId) —
+                  those differ whenever one user completes the wizard on
+                  another's behalf, which is the entire purpose of that
+                  dropdown. assignedTo now takes priority; createdBy is only
+                  the fallback for the rare loan with no resolved assignee. */}
+              <FVal emoji="👤" label="Sales Person" value={loan.assignedTo?.fullName ?? loan.createdBy?.fullName} />
               <FVal emoji="📅" label="Created" value={formatDate(loan.createdAt)} />
               <FVal emoji="📈" label="Loan Rate" value={loan.interestRate != null ? `${loan.interestRate}%` : undefined} />
               <FVal emoji="⏱️" label="Tenure" value={loan.tenureMonths ? `${loan.tenureMonths} months` : undefined} />
               <FVal emoji="🎯" label="Purpose" value={loan.purpose} />
               <FVal emoji="📡" label="Loan Source" value={fromRemarks(loan.remarks, 'Source')} />
-              <FVal emoji="📣" label="Lead Source" value={mapLabel(LEAD_SOURCE_LABELS, fromRemarks(loan.remarks, 'LeadSource'))} />
+              <FVal emoji="📣" label="Lead Source" value={mapLabel(LEAD_SOURCE_LABELS, overviewProductData.leadsrc)} />
               <FVal emoji="🔗" label="Channel" value={mapLabel(CHANNEL_LABELS, fromRemarks(loan.remarks, 'Channel'))} />
               {/* Channel-conditional rows — verbatim parity with Vanilla
                   efin-app.js:2489-2492: DSA Name + Linked Partner (channel=dsa),
@@ -839,7 +856,7 @@ export default function LoanDetailPage() {
                 <FVal emoji="🤝" label="Partner / Agent" value={loan.partnerName} />
               )}
               {fromRemarks(loan.remarks, 'Channel') === 'direct' && (
-                <FVal emoji="👤" label="Sales Person (Direct)" value={loan.createdBy?.fullName ?? loan.assignedTo?.fullName} />
+                <FVal emoji="👤" label="Sales Person (Direct)" value={loan.assignedTo?.fullName ?? loan.createdBy?.fullName} />
               )}
               <FVal emoji="⚡" label="InCred RM" value={loan.incredRmName ?? undefined} />
               <FVal emoji="🏛️" label="Analytic Bank" value={loan.analyticBank ?? undefined} />

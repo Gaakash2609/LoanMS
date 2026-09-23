@@ -939,6 +939,14 @@ public class LoansController : BaseController
                 fileRef       = d.FilePath,
                 fileSizeBytes = d.FileSizeBytes,
                 uploadedAt    = d.CreatedAt,
+                // Wizard-to-detail-page linking fix: ApplicantRole/ApplicantKey
+                // were already being saved on upload (see UploadDocument above)
+                // but never selected here, so the Documents tab had no way to
+                // tell a primary applicant's document apart from an identically-
+                // typed co-applicant one (e.g. Education loan's co-applicant
+                // salary slips / bank statement).
+                applicantRole    = d.ApplicantRole.ToString(),
+                applicantKey     = d.ApplicantKey,
                 // Phase 2 RBAC — G-10/G-11 verification + versioning surface.
                 status           = d.Status,
                 reviewNote       = d.ReviewNote,
