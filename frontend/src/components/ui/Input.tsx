@@ -11,19 +11,24 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
   return (
     <div className="space-y-1">
-      {label && <label htmlFor={inputId} className="block text-sm font-medium text-gray-700">{label}</label>}
+      {/* Label/hint colours come from the legacy text ramp (--text2/--text3)
+          rather than Tailwind gray, so they sit on the same scale as the rest
+          of the app. */}
+      {label && (
+        <label
+          htmlFor={inputId}
+          className="block text-sm font-medium text-[color:var(--text2)]"
+        >
+          {label}
+        </label>
+      )}
       <input
         id={inputId}
-        className={cn(
-          'block w-full rounded-lg border px-3 py-2 text-sm shadow-sm transition-colors',
-          'focus:outline-none focus:ring-2 focus:ring-efin-blue focus:border-transparent',
-          error ? 'border-red-300 bg-red-50' : 'border-gray-300 bg-white hover:border-gray-400',
-          className
-        )}
+        className={cn('efin-input', error && 'efin-input--error', className)}
         {...props}
       />
-      {error && <p className="text-xs text-red-600">{error}</p>}
-      {hint && !error && <p className="text-xs text-gray-500">{hint}</p>}
+      {error && <p className="text-xs text-[color:var(--accent2)]">{error}</p>}
+      {hint && !error && <p className="text-xs text-[color:var(--text3)]">{hint}</p>}
     </div>
   )
 }

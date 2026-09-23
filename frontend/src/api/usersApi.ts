@@ -12,6 +12,12 @@ export interface CreateUserRequest {
   password: string
   role: UserRole
   phoneNumber?: string
+  // Primary Location / Sales-Team / Operation-Team the legacy user modal
+  // captures on create (CreateUserRequestDto.LocationName/SalesTeam/OpTeam,
+  // persisted onto the user as denormalised strings by UserService).
+  locationName?: string
+  salesTeam?: string
+  opTeam?: string
 }
 
 export interface UpdateUserRequest {
@@ -19,9 +25,65 @@ export interface UpdateUserRequest {
   isActive: boolean
   role: UserRole
   phoneNumber?: string
+  // Same primary Location / Sales-Team / Operation-Team fields the legacy
+  // user modal edits (UpdateUserRequestDto.LocationName/SalesTeam/OpTeam).
+  locationName?: string
+  salesTeam?: string
+  opTeam?: string
+}
+
+// Self-service profile — GET/PUT /api/users/profile. Both routes already
+// existed on UsersController (own-record-only; id always comes from the
+// caller's JWT), and UserDto/UpdateProfileRequestDto already carried the
+// photo, address and bank fields — but nothing in the React app ever
+// called them, so ProfilePage could only show name/email/role off the JWT.
+export interface UserProfile {
+  id: number
+  fullName: string
+  email: string
+  role: string
+  isActive: boolean
+  createdAt: string
+  employeeCode?: string | null
+  phoneNumber?: string | null
+  locationName?: string | null
+  salesTeam?: string | null
+  opTeam?: string | null
+  photoData?: string | null
+  addressLine1?: string | null
+  addressLine2?: string | null
+  addressCity?: string | null
+  addressState?: string | null
+  addressPostalCode?: string | null
+  bankAccountHolderName?: string | null
+  bankName?: string | null
+  bankAccountType?: string | null
+  bankAccountNumber?: string | null
+  bankIfscCode?: string | null
+}
+
+// Matches UpdateProfileRequestDto exactly. Every field optional — the
+// service only assigns what's sent, so a partial save can't blank the rest.
+export interface UpdateProfileRequest {
+  phoneNumber?: string | null
+  photoData?: string | null
+  addressLine1?: string | null
+  addressLine2?: string | null
+  addressCity?: string | null
+  addressState?: string | null
+  addressPostalCode?: string | null
+  bankAccountHolderName?: string | null
+  bankName?: string | null
+  bankAccountType?: string | null
+  bankAccountNumber?: string | null
+  bankIfscCode?: string | null
 }
 
 export const usersApi = {
+  getProfile: () => api.get<ApiResponse<UserProfile>>('/api/users/profile'),
+  updateProfile: (data: UpdateProfileRequest) =>
+    api.put<ApiResponse<UserProfile>>('/api/users/profile', data),
+
   // BUGFIX (confirmed real, pre-existing gap — Phase 4 Part C audit):
   // this was typed/handled as ApiResponse<PagedResult<User>>
   // ({items, totalCount, totalPages}), but UsersController.GetAll()
@@ -59,6 +121,17 @@ export const usersApi = {
   // its internal contract changed.
   toggleActive: (id: number, isActive: boolean) =>
     api.patch<ApiResponse<boolean>>(`/api/users/${id}/status`, { isActive }),
+
+  // Both Admin-only routes already existed on UsersController with no
+  // React caller — the Users page had no delete and no way for an admin to
+  // reset another user's password.
+  // Delete refuses self-deletion server-side ("Cannot delete your own
+  // account."); the UI hides the button for the signed-in user too.
+  delete: (id: number) => api.delete<ApiResponse<boolean>>(`/api/users/${id}`),
+  // AdminResetPasswordRequestDto — { NewPassword } only, min length 6. No
+  // current password is required (that's the point of an admin reset).
+  adminResetPassword: (id: number, newPassword: string) =>
+    api.post<ApiResponse<boolean>>(`/api/users/${id}/reset-password`, { newPassword }),
 
   // ── Part D: Location/Team multi-select mapping ──────────────────────────
   // Both endpoints already existed (UsersController.SetLocations/SetTeams —

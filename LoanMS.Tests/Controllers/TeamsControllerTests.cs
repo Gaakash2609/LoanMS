@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using LoanMS.Tests.TestHelpers;
 
 namespace LoanMS.Tests.Controllers;
 
@@ -39,7 +40,7 @@ public class TeamsControllerTests
             new Claim("role", currentUserRole)
         }, "TestAuth");
 
-        var controller = new TeamsController(db)
+        var controller = new TeamsController(db, RolePermissionTestDouble.AllowAll())
         {
             ControllerContext = new ControllerContext
             {

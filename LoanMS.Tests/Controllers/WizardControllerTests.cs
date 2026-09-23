@@ -10,6 +10,7 @@ using LoanMS.Tests.TestHelpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;   // InMemoryEventId
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -34,8 +35,17 @@ public class WizardControllerTests
 {
     private static (WizardController controller, AppDbContext db) CreateController(int currentUserId = 1, string currentUserRole = "Sales")
     {
+        // WizardController.Submit wraps its work in a real transaction
+        // (WizardController.cs:346, BeginTransactionAsync). The EF Core InMemory
+        // provider has no transaction support and, by default, escalates that to
+        // a thrown TransactionIgnoredWarning — which aborted these tests before
+        // they reached a single assertion. Suppressing the warning is the remedy
+        // EF documents for exactly this case: the transaction is a no-op here,
+        // while against PostgreSQL it behaves normally. This changes only the
+        // test fixture; the controller is untouched.
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
         var db = new AppDbContext(options);
 
@@ -47,7 +57,8 @@ public class WizardControllerTests
             new Claim("role", currentUserRole)
         }, "TestAuth");
 
-        var controller = new WizardController(db, NullLogger<WizardController>.Instance, cache)
+        var controller = new WizardController(db, NullLogger<WizardController>.Instance, cache, RolePermissionTestDouble.AllowAll(),
+            new LoanMS.API.Services.LoginUserAssignmentService(db))
         {
             ControllerContext = new ControllerContext
             {
@@ -255,5 +266,55 @@ public class WizardControllerTests
 
         result.Should().BeOfType<BadRequestObjectResult>();
         response.Errors.Should().Contain(e => e.Contains("inactive"));
+    }
+
+    // ── Loan-type mapping ────────────────────────────────────────────────────
+    // Regression guard for the Overdraft gap: the frontend product key
+    // "over_draft" must map to LoanType.Overdraft, not silently fall back to
+    // LoanType.Personal (which is what happened before the enum value and the
+    // _loanTypeMap entry were added). Loan.LoanType persists as a string
+    // (HasConversion<string>), so this also confirms "Overdraft" is a valid
+    // stored value needing no migration.
+
+    [Fact]
+    public async Task Submit_OverdraftProductKey_StoresLoanTypeOverdraft()
+    {
+        var (controller, db) = CreateController();
+        var salesUser = new User { FullName = "OD Sales", Email = "od@efin.com", Role = UserRole.Sales, IsActive = true };
+        db.Users.Add(salesUser);
+        await db.SaveChangesAsync();
+
+        var dto = CreateValidDto("OD Sales");
+        dto.LoanType = "over_draft";
+
+        var result = await controller.Submit(dto);
+        var response = ExtractResponse(result);
+
+        response.Success.Should().BeTrue();
+        var loan = await db.Loans.FirstAsync(l => l.Id == response.Data!.LoanId);
+        loan.LoanType.Should().Be(LoanType.Overdraft);
+    }
+
+    [Theory]
+    [InlineData("personal_loan", LoanType.Personal)]
+    [InlineData("business_loan", LoanType.Business)]
+    [InlineData("over_draft",    LoanType.Overdraft)]
+    [InlineData("lap",           LoanType.LAP)]
+    public async Task Submit_MapsProductKeyToExpectedLoanType(string productKey, LoanType expected)
+    {
+        var (controller, db) = CreateController();
+        var salesUser = new User { FullName = "Map Sales", Email = "map@efin.com", Role = UserRole.Sales, IsActive = true };
+        db.Users.Add(salesUser);
+        await db.SaveChangesAsync();
+
+        var dto = CreateValidDto("Map Sales");
+        dto.LoanType = productKey;
+
+        var result = await controller.Submit(dto);
+        var response = ExtractResponse(result);
+
+        response.Success.Should().BeTrue();
+        var loan = await db.Loans.FirstAsync(l => l.Id == response.Data!.LoanId);
+        loan.LoanType.Should().Be(expected);
     }
 }

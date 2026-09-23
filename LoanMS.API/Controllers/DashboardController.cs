@@ -109,7 +109,12 @@ public class DashboardController : BaseController
                 var missing = new List<string>();
                 if (!uploaded.Contains("salary_slip")) missing.Add("salary_slip");
                 if (!uploaded.Contains("bank_statement")) missing.Add("bank_statement");
-                if (l.EmploymentType is "Self-Employed" or "Professional")
+                // Same self-employed semantic as LoansController.GetMissingDocuments
+                // (RA-5/RA-6 fix): the wizard stores "SELFEMP", not the literal
+                // "Self-Employed" this previously compared against, so self-employed
+                // ITR/GST were never counted on the dashboard either.
+                var et = (l.EmploymentType ?? string.Empty).ToUpperInvariant();
+                if (et.Contains("SELF") || et.Contains("SENP") || et.Contains("BUSIN") || et.Contains("PROF"))
                 {
                     if (!uploaded.Contains("itr")) missing.Add("itr");
                     if (!uploaded.Contains("gst")) missing.Add("gst");

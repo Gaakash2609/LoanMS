@@ -1,0 +1,177 @@
+/* Reports filter verification harness.
+   Intercepts XHR, records every /api/ request (path + parsed query params) on
+   window.__REQS__, and answers with canned payloads so the page renders. */
+(function () {
+  if (window.__MOCK_ON__) return;
+  window.__MOCK_ON__ = true;
+  window.__REQS__ = [];
+
+  var ROLE = localStorage.getItem('__ROLE__') || 'Admin';
+  var USER = { id: 7, fullName: 'Test ' + ROLE, email: 't@x.com', role: ROLE, isActive: true };
+  localStorage.setItem('efin_auth', JSON.stringify({
+    state: { user: USER, accessToken: 'tok', refreshToken: 'rtok', isAuthenticated: true },
+    version: 0
+  }));
+
+  function ok(data) { return { success: true, data: data, message: null, errors: [] }; }
+
+  var SUMMARY = {
+    totalApplications: 42, totalAmount: 12500000, approvedCount: 18,
+    approvedAmount: 6400000, disbursedCount: 11, disbursedAmount: 4100000,
+    rejectedCount: 6, pendingCount: 7, approvalRate: 42.8, avgTicketSize: 297619,
+    avgTat: 3.4, statusBreakdown: [
+      { status: 'Approved', count: 18, amount: 6400000 },
+      { status: 'Disbursed', count: 11, amount: 4100000 },
+      { status: 'Rejected', count: 6, amount: 1200000 }
+    ],
+    typeBreakdown: [{ loanType: 'Personal', count: 30, amount: 9000000 }]
+  };
+  var PIPELINE = [
+    { status: 'Submitted', count: 5, totalAmount: 1500000, avgAmount: 300000 },
+    { status: 'Approved', count: 18, totalAmount: 6400000, avgAmount: 355555 }
+  ];
+  var PERFORMANCE = [
+    { salesPerson: 'Test Admin', userId: 7, totalApps: 42, disbursed: 11, rejected: 6,
+      totalAmount: 12500000, disbursedAmount: 4100000, conversionRate: 26.1 }
+  ];
+  var DISB = [{ loanNumber: 'LN-1001', customerName: 'A Kumar', loanType: 'Personal',
+    disbursedAmount: 500000, disbursedDate: '2026-07-11', bankName: 'HDFC', salesPerson: 'Test Admin' }];
+  var REJ = [{ reason: 'Low CIBIL', count: 4, percentage: 66.7 }];
+
+  function route(url) {
+    var u = new URL(url, location.origin);
+    var p = u.pathname;
+    var q = {};
+    u.searchParams.forEach(function (v, k) { q[k] = v; });
+    window.__REQS__.push({ path: p, params: q, qs: u.search });
+
+    if (p === '/api/reports/summary') return ok(SUMMARY);
+    if (p === '/api/reports/pipeline') return ok(PIPELINE);
+    if (p === '/api/reports/performance') return ok(PERFORMANCE);
+    if (p === '/api/reports/disbursement') return ok(DISB);
+    if (p === '/api/reports/rejection-analysis') return ok(REJ);
+    if (p === '/api/reports/monthly') return ok({ labels: ['Jan'], applications: [4], disbursements: [2], amounts: [500000] });
+    if (p === '/api/reports/targets') return ok({ tatTargetDays: 5, ddrTargetPercent: 80, monthlyTargets: [] });
+    if (p === '/api/users/lookup') return ok([
+      { id: 7, fullName: 'Test ' + ROLE, role: ROLE },
+      { id: 8, fullName: 'Priya Sales', role: 'Sales' },
+      { id: 9, fullName: 'Rahul Sales', role: 'Sales' }
+    ]);
+    if (p === '/api/teams') return ok([
+      { id: 3, name: 'Sales North', type: 'Sales', isActive: true, members: [] },
+      { id: 4, name: 'Sales West', type: 'Sales', isActive: true, members: [] }
+    ]);
+    if (p === '/api/loans') return ok({ items: [], totalCount: 0, page: 1, pageSize: 50, totalPages: 0 });
+    if (p.indexOf('/api/notifications') === 0) return ok([]);
+    if (p.indexOf('/api/dashboard') === 0) return ok({});
+    return ok(null);
+  }
+
+  var RealXHR = window.XMLHttpRequest;
+  function FakeXHR() {
+    var self = this;
+    this.readyState = 0; this.status = 0; this.responseText = ''; this.response = '';
+    this.responseType = ''; this.timeout = 0; this.withCredentials = false;
+    this._h = {};
+    this.upload = { addEventListener: function () {} };
+    this._listeners = {};
+  }
+  FakeXHR.prototype.open = function (m, url) { this._m = m; this._url = url; this.readyState = 1; };
+  FakeXHR.prototype.setRequestHeader = function (k, v) { this._h[k] = v; };
+  FakeXHR.prototype.getAllResponseHeaders = function () { return 'content-type: application/json\r\n'; };
+  FakeXHR.prototype.getResponseHeader = function (k) {
+    return String(k).toLowerCase() === 'content-type' ? 'application/json' : null;
+  };
+  FakeXHR.prototype.addEventListener = function (t, fn) {
+    (this._listeners[t] = this._listeners[t] || []).push(fn);
+  };
+  FakeXHR.prototype.removeEventListener = function () {};
+  FakeXHR.prototype.abort = function () {};
+  FakeXHR.prototype.send = function () {
+    var self = this;
+    var url = this._url;
+    if (String(url).indexOf('/api/') === -1) { // let non-API through
+      var real = new RealXHR();
+      real.open(this._m, url); real.onreadystatechange = function () {
+        self.readyState = real.readyState; self.status = real.status;
+        self.responseText = real.responseText; self.response = real.response;
+        if (self.onreadystatechange) self.onreadystatechange();
+        if (real.readyState === 4 && self.onload) self.onload();
+      };
+      real.send(); return;
+    }
+    setTimeout(function () {
+      var body = JSON.stringify(route(url));
+      self.readyState = 4; self.status = 200;
+      self.responseText = body; self.response = body;
+      if (self.onreadystatechange) self.onreadystatechange();
+      (self._listeners['load'] || []).forEach(function (f) { f.call(self, { target: self }); });
+      (self._listeners['loadend'] || []).forEach(function (f) { f.call(self, { target: self }); });
+      if (self.onload) self.onload({ target: self });
+      if (self.onloadend) self.onloadend({ target: self });
+    }, 5);
+  };
+  FakeXHR.DONE = 4; FakeXHR.UNSENT = 0; FakeXHR.OPENED = 1;
+  FakeXHR.HEADERS_RECEIVED = 2; FakeXHR.LOADING = 3;
+  window.XMLHttpRequest = FakeXHR;
+
+  window.__lastReq__ = function (needle) {
+    for (var i = window.__REQS__.length - 1; i >= 0; i--) {
+      if (window.__REQS__[i].path.indexOf(needle) !== -1) return window.__REQS__[i];
+    }
+    return null;
+  };
+  console.log('[MOCK] active, role=' + ROLE);
+})();
+
+/* ── Self-driving role probe ───────────────────────────────────────────
+   Walks a queue of roles across page loads: each load records what the
+   /app/reports route did for the current role, then advances the queue and
+   reloads. Test-only; this whole file is removed after verification. */
+(function () {
+  var q;
+  try { q = JSON.parse(localStorage.__PROBE_QUEUE__ || '[]'); } catch (e) { q = []; }
+  if (!q.length) return;
+
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      var role = q[0];
+      var bar = [].slice.call(document.querySelectorAll('div')).filter(function (d) {
+        return d.className && d.className.indexOf &&
+          d.className.indexOf('flex flex-wrap items-center gap-2') !== -1 &&
+          (d.querySelector('select') || d.querySelector('input[type=month]'));
+      })[0];
+      var btnTexts = bar ? [].slice.call(bar.querySelectorAll('button')).map(function (b) { return b.textContent; }) : [];
+      var selects  = bar ? [].slice.call(bar.querySelectorAll('select')).map(function (s) { return s.options[0].text; }) : [];
+      var perfTab  = !![].slice.call(document.querySelectorAll('button')).filter(function (b) {
+        return b.textContent.trim().indexOf('Performance') !== -1 && !b.closest('nav') && !b.closest('aside');
+      })[0];
+      var reps = (window.__REQS__ || []).filter(function (r) { return r.path.indexOf('/api/reports/') === 0; })
+        .map(function (r) { return r.path.replace('/api/reports/', '') + (r.qs || ''); });
+
+      var res;
+      try { res = JSON.parse(localStorage.__PROBE_RESULTS__ || '[]'); } catch (e) { res = []; }
+      res.push({
+        role: role,
+        landed: location.pathname,
+        access: location.pathname === '/app/reports' ? 'ALLOWED' : 'REDIRECTED',
+        scopeBtns: btnTexts.filter(function (t) { return t !== 'Apply' && t !== 'Clear dates'; }),
+        dropdowns: selects,
+        perfTab: perfTab,
+        reportReqs: reps
+      });
+      localStorage.__PROBE_RESULTS__ = JSON.stringify(res);
+
+      q.shift();
+      localStorage.__PROBE_QUEUE__ = JSON.stringify(q);
+      if (q.length) {
+        localStorage.setItem('__ROLE__', q[0]);
+        localStorage.removeItem('efin_auth');
+        history.replaceState(null, '', '/app/reports');
+        location.reload();
+      } else {
+        localStorage.__PROBE_DONE__ = '1';
+      }
+    }, 1100);
+  });
+})();

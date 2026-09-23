@@ -14,6 +14,16 @@ public class LocationsController : BaseController
     private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
     public LocationsController(AppDbContext db, LoanMS.API.Services.IRolePermissionService rolePerm) { _db = db; _rolePerm = rolePerm; }
 
+    /// <summary>
+    /// Locations list — enriched with each Location's mapped Sales Teams,
+    /// Login Teams, and assigned Users (by name), mirroring the vanilla
+    /// Locations page's hierarchy columns (efin-app.js twRenderLocations,
+    /// line ~24703: `twSalesTeams.filter(t=>t.location===l.name)` /
+    /// `twLoginTeams.filter(...)` / `twUsers.filter(u=>(u.locs||[]).includes(l.name))`).
+    /// The client also uses these lists to block Delete when a Location is
+    /// still in use (same guard as vanilla's twDeleteLocation), so this is
+    /// the one call the page needs — no N+1 across /api/teams and /api/users.
+    /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -23,11 +33,34 @@ public class LocationsController : BaseController
         var locs = await _db.Locations.OrderBy(l => l.Name)
             .Select(l => new { l.Id, l.Name, l.City, l.State, l.PinCode, l.IsActive, l.Code })
             .ToListAsync();
-        return Ok(ApiResponseDto<object>.Ok(locs));
+
+        var teams = await _db.Teams.Where(t => !t.IsDeleted && t.LocationId != null)
+            .Select(t => new { t.LocationId, t.Name, t.Type })
+            .ToListAsync();
+        var userLocs = await _db.UserLocations.Where(ul => !ul.IsDeleted)
+            .Select(ul => new { ul.LocationId, UserName = ul.User.FullName })
+            .ToListAsync();
+
+        var result = locs.Select(l => new
+        {
+            l.Id, l.Name, l.City, l.State, l.PinCode, l.IsActive, l.Code,
+            SalesTeams = teams.Where(t => t.LocationId == l.Id && t.Type == "Sales").Select(t => t.Name).ToList(),
+            LoginTeams = teams.Where(t => t.LocationId == l.Id && t.Type == "Login").Select(t => t.Name).ToList(),
+            Users = userLocs.Where(u => u.LocationId == l.Id).Select(u => u.UserName).ToList(),
+        });
+        return Ok(ApiResponseDto<object>.Ok(result));
     }
 
+    // Roles widened from Admin-only to Admin,ProductTeam across Create/
+    // Update/SetStatus/Delete — matches vanilla's twCanManageUsers()
+    // (efin-app.js:24863: role==='admin'||role==='product_team'), which
+    // gates Rename/Delete, and the "locations-mgmt" menu's own default
+    // role list (['admin','product_team']) that already lets ProductTeam
+    // reach this page. Vanilla's twSaveLocation (Add) has no permission
+    // check at all beyond page access, so Create needs no extra guard
+    // either — ProductTeam already has page access by default.
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Create([FromBody] LocationDto dto)
     {
         // Employee Code generation (MH-{ROLE}-{LOCATION}-{RANDOM4}) needs a
@@ -45,7 +78,7 @@ public class LocationsController : BaseController
     }
 
     [HttpPut("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Update(int id, [FromBody] LocationDto dto)
     {
         var loc = await _db.Locations.FindAsync(id);
@@ -65,19 +98,21 @@ public class LocationsController : BaseController
     }
 
     /// <summary>
-    /// Archive/Restore a Location [Admin — same role as Update above].
-    /// Dedicated, minimal endpoint — Location.IsActive already exists on
-    /// the entity and is already returned by GetAll (confirmed by
-    /// inspection), it just had no way to be SET — LocationDto (the
-    /// general Update() request-shape) never exposed it, and Update()
-    /// itself never touched loc.IsActive at all. No migration needed —
-    /// the column was already there. Touches only IsActive, leaving
-    /// Name/City/State/PinCode/Code (Update()'s own fields) untouched.
+    /// Archive/Restore a Location [Admin/ProductTeam — same roles as Update
+    /// above, matching vanilla's twCanManageUsers() gate used for
+    /// Rename/Delete (efin-app.js:24863: role==='admin'||role==='product_team')].
+    /// Location.IsActive already exists on the entity and is already
+    /// returned by GetAll (confirmed by inspection), it just had no way to
+    /// be SET — LocationDto (the general Update() request-shape) never
+    /// exposed it, and Update() itself never touched loc.IsActive at all.
+    /// No migration needed — the column was already there. Touches only
+    /// IsActive, leaving Name/City/State/PinCode/Code (Update()'s own
+    /// fields) untouched.
     /// </summary>
     public class SetLocationStatusRequestDto { public bool IsActive { get; set; } }
 
     [HttpPatch("{id:int}/status")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> SetStatus(int id, [FromBody] SetLocationStatusRequestDto request)
     {
         var loc = await _db.Locations.FindAsync(id);
@@ -89,7 +124,7 @@ public class LocationsController : BaseController
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Delete(int id)
     {
         var loc = await _db.Locations.FindAsync(id);

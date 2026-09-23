@@ -30,6 +30,28 @@ export interface CategoryRequest {
   salary: number
 }
 
+// ── Per-product Income/Turnover Categories ─────────────────────────────────
+// Non-personal multi-config "Categories" tab (efin-app.js lcBlRenderCategories).
+// GET/POST/PUT/DELETE /api/LenderConfig/product-categories — keyed by
+// (productKey, bankId), matches BankProductCategoryDto.
+export interface ProductCategory {
+  id: number
+  bankId: number
+  productKey: string
+  name: string
+  minTurnover: number
+  color: string
+  notes?: string
+}
+export interface ProductCategoryRequest {
+  bankId: number
+  productKey: string
+  name: string
+  minTurnover: number
+  color?: string
+  notes?: string
+}
+
 // ── Eligibility Lines ────────────────────────────────────────────────────
 // Confirmed: LenderConfigController has POST/DELETE for lines but NO GET
 // list endpoint. The genuine, existing read-contract is
@@ -41,6 +63,7 @@ export interface Bank {
   id: number
   bankName: string
   isActive: boolean
+  isIncred?: boolean
   lines: EligibilityLine[]
 }
 export interface EligibilityLine {
@@ -108,4 +131,13 @@ export const lenderConfigApi = {
   deleteLine: (id: number) => api.delete<ApiResponse<boolean>>(`/api/LenderConfig/lines/${id}`),
 
   match: (data: MatchRequest) => api.post<ApiResponse<MatchResponse>>('/api/LenderConfig/match', data),
+
+  getProductCategories: (productKey: string) =>
+    api.get<ApiResponse<ProductCategory[]>>(`/api/LenderConfig/product-categories/${productKey}`),
+  createProductCategory: (data: ProductCategoryRequest) =>
+    api.post<ApiResponse<{ id: number }>>('/api/LenderConfig/product-categories', data),
+  updateProductCategory: (id: number, data: ProductCategoryRequest) =>
+    api.put<ApiResponse<boolean>>(`/api/LenderConfig/product-categories/${id}`, data),
+  deleteProductCategory: (id: number) =>
+    api.delete<ApiResponse<boolean>>(`/api/LenderConfig/product-categories/${id}`),
 }

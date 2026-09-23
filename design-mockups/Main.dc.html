@@ -1,0 +1,417 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#f0f4ff; --surface:#fff; --surface2:#f0f4ff; --surface3:#e6ecf8;
+      --border:#dde3f0; --border2:#c4cfe6; --accent:#1a4fa3; --accent-dark:#0f3278;
+      --accent-subtle:rgba(26,79,163,.08); --accent2:#d42b2b; --warn:#e67e00;
+      --success:#1a7340; --danger:#c0392b; --text:#0c1733; --text2:#3a4d6e; --text3:#7a8aaa;
+      --font-head:'Outfit',sans-serif; --font-body:'Plus Jakarta Sans',sans-serif;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:var(--font-body);color:var(--text);}
+    h1,h2,h3{font-family:var(--font-head);margin:0;}
+    a{color:var(--accent);text-decoration:none;} a:hover{color:var(--accent-dark);}
+    .app{display:flex;height:1000px;width:1440px;background:var(--bg);
+      background-image:radial-gradient(ellipse 80% 50% at 20% -10%,rgba(26,79,163,.06) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 110%,rgba(212,43,43,.04) 0%,transparent 50%);
+      overflow:hidden;}
+
+    /* Sidebar */
+    .rail{width:260px;flex-shrink:0;background:#fff;border-right:1px solid #ebebeb;
+      display:flex;flex-direction:column;height:100%;box-shadow:4px 0 28px rgba(0,0,0,.10);}
+    .brand{display:flex;align-items:center;gap:12px;padding:16px;border-bottom:1px solid #ebebeb;}
+    .brand-logo{width:32px;height:32px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#fff;font-family:var(--font-head);font-weight:800;font-size:15px;}
+    .brand-name{font-family:var(--font-head);font-weight:600;font-size:14px;color:var(--text);line-height:1.1;}
+    .brand-sub{font-size:8.5px;letter-spacing:1.5px;font-weight:700;color:var(--text3);margin-top:2px;}
+    .nav{flex:1;padding:12px 0;overflow-y:auto;}
+    .nav::-webkit-scrollbar{width:6px;} .nav::-webkit-scrollbar-thumb{background:#dde3f0;border-radius:99px;}
+    .nav-sec{margin-top:6px;}
+    .nav-label{display:flex;align-items:center;justify-content:space-between;padding:8px 20px 4px;}
+    .nav-label span{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);}
+    .nav-label i{font-style:normal;font-size:10px;color:var(--text3);}
+    .navitem{display:flex;align-items:center;gap:0;position:relative;min-height:44px;margin:1px 8px;
+      border-radius:8px;font-size:13.5px;font-weight:500;color:#3d4a5e;cursor:pointer;transition:background .15s,color .15s;}
+    .navitem .ic{width:44px;min-width:44px;height:44px;display:flex;align-items:center;justify-content:center;opacity:.55;transition:opacity .18s,transform .18s;}
+    .navitem .ic svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;}
+    .navitem:hover{background:#fff7ed;color:var(--accent2);}
+    .navitem:hover .ic{opacity:1;transform:scale(1.08);}
+    .navitem.active{background:#fff3e2;color:var(--accent2);font-weight:700;}
+    .navitem.active .ic{opacity:1;}
+    .navitem.active::before{content:'';position:absolute;left:0;top:15%;bottom:15%;width:3px;background:var(--accent2);border-radius:0 3px 3px 0;}
+
+    /* Topbar */
+    .main{flex:1;display:flex;flex-direction:column;min-width:0;}
+    .topbar{min-height:68px;padding:14px 32px;display:flex;align-items:center;gap:16px;
+      background:rgba(255,255,255,.92);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);}
+    .topbar-title{font-family:var(--font-head);font-size:18px;font-weight:800;letter-spacing:-.4px;color:var(--text);}
+    .topbar-search{margin-left:auto;position:relative;width:280px;}
+    .topbar-search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:14px;height:14px;stroke:var(--text3);fill:none;stroke-width:1.75;}
+    .topbar-search input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:8px 14px 8px 36px;color:var(--text);font-family:var(--font-body);font-size:14px;outline:none;}
+    .topbar-search input::placeholder{color:var(--text3);}
+    .ic-btn{width:38px;height:38px;flex-shrink:0;border-radius:9px;border:1px solid var(--border2);background:var(--surface2);color:var(--text2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;position:relative;}
+    .ic-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;}
+    .notif-dot{position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:var(--danger);border:1.5px solid var(--surface);}
+    .avatar{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;cursor:pointer;}
+
+    .content{flex:1;overflow-y:auto;padding:24px;}
+    .content::-webkit-scrollbar{width:8px;} .content::-webkit-scrollbar-thumb{background:#dde3f0;border-radius:99px;}
+
+    /* Card */
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;}
+
+    /* Buttons */
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:10px;font-family:var(--font-body);font-weight:600;letter-spacing:.1px;cursor:pointer;line-height:normal;padding:9px 18px;font-size:13px;transition:all .18s;}
+    .btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+    .btn-sm{padding:5px 12px;font-size:11.5px;}
+    .btn-primary{background:linear-gradient(135deg,#2563c7 0%,#1b4fa0 50%,#143d82 100%);color:#fff;box-shadow:0 8px 24px rgba(26,79,163,.4),0 1px 0 rgba(255,255,255,.2) inset;}
+    .btn-primary:hover{background:#1a5bc7;transform:translateY(-1px);}
+    .btn-secondary{background:var(--surface);color:var(--text2);border:1px solid var(--border);box-shadow:0 1px 2px rgba(26,79,163,.06);}
+    .btn-secondary:hover{background:var(--surface2);border-color:var(--border2);transform:translateY(-1px);}
+
+    /* Section tabs */
+    .sec-tabs{display:flex;gap:8px;}
+    .sec-tab{padding:6px 16px;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;border:none;transition:.15s;display:inline-flex;align-items:center;gap:6px;background:var(--surface3);color:var(--text2);}
+    .sec-tab:hover{background:var(--border);}
+    .sec-tab.active{background:var(--accent);color:#fff;}
+    .sec-tab .cnt{font-size:11px;border-radius:99px;padding:1px 7px;background:var(--border);color:var(--text2);}
+    .sec-tab.active .cnt{background:rgba(255,255,255,.22);color:#fff;}
+
+    /* Filter chips */
+    .chip{padding:7px 16px;border-radius:22px;font-size:12px;font-weight:600;border:1.5px solid var(--border);color:var(--text3);background:var(--surface);cursor:pointer;transition:all .18s;}
+    .chip:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-subtle);}
+    .chip.active{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 4px 12px rgba(26,79,163,.28);}
+
+    .flt-search{border:1px solid var(--border2);border-radius:10px;padding:7px 12px;font-size:14px;font-family:var(--font-body);outline:none;width:256px;color:var(--text);}
+    .flt-search::placeholder{color:var(--text3);}
+    .flt-search:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(26,79,163,.14);}
+
+    /* Table */
+    .tbl-wrap{overflow:hidden;border-radius:14px;border:1px solid var(--border);}
+    table{width:100%;border-collapse:collapse;}
+    thead th{background:linear-gradient(180deg,var(--surface2),var(--surface));font-family:var(--font-body);font-size:10.5px;text-transform:uppercase;letter-spacing:1px;font-weight:600;color:var(--text3);padding:12px 16px;text-align:left;border-bottom:1.5px solid var(--border);white-space:nowrap;}
+    tbody td{padding:13px 16px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text2);}
+    tbody tr:last-child td{border-bottom:none;}
+    tbody tr:hover td{background:rgba(26,79,163,.035);}
+    .mono{font-family:'SFMono-Regular',ui-monospace,Menlo,monospace;font-size:12px;}
+    .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:600;box-shadow:inset 0 0 0 1px rgba(0,0,0,.05);}
+    .badge .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+    .view-link{font-size:12px;font-weight:600;color:var(--accent);cursor:pointer;}
+    .view-link:hover{text-decoration:underline;}
+    input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px;cursor:pointer;}
+
+    .bulkbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px;border-radius:10px;background:rgba(26,79,163,.10);border:1px solid rgba(26,79,163,.20);}
+    .bulk-sel{border:1px solid var(--border2);border-radius:8px;padding:6px 10px;font-size:13px;background:#fff;color:var(--text2);}
+
+    .page-h1{font-family:var(--font-head);font-size:24px;font-weight:800;letter-spacing:-.3px;color:var(--text);}
+    .empty{padding:40px;text-align:center;font-size:13px;color:var(--text3);}
+  </style>
+</helmet>
+
+<div class="app">
+  <!-- ===== SIDEBAR ===== -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-logo">M</div>
+      <div>
+        <div class="brand-name">Mudrahub</div>
+        <div class="brand-sub">LET'S MAKE IT HAPPEN</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-sec">
+        <div class="nav-label"><span>Main Menu</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>Overview</div>
+        <div class="navitem active"><span class="ic"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>Applications</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg></span>Register New</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="11" x2="9" y2="11"/><line x1="12" y1="11" x2="13" y2="11"/><line x1="8" y1="15" x2="9" y2="15"/><line x1="12" y1="15" x2="13" y2="15"/></svg></span>EMI Calculator</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg></span>Tasks</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><line x1="6" y1="6" x2="16" y2="6"/><line x1="6" y1="10" x2="16" y2="10"/><path d="M7 6c5 0 6 8 -1 8l6 4"/></svg></span>Payout</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Customers</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>CIBIL Check</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Management</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><line x1="3" y1="21" x2="21" y2="21"/><path d="M4 21V9l8-5 8 5v12"/><line x1="9" y1="21" x2="9" y2="13"/><line x1="15" y1="21" x2="15" y2="13"/></svg></span>Banks / NBFC</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>InCred Integration</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>Lender Configuration</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span>DSA Management</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M11 17l2 2a1 1 0 0 0 3-3"/><path d="M14 14l2.5 2.5a1 1 0 0 0 3-3l-3.88-3.88"/><path d="M4 12l3-3 4 3 3-3"/></svg></span>Partner Management</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Team Management</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="6" x2="9" y2="6"/><line x1="15" y1="6" x2="15" y2="6"/><line x1="9" y1="10" x2="9" y2="10"/><line x1="15" y1="10" x2="15" y2="10"/><path d="M10 22v-4h4v4"/></svg></span>Team Overview</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>Locations</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><circle cx="19" cy="11" r="2"/></svg></span>Users</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Analytics</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/></svg></span>Reports</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 9a3 3 0 0 1 0 6v3a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3a3 3 0 0 1 0-6V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/></svg></span>Helpdesk Tickets</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Policy &amp; Product</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>Policy &amp; Product</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Settings</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Settings</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg></span>Audit Log</div>
+      </div>
+    </nav>
+  </aside>
+
+  <!-- ===== MAIN ===== -->
+  <div class="main">
+    <header class="topbar">
+      <span class="topbar-title">Applications</span>
+      <div class="topbar-search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" placeholder="Search loans, customers...">
+      </div>
+      <button class="ic-btn"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="notif-dot"></span></button>
+      <div class="avatar">PN</div>
+    </header>
+
+    <div class="content">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <div>
+          <h1 class="page-h1">Applications</h1>
+          <p style="font-size:13px;margin:2px 0 0;color:var(--text3);">{{totalLabel}}</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
+          <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export</button>
+          <button class="btn btn-primary btn-sm"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Loan</button>
+        </div>
+      </div>
+
+      <!-- Section tabs -->
+      <div class="sec-tabs" style="margin-bottom:20px;">
+        <sc-for list="{{sectionTabs}}" as="st" hint-placeholder-count="2">
+          <button class="sec-tab {{st.cls}}" onClick="{{st.pick}}">
+            <sc-if value="{{st.isDrafts}}" hint-placeholder-val="{{true}}"><svg style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></sc-if>
+            {{st.label}}
+            <sc-if value="{{st.showCount}}" hint-placeholder-val="{{true}}"><span class="cnt">{{st.count}}</span></sc-if>
+          </button>
+        </sc-for>
+      </div>
+
+      <!-- ===== APPLICATIONS SECTION ===== -->
+      <sc-if value="{{isApplications}}" hint-placeholder-val="{{true}}">
+      <div class="card">
+        <!-- Filters row -->
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:20px;">
+          <input class="flt-search" type="text" placeholder="Search loans, customers..." value="{{search}}" onInput="{{onSearch}}">
+          <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+          <sc-for list="{{chips}}" as="c" hint-placeholder-count="8">
+            <button class="chip {{c.cls}}" onClick="{{c.pick}}">{{c.label}}</button>
+          </sc-for>
+          <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>Filters</button>
+        </div>
+
+        <!-- Bulk bar -->
+        <sc-if value="{{hasSelection}}" hint-placeholder-val="{{true}}">
+          <div class="bulkbar" style="margin-bottom:16px;">
+            <span style="font-size:13px;font-weight:600;color:var(--accent);">{{selectedCount}} selected</span>
+            <select class="bulk-sel">
+              <option>Change status to&hellip;</option>
+              <option>UnderReview</option><option>Approved</option><option>Rejected</option><option>Disbursed</option>
+            </select>
+            <button class="btn btn-primary btn-sm">Apply</button>
+            <button class="btn btn-secondary btn-sm" onClick="{{clearSelection}}">Clear</button>
+          </div>
+        </sc-if>
+
+        <!-- Table -->
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:36px;padding-left:16px;"><input type="checkbox" checked="{{allSelected}}" onChange="{{toggleAll}}"></th>
+                <th>Application ID</th><th>Applicant</th><th>Loan Type</th>
+                <th style="text-align:right;">Amount</th><th>Status</th><th>Sales Person</th><th>Created</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+                <tr style="background: {{r.rowBg}}">
+                  <td style="padding-left:16px;"><input type="checkbox" checked="{{r.isSelected}}" onChange="{{r.toggle}}"></td>
+                  <td class="mono" style="color:var(--text2);">{{r.loanNumber}}</td>
+                  <td>
+                    <div style="font-weight:500;color:var(--text);">{{r.customerName}}</div>
+                    <div style="font-size:12px;color:var(--text3);">{{r.phone}}</div>
+                  </td>
+                  <td>{{r.loanType}}</td>
+                  <td class="mono" style="text-align:right;font-weight:600;color:var(--text);">{{r.amount}}</td>
+                  <td><span class="badge" style="background: {{r.badgeBg}}; color: {{r.badgeColor}}"><span class="dot" style="background: {{r.badgeColor}}"></span>{{r.status}}</span></td>
+                  <td style="font-size:12px;color:var(--text3);">{{r.salesPerson}}</td>
+                  <td style="font-size:12px;color:var(--text3);">{{r.created}}</td>
+                  <td><span class="view-link">View</span></td>
+                </tr>
+              </sc-for>
+              <sc-if value="{{isEmpty}}" hint-placeholder-val="{{false}}">
+                <tr><td colspan="9" class="empty">No applications found</td></tr>
+              </sc-if>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;padding-top:16px;border-top:1px solid var(--surface3);">
+          <p style="font-size:12px;color:var(--text3);margin:0;">{{pageLabel}}</p>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ===== DRAFTS SECTION ===== -->
+      <sc-if value="{{isDrafts}}" hint-placeholder-val="{{false}}">
+      <div class="card">
+        <p style="font-size:12px;color:var(--text3);margin:0 0 16px;">In-progress applications are saved here automatically. Starting a new application never affects any draft below.</p>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr><th>Draft</th><th>Loan Type</th><th>Progress</th><th>Last Saved</th><th></th></tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{drafts}}" as="d" hint-placeholder-count="2">
+                <tr>
+                  <td style="font-weight:500;color:var(--text);">{{d.label}}</td>
+                  <td>{{d.loanType}}</td>
+                  <td style="font-size:12px;color:var(--text3);">{{d.progress}}</td>
+                  <td style="font-size:12px;color:var(--text3);">{{d.saved}}</td>
+                  <td>
+                    <div style="display:flex;gap:14px;">
+                      <span class="view-link" style="display:inline-flex;align-items:center;gap:4px;"><svg style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>Resume</span>
+                      <span style="font-size:12px;font-weight:600;color:var(--text3);cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><svg style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Discard</span>
+                    </div>
+                  </td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this.state = { section:'applications', status:'', search:'', selected:[] };
+  }
+
+  statusStyle(s){
+    const map = {
+      Draft:       { bg:'rgba(138,150,180,.15)', color:'#8a96b4' },
+      Submitted:   { bg:'rgba(26,79,163,.12)',   color:'#1a4fa3' },
+      UnderReview: { bg:'rgba(161,89,255,.15)',  color:'#a159ff' },
+      Approved:    { bg:'rgba(0,212,170,.15)',   color:'#d42b2b' },
+      Disbursed:   { bg:'rgba(26,115,64,.12)',   color:'#1a7340' },
+      Rejected:    { bg:'rgba(255,69,96,.15)',   color:'#c0392b' },
+      OnHold:      { bg:'rgba(230,126,0,.14)',   color:'#e67e00' },
+    };
+    return map[s] || map.Draft;
+  }
+
+  get data(){
+    return [
+      { id:1, loanNumber:'MH-2026-00418', customerName:'Rohan Deshmukh', phone:'+91 98200 41562', loanType:'Business', amount:'₹18,00,000', status:'UnderReview', salesPerson:'Priya Nair', created:'28 Aug 2026' },
+      { id:2, loanNumber:'MH-2026-00412', customerName:'Aisha Khan', phone:'+91 90045 22810', loanType:'Personal', amount:'₹6,50,000', status:'Approved', salesPerson:'Karan Mehta', created:'27 Aug 2026' },
+      { id:3, loanNumber:'MH-2026-00409', customerName:'Vikram Rao', phone:'+91 99870 13344', loanType:'Home', amount:'₹52,00,000', status:'Disbursed', salesPerson:'Priya Nair', created:'25 Aug 2026' },
+      { id:4, loanNumber:'MH-2026-00405', customerName:'Sneha Patil', phone:'+91 98765 90021', loanType:'LAP', amount:'₹35,00,000', status:'Submitted', salesPerson:'Arjun Shah', created:'24 Aug 2026' },
+      { id:5, loanNumber:'MH-2026-00401', customerName:'Imran Sheikh', phone:'+91 91234 55678', loanType:'Personal', amount:'₹4,00,000', status:'Draft', salesPerson:'Karan Mehta', created:'23 Aug 2026' },
+      { id:6, loanNumber:'MH-2026-00398', customerName:'Deepa Iyer', phone:'+91 97400 88123', loanType:'Business', amount:'₹22,00,000', status:'Rejected', salesPerson:'Arjun Shah', created:'22 Aug 2026' },
+      { id:7, loanNumber:'MH-2026-00394', customerName:'Sanjay Gupta', phone:'+91 98330 76540', loanType:'Car', amount:'₹9,00,000', status:'OnHold', salesPerson:'Priya Nair', created:'21 Aug 2026' },
+      { id:8, loanNumber:'MH-2026-00390', customerName:'Meera Joshi', phone:'+91 96500 34219', loanType:'Home', amount:'₹68,00,000', status:'UnderReview', salesPerson:'Karan Mehta', created:'20 Aug 2026' },
+      { id:9, loanNumber:'MH-2026-00385', customerName:'Farhan Ali', phone:'+91 99201 45677', loanType:'Personal', amount:'₹5,50,000', status:'Approved', salesPerson:'Arjun Shah', created:'19 Aug 2026' },
+    ];
+  }
+
+  filtered(){
+    const q = (this.state.search||'').toLowerCase();
+    return this.data.filter(l =>
+      (!this.state.status || l.status === this.state.status) &&
+      (!q || l.customerName.toLowerCase().includes(q) || l.loanNumber.toLowerCase().includes(q))
+    );
+  }
+
+  renderVals(){
+    const s = this.state;
+    const rows = this.filtered();
+    const selected = s.selected;
+
+    const chipDefs = [
+      {label:'All',value:''},{label:'Personal Details',value:'Draft'},{label:'Assign Lender',value:'Submitted'},
+      {label:'Underwriting',value:'UnderReview'},{label:'Approved',value:'Approved'},{label:'Disbursed',value:'Disbursed'},
+      {label:'Rejected',value:'Rejected'},{label:'Hold',value:'OnHold'},
+    ];
+    const chips = chipDefs.map(c => ({
+      label:c.label, cls: s.status===c.value ? 'active':'',
+      pick: () => this.setState({ status:c.value, selected:[] }),
+    }));
+
+    const draftCount = 2;
+    const sectionTabs = [
+      { key:'applications', label:'Applications', isDrafts:false, showCount:false, count:0 },
+      { key:'drafts', label:'Drafts', isDrafts:true, showCount:true, count:draftCount },
+    ].map(t => ({ ...t, cls: s.section===t.key?'active':'', pick:()=>this.setState({section:t.key}) }));
+
+    const rowVals = rows.map(r => {
+      const st = this.statusStyle(r.status);
+      const isSel = selected.includes(r.id);
+      return {
+        ...r,
+        loanType: r.loanType,
+        badgeBg: st.bg, badgeColor: st.color,
+        isSelected: isSel,
+        rowBg: isSel ? 'rgba(26,79,163,.08)' : 'transparent',
+        toggle: () => this.setState({ selected: isSel ? selected.filter(x=>x!==r.id) : [...selected, r.id] }),
+      };
+    });
+
+    const pageIds = rows.map(r=>r.id);
+    const allSelected = pageIds.length>0 && pageIds.every(id=>selected.includes(id));
+
+    const drafts = [
+      { label:'Business Loan — K. Srinivasan', loanType:'Business', progress:'Step 4 of 9', saved:'2 Sep 2026' },
+      { label:'Personal Loan — Neha Verma', loanType:'Personal', progress:'Step 2 of 9', saved:'1 Sep 2026' },
+    ];
+
+    return {
+      totalLabel: `${this.data.length} total applications`,
+      isApplications: s.section==='applications',
+      isDrafts: s.section==='drafts',
+      sectionTabs, chips, rows: rowVals,
+      isEmpty: rows.length===0,
+      search: s.search,
+      onSearch: (e)=> this.setState({ search: e.target.value }),
+      allSelected,
+      toggleAll: () => this.setState({ selected: allSelected ? [] : pageIds }),
+      hasSelection: selected.length>0,
+      selectedCount: selected.length,
+      clearSelection: () => this.setState({ selected:[] }),
+      pageLabel: `Page 1 of 1 (${rows.length} shown)`,
+      drafts,
+    };
+  }
+}
+</script>
+</body>
+</html>

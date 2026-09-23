@@ -29,8 +29,34 @@ public class Customer : BaseEntity
     public string? Gender { get; set; }
     /// <summary>Optional on InCred's side (MNAME) but useful KYC data generally.</summary>
     public string? FatherName { get; set; }
-    /// <summary>One of InCred's RESIDENCE_TYPE enum values (optional on their side).</summary>
+    /// <summary>One of InCred's RESIDENCE_TYPE enum values (optional on their side).
+    /// Rendered as the current-address "Home Type" in the loan-detail Address tab.</summary>
     public string? ResidenceType { get; set; }
+
+    // ── Applicant-tab parity fields (added 2026-09-05, user-authorised) ──────
+    // Mirrors the VanillaJS loan-detail applicant tabs (efin-app.js:2537 personal,
+    // 2569/2579 current+permanent address, 2601/2661 employment). Previously
+    // React had no column, DTO field or form input for these, so the tabs
+    // could not show or edit them.
+    /// <summary>Personal tab — Mother's name (KYC).</summary>
+    public string? MotherName { get; set; }
+    /// <summary>Personal tab — secondary contact number.</summary>
+    public string? AlternatePhone { get; set; }
+    /// <summary>Current address — house / flat no. (Address holds street &amp; locality.)</summary>
+    public string? HouseNo { get; set; }
+    // Permanent address block — separate from the current address above.
+    public string? PermanentHouseNo { get; set; }
+    public string? PermanentAddress { get; set; }
+    public string? PermanentCity { get; set; }
+    public string? PermanentState { get; set; }
+    public string? PermanentPinCode { get; set; }
+    public string? PermanentResidenceType { get; set; }
+    // Employment tab extras.
+    public string? Designation { get; set; }
+    public string? CompanyType { get; set; }
+    public string? OfficialEmail { get; set; }
+    public string? OfficeAddress { get; set; }
+    public string? OfficePinCode { get; set; }
 
     // Navigation
     public ICollection<Loan> Loans { get; set; } = new List<Loan>();

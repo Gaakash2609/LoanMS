@@ -40,7 +40,21 @@ export const tasksApi = {
   getAll: (params?: { loanId?: number; completed?: boolean }) =>
     api.get<ApiResponse<Task[]>>('/api/tasks', { params }),
   create: (data: TaskCreateRequest) => api.post<ApiResponse<{ id: number }>>('/api/tasks', data),
-  update: (id: number, data: Partial<Task>) => api.put<ApiResponse<Task>>(`/api/tasks/${id}`, data),
-  complete: (id: number) => api.patch<ApiResponse<Task>>(`/api/tasks/${id}/complete`),
-  delete: (id: number) => api.delete(`/api/tasks/${id}`),
+
+  // NOTE: there is deliberately no update() here. TasksController exposes only
+  // GET / POST / PATCH {id}/complete / PATCH {id}/reassign / DELETE {id} — no
+  // general PUT — so a full `update()` could only ever have 404'd.
+
+  // Reassign a task to another user (parity with legacy confirmTaskTransfer).
+  // Backend enforces "current assignee or canManageTasks".
+  reassign: (id: number, assignedToUserId: number) =>
+    api.patch<ApiResponse<{ id: number; assignedTo: string }>>(`/api/tasks/${id}/reassign`, { assignedToUserId }),
+
+  // This is a TOGGLE on the backend (task.IsCompleted = !task.IsCompleted),
+  // which is how a completed task gets reopened — there is no separate
+  // reopen route. The UI must therefore allow clicking a checked task too.
+  toggleComplete: (id: number) => api.patch<ApiResponse<boolean>>(`/api/tasks/${id}/complete`),
+
+  // Soft-delete (sets IsDeleted); gated behind canManageTasks on the server.
+  delete: (id: number) => api.delete<ApiResponse<boolean>>(`/api/tasks/${id}`),
 }

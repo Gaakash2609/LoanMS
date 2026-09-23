@@ -294,6 +294,97 @@ public class LoanServiceTests
         _cacheMock.Verify(c => c.RemoveByPrefixAsync(It.IsAny<string>()), Times.Never);
     }
 
+    // ── Verified InCred disbursement gate ────────────────────────────────────
+    // A loan routed through InCred may only reach Disbursed once a verified
+    // InCred disbursement-success callback is on record. Non-InCred loans keep
+    // the internal manual-disbursement behaviour.
+    private Loan SetupApprovedLoanForDisburse(Action<Loan>? customize = null)
+    {
+        var loan = CreateTestLoan();
+        loan.Status = LoanStatus.Approved;
+        // Disburse pre-conditions (NACH + Customer Agreement) must be satisfied
+        // for the loan to reach the disburse step at all — this gate was added
+        // after these tests were first written, so without it every disburse
+        // test fails at the pre-condition before reaching the InCred verified-
+        // disbursement gate they are actually exercising. Set them true here so
+        // the tests validate the intended gate; a test that needs them unset can
+        // override via the customize callback.
+        loan.NachDone = true;
+        loan.CustomerAgreementDone = true;
+        customize?.Invoke(loan);
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string?>())).ReturnsAsync(true);
+        _histRepoMock.Setup(r => r.AddAsync(It.IsAny<LoanStatusHistory>())).ReturnsAsync(new LoanStatusHistory());
+        _loanRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Loan>())).ReturnsAsync((Loan l) => l);
+        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(1)).ReturnsAsync(loan);
+        return loan;
+    }
+
+    private async Task<ApiResponseDto<LoanDto>> Disburse() =>
+        await CreateService().UpdateStatusAsync(1,
+            new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Disbursed, Comment = "Disburse" }, 1, "Admin");
+
+    [Fact]
+    public async Task Disburse_NonIncredLoan_Allowed()
+    {
+        var loan = SetupApprovedLoanForDisburse(); // no InCred markers → manual mode
+        var result = await Disburse();
+        result.Success.Should().BeTrue();
+        loan.DisbursedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Disburse_IncredLoan_VerifiedSuccess_Allowed()
+    {
+        var loan = SetupApprovedLoanForDisburse(l =>
+        {
+            l.ApplicationSource = "incred";
+            l.IncredApplicationId = "APP-1";
+            l.IncredLastWebhookEvent = "LOAN_DISBURSED";
+            l.IncredLastWebhookStatus = "SUCCESS";
+        });
+        var result = await Disburse();
+        result.Success.Should().BeTrue("a verified InCred disbursement success is on record");
+        loan.DisbursedAt.Should().NotBeNull();
+    }
+
+    [Theory]
+    [InlineData("DISBURSEMENT_INITIATED", "PENDING")]   // pending → blocked
+    [InlineData("LOAN_DISBURSED", "FAILED")]            // failed  → blocked
+    [InlineData("SOMETHING_ELSE", "UNKNOWN")]           // unknown → blocked
+    [InlineData(null, null)]                            // no callback on record → blocked
+    public async Task Disburse_IncredLoan_Unverified_Blocked(string? evt, string? status)
+    {
+        var loan = SetupApprovedLoanForDisburse(l =>
+        {
+            l.ApplicationSource = "incred";
+            l.IncredApplicationId = "APP-1";
+            l.IncredLastWebhookEvent = evt;
+            l.IncredLastWebhookStatus = status;
+        });
+        var result = await Disburse();
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("verified InCred disbursement"));
+        loan.DisbursedAt.Should().BeNull("an unverified InCred loan must not be marked Disbursed");
+        loan.Status.Should().Be(LoanStatus.Approved, "the transition must be rejected, not partially applied");
+    }
+
+    [Fact]
+    public async Task Disburse_IncredLoan_AlreadyDisbursed_DuplicateBlockedByTransitionMatrix()
+    {
+        // Idempotency: once Disbursed, the only allowed transition is Closed, so a
+        // second disburse is rejected before the gate even runs.
+        SetupApprovedLoanForDisburse(l =>
+        {
+            l.Status = LoanStatus.Disbursed;
+            l.ApplicationSource = "incred";
+            l.IncredApplicationId = "APP-1";
+        });
+        var result = await Disburse();
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("Cannot move"));
+    }
+
     [Fact]
     public async Task GetDashboardStatsAsync_AlwaysReadsThroughToRepository_NeverCaches()
     {
@@ -353,4 +444,218 @@ public class LoanServiceTests
         CreatedBy       = new User { Id = 1, FullName = "Admin", Email = "admin@efin.com", Role = UserRole.Admin },
         StatusHistory   = new List<LoanStatusHistory>()
     };
+
+    // ── Hold / Un-hold workflow ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task HoldAsync_FromUnderReview_SetsOnHold_AndRecordsHistory()
+    {
+        var loan = CreateTestLoan();
+        loan.Status = LoanStatus.UnderReview;
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string>())).ReturnsAsync(true);
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(1, It.IsAny<int?>(), It.IsAny<string?>())).ReturnsAsync(loan);
+        LoanStatusHistory? recorded = null;
+        _histRepoMock.Setup(h => h.AddAsync(It.IsAny<LoanStatusHistory>()))
+            .Callback<LoanStatusHistory>(h => recorded = h)
+            .ReturnsAsync((LoanStatusHistory h) => h);
+
+        var result = await CreateService().HoldAsync(1, "Docs pending", 1, "Admin");
+
+        result.Success.Should().BeTrue();
+        loan.Status.Should().Be(LoanStatus.OnHold);
+        recorded.Should().NotBeNull();
+        recorded!.FromStatus.Should().Be(LoanStatus.UnderReview);
+        recorded.ToStatus.Should().Be(LoanStatus.OnHold);
+        recorded.Comment.Should().Be("Docs pending");
+    }
+
+    [Fact]
+    public async Task HoldAsync_EmptyReason_IsRejected()
+    {
+        var result = await CreateService().HoldAsync(1, "  ", 1, "Admin");
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("reason is required"));
+    }
+
+    [Fact]
+    public async Task HoldAsync_FromDraft_IsRejected_NotHoldable()
+    {
+        var loan = CreateTestLoan(); // Draft
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string>())).ReturnsAsync(true);
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+
+        var result = await CreateService().HoldAsync(1, "reason", 1, "Admin");
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("cannot be put on hold"));
+        loan.Status.Should().Be(LoanStatus.Draft);
+    }
+
+    [Fact]
+    public async Task UnholdAsync_RestoresPreHoldStatusFromHistory()
+    {
+        var loan = CreateTestLoan();
+        loan.Status = LoanStatus.OnHold;
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string>())).ReturnsAsync(true);
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(1, It.IsAny<int?>(), It.IsAny<string?>())).ReturnsAsync(loan);
+        _histRepoMock.Setup(h => h.AddAsync(It.IsAny<LoanStatusHistory>()))
+            .ReturnsAsync((LoanStatusHistory h) => h);
+        // The loan was held from Approved.
+        _histRepoMock.Setup(h => h.GetByLoanIdAsync(1)).ReturnsAsync(new List<LoanStatusHistory>
+        {
+            new() { LoanId = 1, FromStatus = LoanStatus.Approved, ToStatus = LoanStatus.OnHold, CreatedAt = DateTime.UtcNow }
+        });
+
+        var result = await CreateService().UnholdAsync(1, null, 1, "Admin");
+
+        result.Success.Should().BeTrue();
+        loan.Status.Should().Be(LoanStatus.Approved);
+    }
+
+    [Fact]
+    public async Task UnholdAsync_WhenNotHeld_IsRejected()
+    {
+        var loan = CreateTestLoan();
+        loan.Status = LoanStatus.Submitted;
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string>())).ReturnsAsync(true);
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+
+        var result = await CreateService().UnholdAsync(1, null, 1, "Admin");
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("not on hold"));
+    }
+
+    // ── Deviation workflow ───────────────────────────────────────────────────
+
+    private void ArrangeLoan(Loan loan)
+    {
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string>())).ReturnsAsync(true);
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _loanRepoMock.Setup(r => r.GetWithDetailsAsync(1, It.IsAny<int?>(), It.IsAny<string?>())).ReturnsAsync(loan);
+        _histRepoMock.Setup(h => h.AddAsync(It.IsAny<LoanStatusHistory>())).ReturnsAsync((LoanStatusHistory h) => h);
+    }
+
+    [Fact]
+    public async Task RaiseDeviationAsync_FromUnderReview_MovesToDecision_RecordsTypeAndReason()
+    {
+        var loan = CreateTestLoan(); loan.Status = LoanStatus.UnderReview;
+        ArrangeLoan(loan);
+        LoanStatusHistory? rec = null;
+        _histRepoMock.Setup(h => h.AddAsync(It.IsAny<LoanStatusHistory>()))
+            .Callback<LoanStatusHistory>(h => rec = h).ReturnsAsync((LoanStatusHistory h) => h);
+
+        var result = await CreateService().RaiseDeviationAsync(1, "FOIR Deviation", "EMI too high", 7, "LoginTeam");
+
+        result.Success.Should().BeTrue();
+        loan.Status.Should().Be(LoanStatus.Decision);
+        rec!.ToStatus.Should().Be(LoanStatus.Decision);
+        rec.Comment.Should().Contain("FOIR Deviation").And.Contain("EMI too high");
+    }
+
+    [Fact]
+    public async Task RaiseDeviationAsync_RequiresTypeAndReason()
+    {
+        (await CreateService().RaiseDeviationAsync(1, "", "reason", 1, "Admin"))
+            .Errors.Should().Contain(e => e.Contains("deviation type is required"));
+        (await CreateService().RaiseDeviationAsync(1, "FOIR", "  ", 1, "Admin"))
+            .Errors.Should().Contain(e => e.Contains("deviation reason is required"));
+    }
+
+    [Fact]
+    public async Task RaiseDeviationAsync_NotUnderReview_IsRejected()
+    {
+        var loan = CreateTestLoan(); loan.Status = LoanStatus.Approved;
+        ArrangeLoan(loan);
+        var result = await CreateService().RaiseDeviationAsync(1, "FOIR", "reason", 1, "Admin");
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("only be raised on an Under Review"));
+    }
+
+    [Fact]
+    public async Task DecideDeviationAsync_Approve_MovesToApproved()
+    {
+        var loan = CreateTestLoan(); loan.Status = LoanStatus.Decision;
+        ArrangeLoan(loan);
+        // Raised by user 7; approver is a different user 9.
+        _histRepoMock.Setup(h => h.GetByLoanIdAsync(1)).ReturnsAsync(new List<LoanStatusHistory>
+        {
+            new() { LoanId = 1, FromStatus = LoanStatus.UnderReview, ToStatus = LoanStatus.Decision, ChangedByUserId = 7, CreatedAt = DateTime.UtcNow }
+        });
+
+        var result = await CreateService().DecideDeviationAsync(1, approve: true, "looks fine", 9, "TeamLeader");
+
+        result.Success.Should().BeTrue();
+        loan.Status.Should().Be(LoanStatus.Approved);
+    }
+
+    [Fact]
+    public async Task DecideDeviationAsync_Reject_MovesToRejected()
+    {
+        var loan = CreateTestLoan(); loan.Status = LoanStatus.Decision;
+        ArrangeLoan(loan);
+        _histRepoMock.Setup(h => h.GetByLoanIdAsync(1)).ReturnsAsync(new List<LoanStatusHistory>());
+
+        var result = await CreateService().DecideDeviationAsync(1, approve: false, null, 9, "Manager");
+
+        result.Success.Should().BeTrue();
+        loan.Status.Should().Be(LoanStatus.Rejected);
+    }
+
+    [Fact]
+    public async Task DecideDeviationAsync_RaiserCannotApproveOwn_UnlessAdmin()
+    {
+        var loan = CreateTestLoan(); loan.Status = LoanStatus.Decision;
+        ArrangeLoan(loan);
+        // Raised by user 7; the same user 7 (non-Admin) tries to approve.
+        _histRepoMock.Setup(h => h.GetByLoanIdAsync(1)).ReturnsAsync(new List<LoanStatusHistory>
+        {
+            new() { LoanId = 1, FromStatus = LoanStatus.UnderReview, ToStatus = LoanStatus.Decision, ChangedByUserId = 7, CreatedAt = DateTime.UtcNow }
+        });
+
+        var result = await CreateService().DecideDeviationAsync(1, approve: true, null, 7, "LoginTeam");
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("cannot approve a deviation you raised"));
+        loan.Status.Should().Be(LoanStatus.Decision); // unchanged
+    }
+
+    [Fact]
+    public async Task DecideDeviationAsync_AdminCanApproveOwnRaisedDeviation()
+    {
+        var loan = CreateTestLoan(); loan.Status = LoanStatus.Decision;
+        ArrangeLoan(loan);
+        _histRepoMock.Setup(h => h.GetByLoanIdAsync(1)).ReturnsAsync(new List<LoanStatusHistory>
+        {
+            new() { LoanId = 1, FromStatus = LoanStatus.UnderReview, ToStatus = LoanStatus.Decision, ChangedByUserId = 3, CreatedAt = DateTime.UtcNow }
+        });
+
+        // Admin (user 3) approves their own raised deviation — allowed.
+        var result = await CreateService().DecideDeviationAsync(1, approve: true, null, 3, "Admin");
+
+        result.Success.Should().BeTrue();
+        loan.Status.Should().Be(LoanStatus.Approved);
+    }
+
+    [Fact]
+    public async Task DecideDeviationAsync_NotInDecision_IsRejected()
+    {
+        var loan = CreateTestLoan(); loan.Status = LoanStatus.UnderReview;
+        ArrangeLoan(loan);
+        var result = await CreateService().DecideDeviationAsync(1, true, null, 1, "Admin");
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("awaiting a deviation decision"));
+    }
+
+    [Fact]
+    public async Task SkipDeviationAsync_FromUnderReview_MovesToApproved()
+    {
+        var loan = CreateTestLoan(); loan.Status = LoanStatus.UnderReview;
+        ArrangeLoan(loan);
+        var result = await CreateService().SkipDeviationAsync(1, null, 1, "Admin");
+        result.Success.Should().BeTrue();
+        loan.Status.Should().Be(LoanStatus.Approved);
+    }
 }

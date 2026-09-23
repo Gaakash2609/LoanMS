@@ -2,17 +2,31 @@ import type { Loan } from '@/types'
 
 // Stages that fire an automatic lender-RM email in legacy (POST_UW_STAGES /
 // EMAIL_TRIGGER_STAGES in lender-email-workflow.js: offer, approved,
-// acceptance, disbursed). Only Approved and Disbursed are reproduced here —
-// the backend's real LoanStatus enum (Draft/Submitted/UnderReview/Approved/
-// Rejected/Disbursed/Closed) has no "Offer" or "Acceptance" value at all,
-// so those two legacy trigger stages have no status transition to hook
-// into in this data model; see handoff note.
-export const AUTO_EMAIL_TRIGGER_STAGES = ['Approved', 'Disbursed']
+// acceptance, disbursed). Approved, Acceptance and Disbursed are reproduced
+// here — LoanStatus now has a real `Acceptance` value (added alongside the
+// deal-confirmation/acceptance-stage work; see LoanMS.Domain/Enums/
+// LoanStatus.cs). Only "offer" still has no equivalent: the backend has no
+// separate pre-underwriting "offer" status distinct from Approved, so that
+// one legacy trigger stage still has nothing to hook into in this data model.
+export const AUTO_EMAIL_TRIGGER_STAGES = ['Approved', 'Acceptance', 'Disbursed']
+
+// Where the LEW bar itself is SHOWN in the Timeline tab — a wider gate than
+// the auto-send trigger above, and deliberately decoupled from it. Legacy's
+// renderTrackingSection shows the #lew-action-bar for LEW_POST_UW =
+// ['login','underwriting','offer','approved','decision','approved_deviation',
+// 'acceptance','ni'] and hides it on terminal stages (efin-app.js:3173-3174).
+// Mapped to React's status enum (api-bridge STATUS_MAP: login=Submitted,
+// underwriting=UnderReview, approved=Approved, decision=Decision,
+// acceptance=Acceptance). Showing the card here only renders the manual
+// Send Enquiry / Log Reply / Thread surface — it never auto-sends (that is
+// gated separately by AUTO_EMAIL_TRIGGER_STAGES in hooks/useLoans.ts), so
+// widening visibility to match Vanilla is safe.
+export const LENDER_EMAIL_VISIBLE_STAGES = ['Submitted', 'UnderReview', 'Approved', 'Decision', 'Acceptance']
 
 // Maps a LoanStatus (as used by React's status-update flow) to the
 // lower-case stage key EMAIL_TEMPLATES/STAGE_EMAIL_CONFIG key in legacy.
 export const STATUS_TO_STAGE_KEY: Record<string, string> = {
-  Approved: 'approved', Disbursed: 'disbursed',
+  Approved: 'approved', Acceptance: 'acceptance', Disbursed: 'disbursed',
 }
 
 export const LOAN_TYPE_LABEL: Record<string, string> = {

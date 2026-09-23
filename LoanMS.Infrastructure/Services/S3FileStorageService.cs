@@ -72,4 +72,11 @@ public class S3FileStorageService : IFileStorageService
             return false;
         }
     }
+
+    public async Task DeleteAsync(string key, CancellationToken ct = default)
+    {
+        // DeleteObject is idempotent on S3 — deleting a missing key returns
+        // 204 without error, so no NotFound handling is needed.
+        await _s3.DeleteObjectAsync(_bucket, key, ct);
+    }
 }

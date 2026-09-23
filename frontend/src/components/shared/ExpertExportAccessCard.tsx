@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { expertExportApi } from '@/api/expertExportApi'
+import { SkeletonText } from '@/components/ui/Skeleton'
 
 // Matches legacy's STG_EE_BACKEND_ROLES exactly.
 const BACKEND_ROLES = ['Admin', 'Manager', 'Sales']
@@ -61,7 +62,7 @@ export default function ExpertExportAccessCard() {
     <Card>
       <CardHeader title="Expert Export Access" subtitle="Who can download the Expert Export (Admin always included)" />
       {isLoading ? (
-        <p className="text-sm text-gray-400 py-4">Loading…</p>
+        <SkeletonText lines={3} className="py-2" />
       ) : (
         <div className="space-y-4">
           <div>

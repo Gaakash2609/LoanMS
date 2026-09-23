@@ -1,0 +1,14 @@
+{
+  "name": "loanms-runtime-verify",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "install-browsers": "playwright install chromium",
+    "verify": "node verify.mjs",
+    "verify:wizard": "node wizard.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.47.0"
+  }
+}

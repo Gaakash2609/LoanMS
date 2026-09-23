@@ -203,17 +203,13 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
                 (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
 
-        // Manager / TeamLeader (Sales hierarchy) — base rule is team-
-        // MEMBERSHIP (Team Leader/Manager see every loan tagged to a Sales
-        // Team they belong to, as leader OR member), same derivation as
-        // before. An Admin can now ALSO explicitly widen this user's scope
-        // with additional Locations/Teams (the same OR-terms every other
-        // role branch uses) — the old conclusion that this role is "team-
-        // only" no longer holds as the sole rule, per the explicit system-
-        // owner override; the team-membership rule itself is preserved as
-        // the base, not replaced.
-        if (string.Equals(role, "Manager", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(role, "TeamLeader", StringComparison.OrdinalIgnoreCase))
+        // TeamLeader (Sales hierarchy) — team-MEMBERSHIP rule: sees every loan
+        // whose creator/assignee is a member of a Sales Team this user leads or
+        // belongs to. Per the confirmed final spec (G-15, least privilege) a
+        // Team Leader is scoped to their mapped Sales Team ONLY — no Location or
+        // Login-queue widening — so another team's applications stay hidden even
+        // at the same Location.
+        if (string.Equals(role, "TeamLeader", StringComparison.OrdinalIgnoreCase))
         {
             var mySalesTeamIds = ctx.Set<Team>()
                 .Where(t => t.Type == "Sales" &&
@@ -230,11 +226,41 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
 
             return query.Where(l =>
                 teamUserIds.Contains(l.CreatedByUserId) ||
-                (l.AssignedToUserId.HasValue && teamUserIds.Contains(l.AssignedToUserId.Value)) ||
-                adminAssignedSalesTeamUserIds.Contains(l.CreatedByUserId) ||
-                (l.AssignedToUserId.HasValue && adminAssignedSalesTeamUserIds.Contains(l.AssignedToUserId.Value)) ||
-                (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
-                (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
+                (l.AssignedToUserId.HasValue && teamUserIds.Contains(l.AssignedToUserId.Value)));
+        }
+
+        // Manager — G-03 (confirmed). Intersection, NOT union: a Manager sees a
+        // loan ONLY when BOTH hold —
+        //   (a) the loan's Location is one of the Manager's mapped Locations
+        //       (UserLocations), AND
+        //   (b) the loan's Team (its creator/assignee belongs to a Sales Team the
+        //       Manager leads/belongs to) is one of the Manager's mapped Teams.
+        // No global access. A Manager with no Location mapping, or no Team
+        // mapping, sees nothing (least privilege — an Admin must map both). This
+        // deliberately replaces the earlier OR/union behaviour.
+        if (string.Equals(role, "Manager", StringComparison.OrdinalIgnoreCase))
+        {
+            var mySalesTeamIds = ctx.Set<Team>()
+                .Where(t => t.Type == "Sales" &&
+                    (t.TeamLeadUserId == currentUserId ||
+                     ctx.Set<TeamMember>().Any(tm => tm.TeamId == t.Id && tm.UserId == currentUserId && !tm.IsDeleted)))
+                .Select(t => t.Id);
+
+            var teamUserIds = ctx.Set<TeamMember>()
+                .Where(tm => mySalesTeamIds.Contains(tm.TeamId) && !tm.IsDeleted)
+                .Select(tm => tm.UserId)
+                .Union(ctx.Set<Team>()
+                    .Where(t => mySalesTeamIds.Contains(t.Id) && t.TeamLeadUserId != null)
+                    .Select(t => t.TeamLeadUserId!.Value));
+
+            var myLocationIds = ctx.Set<UserLocation>()
+                .Where(ul => ul.UserId == currentUserId && !ul.IsDeleted)
+                .Select(ul => ul.LocationId);
+
+            return query.Where(l =>
+                (l.LocationId.HasValue && myLocationIds.Contains(l.LocationId.Value)) &&
+                (teamUserIds.Contains(l.CreatedByUserId) ||
+                 (l.AssignedToUserId.HasValue && teamUserIds.Contains(l.AssignedToUserId.Value))));
         }
 
         // LoginTeam — base rule: an individual Login Team member sees their
@@ -248,10 +274,15 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
                 (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
 
-        // OperationManager — base rule: every loan assigned (LoginUserId) to
-        // any member of an Operation/Login-type Team this user leads or
-        // belongs to. Admin-assigned Location/Team mappings can now
-        // additionally widen this via the same OR-terms.
+        // OperationManager — G-04 (confirmed). Intersection, NOT union: an
+        // Operations Manager sees a loan ONLY when BOTH hold —
+        //   (a) the loan's Location is one of the OM's mapped Locations
+        //       (UserLocations), AND
+        //   (b) the loan's AssignedLoginUser (Loan.LoginUserId) is one of the
+        //       OM's mapped Login Users (members/leads of Login-type Teams the OM
+        //       leads or belongs to).
+        // No global access. An OM with no Location mapping, or no mapped Login
+        // Users, sees nothing (least privilege). Replaces the earlier OR/union.
         if (string.Equals(role, "OperationManager", StringComparison.OrdinalIgnoreCase))
         {
             var myLoginTeamIds = ctx.Set<Team>()
@@ -260,19 +291,20 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                      ctx.Set<TeamMember>().Any(tm => tm.TeamId == t.Id && tm.UserId == currentUserId && !tm.IsDeleted)))
                 .Select(t => t.Id);
 
-            var teamUserIds = ctx.Set<TeamMember>()
+            var loginUserIds = ctx.Set<TeamMember>()
                 .Where(tm => myLoginTeamIds.Contains(tm.TeamId) && !tm.IsDeleted)
                 .Select(tm => tm.UserId)
                 .Union(ctx.Set<Team>()
                     .Where(t => myLoginTeamIds.Contains(t.Id) && t.TeamLeadUserId != null)
                     .Select(t => t.TeamLeadUserId!.Value));
 
+            var myLocationIds = ctx.Set<UserLocation>()
+                .Where(ul => ul.UserId == currentUserId && !ul.IsDeleted)
+                .Select(ul => ul.LocationId);
+
             return query.Where(l =>
-                (l.LoginUserId.HasValue && teamUserIds.Contains(l.LoginUserId.Value)) ||
-                adminAssignedSalesTeamUserIds.Contains(l.CreatedByUserId) ||
-                (l.AssignedToUserId.HasValue && adminAssignedSalesTeamUserIds.Contains(l.AssignedToUserId.Value)) ||
-                (l.LoginUserId.HasValue && adminAssignedLoginTeamUserIds.Contains(l.LoginUserId.Value)) ||
-                (l.LocationId.HasValue && adminAssignedLocationIds.Contains(l.LocationId.Value)));
+                (l.LocationId.HasValue && myLocationIds.Contains(l.LocationId.Value)) &&
+                (l.LoginUserId.HasValue && loginUserIds.Contains(l.LoginUserId.Value)));
         }
 
         // LocationHead — base rule: every loan at any Admin-assigned
@@ -317,6 +349,128 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
         // Unrelated / unrecognized roles: no loan should be visible.
         return query.Where(l => false);
     }
+
+    /// <summary>
+    /// Reports page filters (Scope / User / Team / Status).
+    ///
+    /// This is NARROWING ONLY and must always run AFTER ApplyVisibilityScope —
+    /// every caller composes them in that order. Nothing here can widen what a
+    /// user may see: the predicates are additional .Where() clauses on a query
+    /// the authorization rule has already restricted, so an out-of-scope loan
+    /// is gone before this is reached. That is also why Partner needs no
+    /// special case here — its branch in ApplyVisibilityScope has already
+    /// pinned the query to that partner's own records.
+    ///
+    /// The behaviour mirrors the legacy Reports page (_rptGetFilteredApps,
+    /// efin-app.js:12901) exactly, including the parts that are arguably
+    /// legacy quirks — they are reproduced deliberately rather than
+    /// "improved", so the two apps agree on what a report contains:
+    ///
+    ///   • "My Team" is offered to Admin and TeamLeader only (efin-app.js:12978).
+    ///     Manager does NOT get it, and a scope=team from any other role is a
+    ///     no-op, matching legacy's `teamMembers.length` guard (:12915).
+    ///   • The team roster comes from LEADERSHIP, not membership: the first
+    ///     Sales team this user leads, then that team's lead + members
+    ///     (`twSalesTeams.find(t => t.leader === uname)`, :13036).
+    ///   • Only the FIRST such team counts; further teams the same person
+    ///     leads are ignored, exactly as .find() does. Legacy's "first" is its
+    ///     array order, which is not deterministic; Id order is used here as
+    ///     the closest stable equivalent.
+    ///   • No team found degrades to just this user, so "My Team" quietly
+    ///     behaves like "My Data" (:13038's `: [uname]` fallback).
+    ///
+    /// Loans are matched on CreatedByUserId OR AssignedToUserId. Legacy matches
+    /// its single `a.sales` field, which this data model splits across those
+    /// two columns.
+    /// </summary>
+    /// <param name="scope">"all" | "mine" | "team". Anything else is treated as "all".</param>
+    public static IQueryable<Loan> ApplyReportNarrowing(
+        AppDbContext ctx,
+        IQueryable<Loan> query,
+        int currentUserId,
+        string? currentUserRole,
+        string? scope = null,
+        int? userId = null,
+        int? teamId = null,
+        LoanStatus? status = null)
+    {
+        var role = currentUserRole ?? string.Empty;
+
+        // ── Scope ────────────────────────────────────────────────────────
+        if (string.Equals(scope, "mine", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(l =>
+                l.CreatedByUserId == currentUserId ||
+                (l.AssignedToUserId.HasValue && l.AssignedToUserId.Value == currentUserId));
+        }
+        else if (string.Equals(scope, "team", StringComparison.OrdinalIgnoreCase)
+                 && (string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(role, "TeamLeader", StringComparison.OrdinalIgnoreCase)))
+        {
+            // First Sales team this user LEADS — see the note above on why
+            // leadership (not membership) and why only the first one.
+            var myTeamId = ctx.Set<Team>()
+                .Where(t => t.Type == "Sales" && !t.IsDeleted && t.TeamLeadUserId == currentUserId)
+                .OrderBy(t => t.Id)
+                .Select(t => (int?)t.Id)
+                .FirstOrDefault();
+
+            if (myTeamId == null)
+            {
+                // Legacy's `: [uname]` fallback — "My Team" becomes "My Data".
+                query = query.Where(l =>
+                    l.CreatedByUserId == currentUserId ||
+                    (l.AssignedToUserId.HasValue && l.AssignedToUserId.Value == currentUserId));
+            }
+            else
+            {
+                var rosterUserIds = TeamRosterUserIds(ctx, myTeamId.Value);
+                query = query.Where(l =>
+                    rosterUserIds.Contains(l.CreatedByUserId) ||
+                    (l.AssignedToUserId.HasValue && rosterUserIds.Contains(l.AssignedToUserId.Value)));
+            }
+        }
+        // "all" (and scope=team from a role that isn't offered it) adds nothing.
+
+        // ── Individual user ──────────────────────────────────────────────
+        if (userId.HasValue)
+        {
+            var uid = userId.Value;
+            query = query.Where(l =>
+                l.CreatedByUserId == uid ||
+                (l.AssignedToUserId.HasValue && l.AssignedToUserId.Value == uid));
+        }
+
+        // ── Team ─────────────────────────────────────────────────────────
+        // Legacy narrows to the SELECTED team's leader + members
+        // (efin-app.js:12921), which is the same roster shape as above.
+        if (teamId.HasValue)
+        {
+            var rosterUserIds = TeamRosterUserIds(ctx, teamId.Value);
+            query = query.Where(l =>
+                rosterUserIds.Contains(l.CreatedByUserId) ||
+                (l.AssignedToUserId.HasValue && rosterUserIds.Contains(l.AssignedToUserId.Value)));
+        }
+
+        // ── Status ───────────────────────────────────────────────────────
+        if (status.HasValue)
+            query = query.Where(l => l.Status == status.Value);
+
+        return query;
+    }
+
+    /// <summary>
+    /// A team's lead plus its members, as user ids. Kept as one definition so
+    /// the "My Team" scope and the Team filter can never drift apart, and so
+    /// this matches the lead-∪-members shape ApplyVisibilityScope already uses.
+    /// </summary>
+    private static IQueryable<int> TeamRosterUserIds(AppDbContext ctx, int teamId)
+        => ctx.Set<TeamMember>()
+            .Where(tm => tm.TeamId == teamId && !tm.IsDeleted)
+            .Select(tm => tm.UserId)
+            .Union(ctx.Set<Team>()
+                .Where(t => t.Id == teamId && t.TeamLeadUserId != null)
+                .Select(t => t.TeamLeadUserId!.Value));
 
     /// <summary>
     /// Phase 3A — "can this user act on this loan" check for Update/UpdateStatus/
@@ -403,6 +557,21 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 TenureMonths    = l.TenureMonths,
                 CustomerName    = l.Customer.FullName,
                 CustomerPhone   = l.Customer.Phone,
+                CustomerCibilScore = l.Customer.CibilScore,
+                LocationName    = l.Location != null ? l.Location.Name : null,
+                Purpose         = l.Purpose,
+                Remarks         = l.Remarks,
+                SelectedLenderNames = l.SelectedLenderNames,
+                DsaName         = l.Dsa != null ? l.Dsa.Name : null,
+                PartnerName     = l.Partner != null ? l.Partner.Name : null,
+                CustomerCity    = l.Customer.City,
+                CustomerState   = l.Customer.State,
+                CustomerGender  = l.Customer.Gender,
+                CustomerEmploymentType = l.Customer.EmploymentType,
+                CustomerCompanyName    = l.Customer.CompanyName,
+                CreatedByUserId        = l.CreatedByUserId,
+                AssignedToUserId       = l.AssignedToUserId,
+                CustomerMonthlyIncome  = l.Customer.MonthlyIncome,
                 CreatedByName   = l.CreatedBy.FullName,
                 AssignedToName  = l.AssignedTo != null ? l.AssignedTo.FullName : null,
                 LoginUserName   = l.LoginUser  != null ? l.LoginUser.FullName  : null,
@@ -456,6 +625,21 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 TenureMonths    = l.TenureMonths,
                 CustomerName    = l.Customer.FullName,
                 CustomerPhone   = l.Customer.Phone,
+                CustomerCibilScore = l.Customer.CibilScore,
+                LocationName    = l.Location != null ? l.Location.Name : null,
+                Purpose         = l.Purpose,
+                Remarks         = l.Remarks,
+                SelectedLenderNames = l.SelectedLenderNames,
+                DsaName         = l.Dsa != null ? l.Dsa.Name : null,
+                PartnerName     = l.Partner != null ? l.Partner.Name : null,
+                CustomerCity    = l.Customer.City,
+                CustomerState   = l.Customer.State,
+                CustomerGender  = l.Customer.Gender,
+                CustomerEmploymentType = l.Customer.EmploymentType,
+                CustomerCompanyName    = l.Customer.CompanyName,
+                CreatedByUserId        = l.CreatedByUserId,
+                AssignedToUserId       = l.AssignedToUserId,
+                CustomerMonthlyIncome  = l.Customer.MonthlyIncome,
                 CreatedByName   = l.CreatedBy.FullName,
                 AssignedToName  = l.AssignedTo != null ? l.AssignedTo.FullName : null,
                 LoginUserName   = l.LoginUser  != null ? l.LoginUser.FullName  : null,
@@ -479,17 +663,73 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
         if (!string.IsNullOrEmpty(filter.Search))
         {
             var s = filter.Search.ToLower();
-            query = query.Where(l =>
-                l.LoanNumber.ToLower().Contains(s) ||
-                l.Customer.FullName.ToLower().Contains(s) ||
-                l.Customer.Phone.Contains(s) ||
-                l.Customer.Email.ToLower().Contains(s));
+            // PHASE 6 FIX: this searched only LoanNumber / name / phone / email.
+            // Vanilla's filterTable (efin-app.js:2211) searches App ID, name,
+            // PAN, mobile, sales person, DSA, linked partner, company, loan
+            // type, status, Aadhaar and email — so searching a PAN or a DSA
+            // name returned nothing here while working fine in the legacy app.
+            // LoanType/Status are enums persisted via HasConversion<string>(),
+            // and ToString() on them is not translatable, so a text term is
+            // resolved to an enum value up front and matched by equality (the
+            // converter turns that into the right string comparison in SQL).
+            // Hoisted to plain locals on purpose: EF's parameter-extraction pass
+            // eagerly evaluates any subexpression that doesn't touch `l`, so a
+            // `typeToken.Value` left inside the predicate would throw
+            // InvalidOperationException whenever the term matched no enum value.
+            // (`Where(l => false)` is already used by ApplyVisibilityScope above,
+            // so the no-rows predicate itself is proven against this provider.)
+            var typeToken   = ParseLoanTypeToken(s);
+            var statusToken = ParseStatusToken(s);
+            var hasType     = typeToken.HasValue;
+            var typeVal     = typeToken ?? default;
+            var hasStatus   = statusToken.HasValue;
+            var statusVal   = statusToken ?? default;
+
+            query = (filter.SearchField ?? "").ToLower() switch
+            {
+                "name"     => query.Where(l => l.Customer.FullName.ToLower().Contains(s)),
+                "id"       => query.Where(l => l.LoanNumber.ToLower().Contains(s)),
+                "mobile"   => query.Where(l => l.Customer.Phone.Contains(s)),
+                "pan"      => query.Where(l => l.Customer.PanNumber != null && l.Customer.PanNumber.ToLower().Contains(s)),
+                "dsa"      => query.Where(l => l.Dsa != null && l.Dsa.Name.ToLower().Contains(s)),
+                "partner"  => query.Where(l => l.Partner != null && l.Partner.Name.ToLower().Contains(s)),
+                "company"  => query.Where(l => l.Customer.CompanyName != null && l.Customer.CompanyName.ToLower().Contains(s)),
+                "sales"    => query.Where(l => l.CreatedBy.FullName.ToLower().Contains(s)),
+                "loantype" => hasType
+                                ? query.Where(l => l.LoanType == typeVal)
+                                : query.Where(l => false),
+                "status"   => hasStatus
+                                ? query.Where(l => l.Status == statusVal)
+                                : query.Where(l => false),
+                // All Fields
+                _ => query.Where(l =>
+                        l.LoanNumber.ToLower().Contains(s) ||
+                        l.Customer.FullName.ToLower().Contains(s) ||
+                        l.Customer.Phone.Contains(s) ||
+                        l.Customer.Email.ToLower().Contains(s) ||
+                        (l.Customer.PanNumber != null && l.Customer.PanNumber.ToLower().Contains(s)) ||
+                        (l.Customer.AadhaarNumber != null && l.Customer.AadhaarNumber.Contains(s)) ||
+                        (l.Customer.CompanyName != null && l.Customer.CompanyName.ToLower().Contains(s)) ||
+                        l.CreatedBy.FullName.ToLower().Contains(s) ||
+                        (l.Dsa != null && l.Dsa.Name.ToLower().Contains(s)) ||
+                        (l.Partner != null && l.Partner.Name.ToLower().Contains(s)) ||
+                        (hasType   && l.LoanType == typeVal) ||
+                        (hasStatus && l.Status   == statusVal)),
+            };
         }
 
-        if (filter.Status.HasValue)   query = query.Where(l => l.Status == filter.Status.Value);
+        // Gap 1 — Statuses (multi-select) takes precedence over the single
+        // Status filter when both somehow arrive together; callers are
+        // expected to send exactly one of the two (frontend loanStore.setFilter
+        // enforces this by clearing whichever one isn't being set).
+        if (filter.Statuses is { Count: > 0 }) query = query.Where(l => filter.Statuses.Contains(l.Status));
+        else if (filter.Status.HasValue)       query = query.Where(l => l.Status == filter.Status.Value);
         if (filter.LoanType.HasValue) query = query.Where(l => l.LoanType == filter.LoanType.Value);
         if (filter.CustomerId.HasValue) query = query.Where(l => l.CustomerId == filter.CustomerId.Value);
         if (filter.AssignedToUserId.HasValue) query = query.Where(l => l.AssignedToUserId == filter.AssignedToUserId.Value);
+        // Phase 1 (DSA parity) — see LoanFilterDto.DsaId/PartnerId.
+        if (filter.DsaId.HasValue) query = query.Where(l => l.DsaId == filter.DsaId.Value);
+        if (filter.PartnerId.HasValue) query = query.Where(l => l.PartnerId == filter.PartnerId.Value);
         if (filter.FromDate.HasValue) query = query.Where(l => l.CreatedAt >= filter.FromDate.Value);
         if (filter.ToDate.HasValue)   query = query.Where(l => l.CreatedAt <= filter.ToDate.Value.AddDays(1));
 
@@ -508,6 +748,48 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 : query.OrderByDescending(l => ctx.Set<BureauReport>().Where(b => b.CustomerId == l.CustomerId).OrderByDescending(b => b.ScoreGeneratedDate).Select(b => b.RiskGrade).FirstOrDefault()),
             _            => filter.SortDir == "asc" ? query.OrderBy(l => l.CreatedAt)         : query.OrderByDescending(l => l.CreatedAt)
         };
+    }
+
+    /// <summary>
+    /// Resolves a free-text search term to a LoanType, so "personal", "car" or
+    /// "against property" narrow the list the way vanilla's
+    /// loanTypeLabel(a.loanType) substring match did. Returns null when nothing
+    /// matches, which the caller treats as "this scope contributes no rows"
+    /// rather than "match everything".
+    /// </summary>
+    private static LoanType? ParseLoanTypeToken(string term)
+        => MatchEnumLabel<LoanType>(term, v => v switch
+        {
+            LoanType.Personal  => "personal loan",
+            LoanType.Business  => "business loan",
+            LoanType.Home      => "home loan",
+            LoanType.Vehicle   => "vehicle loan",
+            LoanType.Education => "education loan",
+            LoanType.Car       => "car loan",
+            LoanType.LAP       => "lap loan against property",
+            LoanType.Overdraft => "overdraft cash credit",
+            _                  => v.ToString().ToLower(),
+        });
+
+    /// <summary>Same idea for LoanStatus, using the business labels the UI shows.</summary>
+    private static LoanStatus? ParseStatusToken(string term)
+        => MatchEnumLabel<LoanStatus>(term, v => v switch
+        {
+            LoanStatus.Draft       => "draft personal details",
+            LoanStatus.Submitted   => "submitted assign lender",
+            LoanStatus.UnderReview => "under review underwriting",
+            LoanStatus.OnHold      => "on hold",
+            _                      => v.ToString().ToLower(),
+        });
+
+    private static TEnum? MatchEnumLabel<TEnum>(string term, Func<TEnum, string> label) where TEnum : struct, Enum
+    {
+        foreach (var v in Enum.GetValues<TEnum>())
+        {
+            if (v.ToString()!.ToLower().Contains(term) || label(v).Contains(term))
+                return v;
+        }
+        return null;
     }
 
     public async Task<string?> GetLatestRiskGradeAsync(int customerId)
@@ -562,6 +844,12 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
 
         var customers = await _ctx.Set<Customer>().CountAsync(c => !c.IsDeleted);
 
+        // Gap 2 — Recent Activity feed, sourced from real persisted
+        // LoanStatusHistory rows (same visibility scope as everything else
+        // on this dashboard) rather than RecentLoans' creation-date ordering
+        // below, so a status change on an older loan surfaces here too.
+        var recentActivity = await GetRecentActivityAsync(userId, role, 15);
+
         var recent = await baseQuery
             .Include(l => l.Customer).Include(l => l.CreatedBy).Include(l => l.AssignedTo).Include(l => l.LoginUser)
             .OrderByDescending(l => l.CreatedAt).Take(10)
@@ -577,6 +865,21 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 TenureMonths    = l.TenureMonths,
                 CustomerName    = l.Customer.FullName,
                 CustomerPhone   = l.Customer.Phone,
+                CustomerCibilScore = l.Customer.CibilScore,
+                LocationName    = l.Location != null ? l.Location.Name : null,
+                Purpose         = l.Purpose,
+                Remarks         = l.Remarks,
+                SelectedLenderNames = l.SelectedLenderNames,
+                DsaName         = l.Dsa != null ? l.Dsa.Name : null,
+                PartnerName     = l.Partner != null ? l.Partner.Name : null,
+                CustomerCity    = l.Customer.City,
+                CustomerState   = l.Customer.State,
+                CustomerGender  = l.Customer.Gender,
+                CustomerEmploymentType = l.Customer.EmploymentType,
+                CustomerCompanyName    = l.Customer.CompanyName,
+                CreatedByUserId        = l.CreatedByUserId,
+                AssignedToUserId       = l.AssignedToUserId,
+                CustomerMonthlyIncome  = l.Customer.MonthlyIncome,
                 CreatedByName   = l.CreatedBy.FullName,
                 AssignedToName  = l.AssignedTo != null ? l.AssignedTo.FullName : null,
                 LoginUserName   = l.LoginUser  != null ? l.LoginUser.FullName  : null,
@@ -599,8 +902,124 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
             TotalRequestedAmount = stats?.TotalReq ?? 0,
             TotalApprovedAmount  = stats?.TotalAppr ?? 0,
             TotalDisbursedAmount = stats?.TotalDisb ?? 0,
-            RecentLoans          = recent
+            RecentLoans          = recent,
+            RecentActivity       = recentActivity
         };
+    }
+
+    /// <summary>
+    /// Dashboard Recent Activity feed (Gap 2) — a global, cross-loan feed of
+    /// real persisted status transitions, built from LoanStatusHistory (the
+    /// audit trail LoanService already writes on every create/status-change:
+    /// CreateAsync, UpdateStatusAsync, admin overrides, hold/release, etc.).
+    /// It reads from the database instead of an in-memory array that resets
+    /// on every page load, so it survives refreshes/restarts and reflects
+    /// every visible loan's real history, not just the current browser
+    /// session's events. Same role-based visibility scope as every other
+    /// loan read (Phase 2B) — a loan outside the caller's scope contributes
+    /// no activity rows either.
+    ///
+    /// RE-AUDITED AGAIN (Phase 9 — Recent Activity final gap pass). The
+    /// PENDING categories the previous pass of this comment left out are now
+    /// split into two buckets after inspecting AuditLogs/AuditMiddleware/
+    /// TrackingController/UsersController/IncredController directly:
+    ///  - Users (create/update/delete/reset-password), Tracking (per-loan
+    ///    timeline-entry edit/delete — TrackingController's PUT/DELETE), and
+    ///    Incred (lender-sync POST/PATCH writes) DO have a genuine persisted
+    ///    source: AuditMiddleware writes an AuditLogs row for every
+    ///    successful POST/PUT/PATCH/DELETE to /api/* with EntityName taken
+    ///    from the URL path segment, which is exactly "Users"/"Tracking"/
+    ///    "Incred" for these controllers' routes. Reused below via the
+    ///    already-Admin-only AuditLogs table/AuditController — no new audit
+    ///    system.
+    ///  - Custom-role create/update/delete (efin-app.js:28658/28682) still
+    ///    has NO reliably attributable persisted source: SettingsController
+    ///    stores the whole role/permission map as one blob under the
+    ///    "efin_role_permissions" key, so an AuditLogs row for it says only
+    ///    "Settings updated", indistinguishable from a logo/email-config/
+    ///    AI-key change. Reporting that as "role created" would be
+    ///    fabricating detail the data doesn't contain, so it is genuinely
+    ///    left PENDING rather than guessed at. "Invited user" is folded into
+    ///    the Users bucket rather than its own line for the same reason —
+    ///    invite-completion (efin-app.js:38016) has no dedicated backend
+    ///    action; it ends in a Users photo/password write that AuditLogs
+    ///    already records as a generic Users update.
+    ///
+    /// The merged AuditLogs-sourced half of this feed is gated to Admin
+    /// callers only: AuditController (the existing Audit Log page) is
+    /// already [Authorize(Roles="Admin")], i.e. the product already treats
+    /// this data as admin-sensitive (who reset whose password, who edited a
+    /// loan's timeline, ...). Merging it into every role's dashboard here
+    /// would be a new access-control regression, not a parity fix, so
+    /// non-Admin callers keep getting the Loan-only feed exactly as before.
+    /// </summary>
+    private async Task<List<RecentActivityDto>> GetRecentActivityAsync(int? userId, string? role, int take)
+    {
+        var loanScope = _set.AsQueryable();
+        if (userId.HasValue)
+            loanScope = ApplyVisibilityScope(_ctx, loanScope, userId.Value, role);
+
+        var loanActivity = await (
+            from h in _ctx.LoanStatusHistories
+            join l in loanScope on h.LoanId equals l.Id
+            orderby h.CreatedAt descending
+            select new RecentActivityDto
+            {
+                Type         = "Loan",
+                LoanId       = l.Id,
+                LoanNumber   = l.LoanNumber,
+                CustomerName = l.Customer.FullName,
+                Status       = h.ToStatus.ToString(),
+                ChangedAt    = h.CreatedAt
+            }
+        ).Take(take).ToListAsync();
+
+        var auditActivity = new List<RecentActivityDto>();
+        if (string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase))
+        {
+            var auditEntityNames = new[] { "Users", "Tracking", "Incred" };
+            var auditRows = await _ctx.AuditLogs
+                .Where(a => auditEntityNames.Contains(a.EntityName))
+                .OrderByDescending(a => a.CreatedAt)
+                .Take(take)
+                .ToListAsync();
+
+            auditActivity = auditRows.Select(a => new RecentActivityDto
+            {
+                Type        = "Audit",
+                EntityName  = a.EntityName,
+                Action      = a.Action,
+                Description = BuildAuditDescription(a),
+                ChangedAt   = a.CreatedAt
+            }).ToList();
+        }
+
+        return loanActivity
+            .Concat(auditActivity)
+            .OrderByDescending(a => a.ChangedAt)
+            .Take(take)
+            .ToList();
+    }
+
+    /// <summary>Builds an honest, generic summary from an AuditLog row —
+    /// who + action + which record. Deliberately does NOT try to reproduce
+    /// Vanilla's exact pushActivity() wording (e.g. old-name→new-name) since
+    /// AuditMiddleware's generic write log never captured that field-level
+    /// detail in the first place — this describes the real row as it
+    /// actually is, rather than fabricating specificity it doesn't have.</summary>
+    private static string BuildAuditDescription(AuditLog a)
+    {
+        var who = !string.IsNullOrWhiteSpace(a.UserName) ? a.UserName : "System";
+        var verb = a.Action switch
+        {
+            "Created"       => "created",
+            "Updated"       => "updated",
+            "Deleted"       => "deleted",
+            "StatusChanged" => "changed the status of",
+            _               => a.Action?.ToLowerInvariant() ?? "modified"
+        };
+        var target = a.EntityId != null ? $"{a.EntityName} #{a.EntityId}" : a.EntityName;
+        return $"{who} {verb} {target}";
     }
 
     public async Task<IEnumerable<Loan>> GetLoansByCustomerAsync(int customerId) =>

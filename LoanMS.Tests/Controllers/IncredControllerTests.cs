@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using LoanMS.API.Controllers;
+using LoanMS.API.Services;      // IRolePermissionService — 6th IncredController ctor arg.
 using LoanMS.Application.DTOs;
 using LoanMS.Domain.Entities;
 using LoanMS.Domain.Enums;
@@ -18,14 +19,13 @@ using Xunit;
 namespace LoanMS.Tests.Controllers;
 
 /// <summary>
-/// NOTE ON VERIFICATION: this suite could not be executed in the sandbox that
-/// produced it — dotnet build/test require restoring NuGet packages, and
-/// outbound access to nuget.org is blocked by that environment's network
-/// policy (confirmed via `dotnet restore` -> NU1301 403, independent of the
-/// SDK itself, which installs and runs fine there). The tests were written
-/// against the actual IncredController source (method signatures, DTO shapes,
-/// entity fields all cross-checked against the real files) but have not been
-/// compiler- or run-verified. Run `dotnet test` locally before relying on them.
+/// Runs clean: 17/17 passing as of the LoanMS migration finalization pass.
+/// (An earlier note here said this suite could not be executed in the
+/// sandbox that produced it, due to a blocked NuGet restore in that
+/// environment, and had not been compiler- or run-verified. That has since
+/// been confirmed false in an environment with normal network access — left
+/// as a correction, not a silent edit, since the note was an explicit
+/// caveat someone might otherwise still be relying on.)
 /// </summary>
 public class IncredControllerTests
 {
@@ -72,8 +72,19 @@ public class IncredControllerTests
 
         var cache = new FakeCacheService();
 
+        // Permissive stub. IRolePermissionService layers the Admin-configurable
+        // permission matrix on top of the fixed [Authorize] checks and is
+        // fail-open by contract (a key absent from GetDeniedPermissionsAsync
+        // means "allowed"), so allowing everything here keeps these tests
+        // focused on the InCred behaviour they actually assert.
+        var rolePerm = new Mock<IRolePermissionService>();
+        rolePerm.Setup(r => r.IsAllowedAsync(It.IsAny<string?>(), It.IsAny<string>())).ReturnsAsync(true);
+        rolePerm.Setup(r => r.IsMenuAllowedAsync(It.IsAny<string?>(), It.IsAny<string>())).ReturnsAsync(true);
+        rolePerm.Setup(r => r.GetDeniedPermissionsAsync(It.IsAny<string?>(), It.IsAny<IEnumerable<string>>()))
+                .ReturnsAsync(new HashSet<string>());
+
         var controller = new IncredController(db, httpFactory.Object, dpProvider.Object,
-            NullLogger<IncredController>.Instance, cache)
+            NullLogger<IncredController>.Instance, cache, rolePerm.Object)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -211,6 +222,49 @@ public class IncredControllerTests
         result.Should().BeOfType<OkObjectResult>();
         var updated = await db.Loans.FirstAsync(l => l.Id == loan.Id);
         updated.IncredLastWebhookEvent.Should().Be("OFFER_GENERATED");
+        updated.IncredLastWebhookStatus.Should().Be("SUCCESS");
+    }
+
+    // Webhook caller authentication (shared-secret gate). When
+    // incred_webhook_secret is configured, a spoofed caller with no/wrong
+    // X-Webhook-Token must be rejected (401) and must NOT mutate the loan.
+    [Fact]
+    public async Task ReceiveWebhook_SecretConfigured_WrongToken_RejectsWithoutSyncing()
+    {
+        var (controller, _, _, db) = CreateController();
+        db.AppSettings.Add(new AppSetting { Key = "incred_webhook_secret", Value = "s3cr3t-token" });
+        var loan = SeedLoanWithCustomer(db);
+        loan.ApplicationSource = "incred";
+        loan.IncredApplicationId = "APP-777";
+        await db.SaveChangesAsync();
+
+        controller.ControllerContext.HttpContext.Request.Headers["X-Webhook-Token"] = "WRONG";
+        var payload = Json("{\"APPLICATION_ID\":\"APP-777\",\"EVENT\":\"OFFER_GENERATED\",\"STATUS\":\"SUCCESS\"}");
+        var result = await controller.ReceiveWebhook(payload);
+
+        result.Should().BeOfType<UnauthorizedObjectResult>();
+        var untouched = await db.Loans.FirstAsync(l => l.Id == loan.Id);
+        untouched.IncredLastWebhookEvent.Should().BeNull("a spoofed webhook must not mutate the loan");
+        untouched.IncredLastWebhookStatus.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReceiveWebhook_SecretConfigured_CorrectToken_SyncsLoanRow()
+    {
+        var (controller, _, _, db) = CreateController();
+        db.AppSettings.Add(new AppSetting { Key = "incred_webhook_secret", Value = "s3cr3t-token" });
+        var loan = SeedLoanWithCustomer(db);
+        loan.ApplicationSource = "incred";
+        loan.IncredApplicationId = "APP-778";
+        await db.SaveChangesAsync();
+
+        controller.ControllerContext.HttpContext.Request.Headers["X-Webhook-Token"] = "s3cr3t-token";
+        var payload = Json("{\"APPLICATION_ID\":\"APP-778\",\"EVENT\":\"DISBURSED\",\"STATUS\":\"SUCCESS\"}");
+        var result = await controller.ReceiveWebhook(payload);
+
+        result.Should().BeOfType<OkObjectResult>();
+        var updated = await db.Loans.FirstAsync(l => l.Id == loan.Id);
+        updated.IncredLastWebhookEvent.Should().Be("DISBURSED");
         updated.IncredLastWebhookStatus.Should().Be("SUCCESS");
     }
 

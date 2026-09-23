@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
-import { X, ChevronUp, ChevronDown } from 'lucide-react'
+import { Modal } from '@/components/ui/Modal'
+import { ChevronUp, ChevronDown } from 'lucide-react'
 import { loansApi } from '@/api/loansApi'
+import { EXPORT_SCOPES, PIPELINE_STATUSES, scopeToStatus, type ExportScope } from '@/constants/advFilter'
 import { userSettingsApi } from '@/api/userSettingsApi'
 import type { LoanFilter } from '@/types'
-import { defaultExportColumns, buildLoansCsv, downloadCsv, type ExportColumn } from '@/utils/loanExport'
+import { defaultExportColumns, buildLoansCsv, buildLoansExcelHtml, buildLoansPdfHtml, downloadCsv, type ExportColumn } from '@/utils/loanExport'
+import { downloadBlob, openReportPdfPreview } from '@/utils/reportExport'
 
 const PRESET_KEY = 'export_presets' // matches legacy's STG_EXPORT_PRESETS_KEY exactly
 
@@ -21,18 +24,28 @@ interface Preset { name: string; columns: string[] } // ordered list of checked 
 // "custom date-range" scope isn't reproduced, see code comment. Reordering
 // uses up/down buttons rather than legacy's drag-and-drop (no DnD library in
 // this project) but produces the same reordered-column-list outcome.
-// XLSX format is NOT implemented — no spreadsheet-generation library is
-// installed in this project; only CSV (which needs none) is offered.
+// All three of legacy's formats are offered — CSV, Excel and PDF — matching
+// doExport's csv/xlsx/pdf branches (efin-app.js:36175-36187). Neither Excel nor
+// PDF needs a library: Excel is legacy exportXLSX's Office-namespaced HTML
+// table saved as .xls, and PDF is legacy exportPDF's print-styled window that
+// calls window.print() itself. Both reuse helpers from utils/reportExport.ts
+// (wrapExcelHtml/htmlTable, openReportPdfPreview) rather than duplicating them.
+// (An earlier comment here claimed XLSX was impossible without a library; that
+// was wrong — the Reports export had been using this same technique already.)
 export default function ExportLoansModal({ filter, onClose }: { filter: LoanFilter; onClose: () => void }) {
   const qc = useQueryClient()
   const [columns, setColumns] = useState<ExportColumn[]>(defaultExportColumns())
   const [presetName, setPresetName] = useState('')
   const [error, setError] = useState('')
-  // Matches legacy's afSetExportScope('filtered' | 'custom') — only the
-  // date-range piece of legacy's custom scope is reproduced here (loan
-  // type/bank/status/sales/amount-range custom filters are a separate,
-  // not-yet-requested piece of that same legacy panel).
-  const [scope, setScope] = useState<'filtered' | 'custom'>('filtered')
+  // Legacy's afSetExportScope chip set in full: filtered / all / disbursed /
+  // pending / rejected, plus the custom date range. "pending" is legacy's
+  // Active Pipeline — several statuses at once, which the list endpoint's
+  // single Status param cannot express, so that one scope fetches unfiltered
+  // and narrows the rows before the CSV is built.
+  const [scope, setScope] = useState<ExportScope | 'custom'>('filtered')
+  // Legacy's export-fmt radio group. Legacy defaulted to xlsx; CSV is kept as
+  // the default here because it is the format this modal has been shipping.
+  const [format, setFormat] = useState<'csv' | 'excel' | 'pdf'>('csv')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
@@ -93,20 +106,50 @@ export default function ExportLoansModal({ filter, onClose }: { filter: LoanFilt
       // filter, but with an independent date range replacing whatever
       // date filter the list itself had (matches legacy's afSetExportScope
       // 'custom', date-range portion only).
-      const effectiveFilter: LoanFilter = scope === 'custom'
-        ? { ...filter, dateFrom, dateTo }
-        : filter
+      let effectiveFilter: LoanFilter
+      if (scope === 'custom') {
+        effectiveFilter = { ...filter, dateFrom, dateTo }
+      } else if (scope === 'filtered') {
+        effectiveFilter = filter
+      } else {
+        // all / disbursed / pending / rejected deliberately ignore the list's
+        // own filters — legacy's chips mean "export this set", not "narrow
+        // what is already on screen".
+        effectiveFilter = { status: scopeToStatus(scope) }
+      }
       const res = await loansApi.getAll({ ...effectiveFilter, page: 1, pageSize: 5000 })
       const page = res.data.data
       if (!page) throw new Error('Could not load loans to export')
-      return page.items
+      return scope === 'pending'
+        ? page.items.filter(l => (PIPELINE_STATUSES as readonly string[]).includes(l.status))
+        : page.items
     },
     onSuccess: (items) => {
       if (items.length === 0) { setExportError('No loans match the current filter — nothing to export.'); return }
       const active = columns.filter(c => c.checked)
       if (active.length === 0) { setExportError('Select at least one column.'); return }
-      const csv = buildLoansCsv(items, columns)
-      downloadCsv(csv, `applications-export-${new Date().toISOString().slice(0, 10)}.csv`)
+      const stamp = new Date().toISOString().slice(0, 10)
+      if (format === 'pdf') {
+        // Legacy's exportPDF technique: a print-styled document opened in its
+        // own window that triggers window.print() itself. If the popup is
+        // blocked, fall back to downloading the same HTML — identical to how
+        // ReportsPage.handleExportPdf handles it, so behaviour is consistent
+        // across both PDF exports.
+        const html = buildLoansPdfHtml(items, columns)
+        if (openReportPdfPreview(html) === 'blocked') {
+          downloadBlob(html, `applications-export-${stamp}.html`, 'text/html;charset=utf-8')
+        }
+      } else if (format === 'excel') {
+        // Office-HTML workbook (legacy exportXLSX's technique) — .xls so Excel
+        // opens it natively; the CSV path below is untouched.
+        downloadBlob(
+          buildLoansExcelHtml(items, columns),
+          `applications-export-${stamp}.xls`,
+          'application/vnd.ms-excel;charset=utf-8',
+        )
+      } else {
+        downloadCsv(buildLoansCsv(items, columns), `applications-export-${stamp}.csv`)
+      }
       setExportError('')
       onClose()
     },
@@ -126,14 +169,20 @@ export default function ExportLoansModal({ filter, onClose }: { filter: LoanFilt
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-base font-semibold text-gray-900">Export Applications</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={18} /></button>
-        </div>
-
-        <div className="p-5 space-y-4">
+    <Modal
+      open
+      onClose={onClose}
+      title="Export Applications"
+      size="md"
+      className="sm:max-w-lg"
+      footer={<>
+        <Button loading={runExport.isPending} onClick={handleExportClick}>
+          {format === 'pdf' ? 'Export PDF' : format === 'excel' ? 'Export Excel' : 'Export CSV'}
+        </Button>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+      </>}
+    >
+      <div className="space-y-4">
           {presets.length > 0 && (
             <div>
               <p className="text-xs font-medium text-gray-600 mb-1.5">Presets</p>
@@ -151,7 +200,7 @@ export default function ExportLoansModal({ filter, onClose }: { filter: LoanFilt
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-gray-600">Columns</p>
             <div className="flex gap-2">
-              <button onClick={() => toggleAll(true)} className="text-xs text-blue-600 font-medium">All</button>
+              <button onClick={() => toggleAll(true)} className="text-xs text-efin-blue font-medium">All</button>
               <button onClick={() => toggleAll(false)} className="text-xs text-gray-400 font-medium">None</button>
             </div>
           </div>
@@ -179,14 +228,20 @@ export default function ExportLoansModal({ filter, onClose }: { filter: LoanFilt
 
           <div>
             <p className="text-xs font-medium text-gray-600 mb-1.5">Scope</p>
-            <div className="flex gap-2 mb-2">
-              <label className={`flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold cursor-pointer ${scope === 'filtered' ? 'bg-blue-50 border-blue-300' : 'bg-white'}`}>
-                <input type="radio" name="export-scope" checked={scope === 'filtered'} onChange={() => setScope('filtered')} />
-                Current Filter
-              </label>
-              <label className={`flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold cursor-pointer ${scope === 'custom' ? 'bg-blue-50 border-blue-300' : 'bg-white'}`}>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {EXPORT_SCOPES.map(sc => (
+                <label key={sc.scope}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-semibold cursor-pointer ${
+                    scope === sc.scope ? 'bg-efin-blue/10 border-efin-blue/30' : 'bg-white border-gray-200'}`}>
+                  <input type="radio" name="export-scope" checked={scope === sc.scope}
+                    onChange={() => setScope(sc.scope)} />
+                  {sc.label}
+                </label>
+              ))}
+              <label className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-semibold cursor-pointer ${
+                scope === 'custom' ? 'bg-efin-blue/10 border-efin-blue/30' : 'bg-white border-gray-200'}`}>
                 <input type="radio" name="export-scope" checked={scope === 'custom'} onChange={() => setScope('custom')} />
-                Custom Date Range
+                Custom Range
               </label>
             </div>
             {scope === 'custom' && (
@@ -200,15 +255,31 @@ export default function ExportLoansModal({ filter, onClose }: { filter: LoanFilt
             )}
           </div>
 
-          <p className="text-xs text-gray-400">Format: CSV — {scope === 'custom' ? 'exports applications within the selected date range.' : 'exports every application matching the current search/status filter.'}</p>
-          {exportError && <p className="text-xs text-red-600">{exportError}</p>}
-
-          <div className="flex gap-2 pt-2 border-t border-gray-100">
-            <Button loading={runExport.isPending} onClick={handleExportClick}>Export CSV</Button>
-            <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <div>
+            <p className="text-xs font-medium text-gray-500 mb-1.5">Format</p>
+            <div className="flex gap-2">
+              {([['csv', 'CSV'], ['excel', 'Excel (.xls)'], ['pdf', 'PDF']] as const).map(([value, label]) => (
+                <button key={value} type="button" onClick={() => setFormat(value)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    format === value
+                      ? 'bg-efin-blue text-white border-efin-blue'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+
+          <p className="text-xs text-gray-400">{
+            scope === 'custom'   ? 'exports applications within the selected date range.'
+            : scope === 'filtered' ? 'exports every application matching the current search/status filter.'
+            : scope === 'all'      ? 'exports every application you can see, ignoring the list filters.'
+            : scope === 'pending'  ? 'exports the active pipeline: draft, submitted, under review and approved.'
+            : `exports ${scope} applications only, ignoring the list filters.`
+          }</p>
+          {exportError && <p className="text-xs text-red-600">{exportError}</p>}
       </div>
-    </div>
+    </Modal>
   )
 }

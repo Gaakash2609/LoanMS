@@ -60,6 +60,14 @@ export interface WizardSubmitPayload {
   r2Name?: string
   r2Mobile?: string
   r2Relation?: string
+  // Product-specific fields (Property / Vehicle / Education / co-applicant /
+  // self-employed business detail). The backend already had this pipe —
+  // WizardSubmitDto.ProductData is serialised straight into
+  // Loan.ProductDataJson (migration AddLoanProductDataJson) and read back
+  // by GetDraft — but this payload type never declared it, so every one of
+  // those wizard fields was collected in the UI and then silently dropped
+  // before the request was sent.
+  productData?: Record<string, string>
   // Meta
   source?: string
   lenderName?: string
@@ -126,7 +134,7 @@ export const wizardApi = {
   // Manager users can populate the Sales Person dropdown — GET /api/users is
   // Admin-only and used to 403 for everyone else.
   getUsers: () =>
-    api.get<ApiResponse<Array<{ id: number; fullName: string; role: string }>>>('/api/users/lookup'),
+    api.get<ApiResponse<Array<{ id: number; fullName: string; role: string; locationId: number | null }>>>('/api/users/lookup'),
 
   getDsaPartners: () =>
     api.get<ApiResponse<Array<{ id: number; name: string; code: string; partnerType: string }>>>('/api/dsa'),

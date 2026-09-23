@@ -1,5 +1,6 @@
 using LoanMS.Application.DTOs;
 using LoanMS.Domain.Entities;
+using LoanMS.Domain.Enums;
 using LoanMS.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,13 +14,20 @@ public class PayoutController : BaseController
     private readonly AppDbContext _db;
     public PayoutController(AppDbContext db) => _db = db;
 
-    // Roles whose payout view is automatically scoped to their own claims only.
-    // Phase 3B fix: was ["Sales", "partner", "dsa_user"] — those two never matched
-    // the actual role claim value (User.Role.ToString() == "Dsa" / "Partner"), so
-    // Dsa/Partner users were silently NOT scoped to their own claims unless the
-    // caller happened to pass myOnly=true. Comparer is already OrdinalIgnoreCase.
-    private static readonly HashSet<string> _selfOnlyRoles =
-        new(StringComparer.OrdinalIgnoreCase) { "Sales", "Dsa", "Partner" };
+    // Phase 2 RBAC — G-13 payout over-exposure fix. The ONLY roles allowed to
+    // read every payout/commission claim in the system. Payout is finance data;
+    // per the confirmed business rules Accounts has full Payout access and
+    // Admin runs and configures payouts. Manager is deliberately NOT in this
+    // set: in the Payout section Manager has exactly Sales-level rights
+    // (own claims only, server-computed amount, no status changes, no rules).
+    // Previously GetAll returned the
+    // full claim list to ANY authenticated role that merely wasn't in
+    // _selfOnlyRoles above — so LoginTeam / TeamLeader / LocationHead /
+    // OperationManager / ProductTeam could list everyone's commissions. Now
+    // every role outside this allow-list is scoped to its OWN claims only, so
+    // no user receives all payout records just because they authenticated.
+    private static readonly HashSet<string> _payoutAllAccessRoles =
+        new(StringComparer.OrdinalIgnoreCase) { "Admin", "Accounts" };
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] bool myOnly = false)
@@ -32,19 +40,55 @@ public class PayoutController : BaseController
 
         if (!string.IsNullOrEmpty(status)) q = q.Where(p => p.Status == status);
 
-        // Partner / DSA / Sales always see only their own — backend-enforced
-        if (myOnly || _selfOnlyRoles.Contains(CurrentUserRole))
-            q = q.Where(p => p.ClaimedByUserId == CurrentUserId);
+        // G-13 fix: only finance roles (Admin/Accounts) may see every
+        // claim. Every other role — Manager/Sales/Dsa/Partner AND the internal
+        // processing roles that used to fall through to "see all" — is scoped
+        // to their own claims. `myOnly` still forces self-scope for anyone.
+        if (myOnly || !_payoutAllAccessRoles.Contains(CurrentUserRole))
+        {
+            // Self-scope by default. EXCEPTION — a DSA user acts as the group
+            // owner for the Partners mapped under them, so their "My Claims"
+            // includes those Partners' claims too (legacy getVisiblePayoutClaims,
+            // efin-app.js:4244 — DSA sees own + every mapped Partner's claims).
+            var visibleUserIds = new HashSet<int> { CurrentUserId };
+            if (string.Equals(CurrentUserRole, "Dsa", StringComparison.OrdinalIgnoreCase))
+            {
+                var dsaRecord = await _db.Set<DsaPartner>().FirstOrDefaultAsync(d =>
+                    d.LinkedUserId == CurrentUserId && d.PartnerType == PartnerType.Dsa && !d.IsDeleted);
+                if (dsaRecord != null)
+                {
+                    var mappedPartnerUserIds = await _db.Set<DsaPartner>()
+                        .Where(p => p.MappedDsaId == dsaRecord.Id && p.PartnerType == PartnerType.Partner
+                                    && p.LinkedUserId != null && !p.IsDeleted)
+                        .Select(p => p.LinkedUserId!.Value)
+                        .ToListAsync();
+                    foreach (var uid in mappedPartnerUserIds) visibleUserIds.Add(uid);
+                }
+            }
+            q = q.Where(p => visibleUserIds.Contains(p.ClaimedByUserId));
+        }
 
         var claims = await q.OrderByDescending(p => p.CreatedAt)
             .Select(p => new {
                 p.Id, p.Status, p.ClaimAmount, p.Month, p.Notes, p.ClaimType,
                 p.CreatedAt, p.VerifiedAt, p.PaidAt,
+                p.PaymentMode, p.PaymentReference, p.PaymentDate, p.BankAccountLast4,
+                // Legacy CLAIMS-modal detail fields (now persisted + returned).
+                p.UserType, p.DsaMobile, p.Contests, p.BankName, p.ProductName,
+                p.FirstName, p.LastName, p.LoanNumberRef, p.ApacRef, p.CompanyName,
+                p.DisbursementAmount, p.DisbursementDate, p.City, p.BusinessCategory,
+                p.ConfirmationRequired, p.SplitCase,
+                p.BankerEmail, p.BankerName, p.BankerMobile,
+                p.AsmEmail, p.AsmName, p.AsmMobile,
                 LoanNumber   = p.Loan.LoanNumber,
                 CustomerName = p.Loan.Customer.FullName,
                 ClaimedBy    = p.ClaimedBy.FullName,
-                ProcessedBy  = p.ProcessedBy != null ? p.ProcessedBy.FullName : null
-                // Rate/percentage deliberately not returned
+                ProcessedBy  = p.ProcessedBy != null ? p.ProcessedBy.FullName : null,
+                // Disbursed/approved loan amount (the money actually lent) — lets
+                // the payout page show a real "Total Disbursed" like legacy
+                // renderMyPayout's Σ disbAmount. Same base the payout % is taken
+                // of (CalculatePayoutAmountAsync). Rate/percentage still withheld.
+                DisbursedAmount = p.Loan.ApprovedAmount ?? p.Loan.RequestedAmount
             }).ToListAsync();
 
         return Ok(ApiResponseDto<object>.Ok(claims));
@@ -70,7 +114,7 @@ public class PayoutController : BaseController
             ruleConfigured,
             // Rate/percentage deliberately not returned — same non-disclosure
             // convention already used in GetAll() above.
-            canOverride = CurrentUserRole is "Admin" or "Manager",
+            canOverride = CurrentUserRole is "Admin",
             minPayout = rule?.MinPayout,
             maxPayout = rule?.MaxPayout
         }));
@@ -87,14 +131,24 @@ public class PayoutController : BaseController
         var loan = await _db.Loans.FindAsync(dto.LoanId);
         if (loan == null) return BadRequest(ApiResponseDto<bool>.Fail("Loan not found."));
 
+        // Payout is a post-disbursement activity. Legacy created/allowed claims
+        // ONLY for disbursed loans — autoCreatePayoutClaim early-returns unless
+        // status is 'disbursed', and the manual quick-claim "unclaimed" list is
+        // filtered to disbursed loans — and a claim is a percentage of the
+        // disbursed amount. DisbursedAt is set only on the Disburse transition
+        // and persists through Closed, so it is the robust "has been disbursed"
+        // signal regardless of a later status change.
+        if (loan.DisbursedAt == null)
+            return BadRequest(ApiResponseDto<bool>.Fail("Payout can only be claimed once the loan is disbursed."));
+
         // Server-side amount calculation — ignore user-submitted amount entirely
         var (serverAmount, rule, _) = await CalculatePayoutAmountAsync(loan);
-        if (rule == null && CurrentUserRole is not ("Admin" or "Manager"))
+        if (rule == null && CurrentUserRole is not "Admin")
             return BadRequest(ApiResponseDto<bool>.Fail("No payout rule configured for this loan type."));
-        if (rule == null) serverAmount = dto.ClaimAmount; // Admin/Manager fallback when no rule exists — unchanged from before
+        if (rule == null) serverAmount = dto.ClaimAmount; // Admin-only fallback when no rule exists
 
-        // Admin/Manager may adjust within rule bounds
-        if (CurrentUserRole is "Admin" or "Manager" && dto.ClaimAmount > 0 && rule != null)
+        // Only Admin may adjust within rule bounds (Manager = Sales-level: no override)
+        if (CurrentUserRole is "Admin" && dto.ClaimAmount > 0 && rule != null)
         {
             var minOk = !rule.MinPayout.HasValue || dto.ClaimAmount >= rule.MinPayout.Value;
             var maxOk = !rule.MaxPayout.HasValue || dto.ClaimAmount <= rule.MaxPayout.Value;
@@ -103,7 +157,7 @@ public class PayoutController : BaseController
 
         // ClaimType is the capacity in which the caller is claiming (Sales/Dsa/
         // Partner/Login). It is derived from the caller's own authenticated role
-        // by default; Admin/Manager may pass an explicit type only when
+        // by default; only Admin may pass an explicit type, and only when
         // reconciling on another eligible claimant's behalf via a whitelisted
         // value. It is never trusted blindly from an arbitrary client value.
         var allowedClaimTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -114,7 +168,7 @@ public class PayoutController : BaseController
             "Partner" => "Partner",
             _         => "Sales"
         };
-        if (CurrentUserRole is "Admin" or "Manager" &&
+        if (CurrentUserRole is "Admin" &&
             !string.IsNullOrWhiteSpace(dto.ClaimType) && allowedClaimTypes.Contains(dto.ClaimType))
         {
             claimType = dto.ClaimType;
@@ -135,7 +189,30 @@ public class PayoutController : BaseController
             Notes           = dto.Notes,
             ClaimedByUserId = CurrentUserId,
             ClaimType       = claimType,
-            CreatedAt       = DateTime.UtcNow
+            CreatedAt       = DateTime.UtcNow,
+            // Legacy CLAIMS-modal detail fields — persisted verbatim (trimmed).
+            UserType             = dto.UserType,
+            DsaMobile            = dto.DsaMobile,
+            Contests             = dto.Contests,
+            BankName             = dto.BankName,
+            ProductName          = dto.ProductName,
+            FirstName            = dto.FirstName,
+            LastName             = dto.LastName,
+            LoanNumberRef        = dto.LoanNumberRef,
+            ApacRef              = dto.ApacRef,
+            CompanyName          = dto.CompanyName,
+            DisbursementAmount   = dto.DisbursementAmount,
+            DisbursementDate     = dto.DisbursementDate,
+            City                 = dto.City,
+            BusinessCategory     = dto.BusinessCategory,
+            ConfirmationRequired = dto.ConfirmationRequired,
+            SplitCase            = dto.SplitCase,
+            BankerEmail          = dto.BankerEmail,
+            BankerName           = dto.BankerName,
+            BankerMobile         = dto.BankerMobile,
+            AsmEmail             = dto.AsmEmail,
+            AsmName              = dto.AsmName,
+            AsmMobile            = dto.AsmMobile
         };
         _db.PayoutClaims.Add(claim);
         try
@@ -152,16 +229,18 @@ public class PayoutController : BaseController
     }
 
     /// <summary>
-    /// Verify/Pay/Reject/Hold a payout claim. Accounts is included here (in
-    /// addition to Admin/Manager) — per the business owner, Accounts gets
-    /// every right within the Payout section except Delete (and there is no
-    /// Delete endpoint on this controller at all, so Accounts effectively
-    /// gets full Payout access: view all claims — see the class-level
-    /// _selfOnlyRoles set above, which deliberately does NOT include
-    /// Accounts — submit claims, and change claim status).
+    /// Verify/Pay/Reject/Hold a payout claim. Admin and Accounts only —
+    /// Manager has Sales-level rights in Payout and cannot change status.
+    /// Per the business owner, Accounts gets
+    /// every right within the Payout section except Delete (see the
+    /// Delete() action below, which is [Authorize(Roles = "Admin")] only —
+    /// Accounts is deliberately excluded from it). Short of that one action,
+    /// Accounts gets full Payout access: view all claims — Accounts is
+    /// included in the class-level _payoutAllAccessRoles set above — submit
+    /// claims, and change claim status.
     /// </summary>
     [HttpPatch("{id:int}/status")]
-    [Authorize(Roles = "Admin,Manager,Accounts")]
+    [Authorize(Roles = "Admin,Accounts")]
     public async Task<IActionResult> UpdateStatus(int id, [FromBody] ClaimStatusDto dto)
     {
         var claim = await _db.PayoutClaims.FindAsync(id);
@@ -174,6 +253,9 @@ public class PayoutController : BaseController
             return BadRequest(ApiResponseDto<bool>.Fail(
                 $"Invalid status '{dto.Status}'. Allowed values: {string.Join(", ", allowed)}."));
 
+        // G-22 — structured before/after audit for this financial mutation.
+        var oldStatus = claim.Status;
+
         claim.Status            = dto.Status;
         claim.UpdatedAt         = DateTime.UtcNow;
         claim.ProcessedByUserId = CurrentUserId;
@@ -181,6 +263,18 @@ public class PayoutController : BaseController
 
         if (dto.Status == "Verified") claim.VerifiedAt = DateTime.UtcNow;
         else if (dto.Status == "Paid") claim.PaidAt    = DateTime.UtcNow;
+
+        // Payment details — only assigned when actually supplied, same
+        // null-guarded pattern as Notes above, so a Verified/Rejected
+        // transition can never blank out a previously-recorded payment.
+        if (dto.PaymentMode      != null) claim.PaymentMode      = dto.PaymentMode;
+        if (dto.PaymentReference != null) claim.PaymentReference = dto.PaymentReference;
+        if (dto.PaymentDate.HasValue)     claim.PaymentDate      = dto.PaymentDate.Value;
+        if (dto.BankAccountLast4 != null) claim.BankAccountLast4 = dto.BankAccountLast4;
+
+        AuditHelper.LogChange(_db, HttpContext, "PayoutClaim", id.ToString(), "PayoutStatusChanged",
+            oldValues: oldStatus, newValues: dto.Status, reason: dto.Notes,
+            userId: CurrentUserId, userName: CurrentUserEmail);
 
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<bool>.Ok(true, $"Claim marked as {dto.Status}."));
@@ -248,7 +342,14 @@ public class PayoutController : BaseController
 
         if (rule == null) return (0, null, false);
 
-        var amount = Math.Round(loan.RequestedAmount * rule.Percentage / 100, 2);
+        // Base is the approved/disbursed amount — the money actually lent — not
+        // the (possibly higher) requested amount. This matches the PayoutRule
+        // contract ("% of approved/disbursed amount") and legacy
+        // autoCreatePayoutClaim, which computed the claim on the disbursed
+        // amount (efin-app.js). Falls back to RequestedAmount only before an
+        // approval figure exists (defensive; claims are for disbursed loans).
+        var baseAmount = loan.ApprovedAmount ?? loan.RequestedAmount;
+        var amount = Math.Round(baseAmount * rule.Percentage / 100, 2);
         if (rule.MinPayout.HasValue) amount = Math.Max(amount, rule.MinPayout.Value);
         if (rule.MaxPayout.HasValue) amount = Math.Min(amount, rule.MaxPayout.Value);
         return (amount, rule, true);
@@ -257,16 +358,47 @@ public class PayoutController : BaseController
 
 public class ClaimCreateDto {
     public int     LoanId      { get; set; }
-    public decimal ClaimAmount { get; set; }  // Used only by Admin/Manager within rule bounds
-    public string? Month       { get; set; }
-    public string? Notes       { get; set; }
-    /// <summary>Optional. Only honored for Admin/Manager callers reconciling on
+    public decimal ClaimAmount { get; set; }  // Used only by Admin within rule bounds
+    public string? Month       { get; set; }  // legacy cl-claim-month
+    public string? Notes       { get; set; }  // legacy cl-vendor-remark
+    /// <summary>Optional. Only honored for Admin callers reconciling on
     /// another eligible claimant's behalf; otherwise derived server-side from
     /// the caller's own role. See PayoutController.Submit.</summary>
     public string? ClaimType   { get; set; }
+
+    // ── Legacy CLAIMS-modal detail fields (index.html cl-*), now persisted ──
+    public string?   UserType             { get; set; }
+    public string?   DsaMobile            { get; set; }
+    public string?   Contests             { get; set; }
+    public string?   BankName             { get; set; }
+    public string?   ProductName          { get; set; }
+    public string?   FirstName            { get; set; }
+    public string?   LastName             { get; set; }
+    public string?   LoanNumberRef        { get; set; }
+    public string?   ApacRef              { get; set; }
+    public string?   CompanyName          { get; set; }
+    public decimal?  DisbursementAmount   { get; set; }
+    public DateTime? DisbursementDate     { get; set; }
+    public string?   City                 { get; set; }
+    public string?   BusinessCategory     { get; set; }
+    public bool      ConfirmationRequired { get; set; }
+    public bool      SplitCase            { get; set; }
+    public string?   BankerEmail          { get; set; }
+    public string?   BankerName           { get; set; }
+    public string?   BankerMobile         { get; set; }
+    public string?   AsmEmail             { get; set; }
+    public string?   AsmName              { get; set; }
+    public string?   AsmMobile            { get; set; }
 }
 
 public class ClaimStatusDto {
     public string Status { get; set; } = string.Empty;
     public string? Notes { get; set; }
+
+    // Payment details — only meaningful when Status == "Paid". Optional so
+    // a plain Verified/Rejected/OnHold transition sends nothing extra.
+    public string? PaymentMode { get; set; }
+    public string? PaymentReference { get; set; }
+    public DateTime? PaymentDate { get; set; }
+    public string? BankAccountLast4 { get; set; }
 }

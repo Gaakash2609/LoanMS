@@ -28,5 +28,18 @@ public class BankProductRule : BaseEntity
     public string   CompTypesJson { get; set; } = "[]";
     public string   HomeTypesJson { get; set; } = "[]";
 
+    // ── Bank Rules extras (multi-config only — efin-app.js lcBlRenderBankRules) ──
+    /// <summary>Minimum business vintage in months (SENP/SEP).</summary>
+    public int?     MinVintage { get; set; }
+    /// <summary>Minimum monthly turnover.</summary>
+    public decimal? MinTurnover { get; set; }
+
+    // ── Banking / Credit Score rules (efin-app.js lcBlRenderCreditScores) ───────
+    public int?     MinAcctVintage { get; set; }   // account vintage (months)
+    public decimal? MinAvgBalance { get; set; }     // minimum average balance
+    public int?     MinCreditScore { get; set; }    // distinct from MinCibil
+    public int?     BankStmtMonths { get; set; }    // bank-statement months required
+    public int?     BounceTolerance { get; set; }   // acceptable cheque bounces
+
     public BankMaster Bank { get; set; } = null!;
 }

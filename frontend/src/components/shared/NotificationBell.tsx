@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell } from 'lucide-react'
+import { Bell, Clock, CheckCheck } from 'lucide-react'
 import { notificationsApi, type AppNotification } from '@/api/notificationsApi'
 
 // Matches legacy efin-app.js's timeAgo() in toggleNotifPanel() exactly.
@@ -33,7 +33,21 @@ export default function NotificationBell() {
   })
   const notifications: AppNotification[] = data ?? []
   const hasUnread = notifications.some(n => !n.isRead)
+  const unreadCount = notifications.filter(n => !n.isRead).length
   const visible = notifications.slice(0, 10)
+
+  // Rings the bell once when unread notifications first appear (e.g. the
+  // initial fetch lands with unread items), not on every render.
+  const [ring, setRing] = useState(false)
+  const prevHasUnread = useRef(false)
+  useEffect(() => {
+    const justBecameUnread = hasUnread && !prevHasUnread.current
+    prevHasUnread.current = hasUnread
+    if (!justBecameUnread) return
+    setRing(true)
+    const t = setTimeout(() => setRing(false), 500)
+    return () => clearTimeout(t)
+  }, [hasUnread])
 
   function markReadLocally(ids: number[]) {
     if (!ids.length) return
@@ -64,43 +78,52 @@ export default function NotificationBell() {
         type="button"
         onClick={(e) => { e.stopPropagation(); togglePanel() }}
         title="Notifications"
-        className="relative w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500"
+        aria-label={hasUnread ? 'Notifications (unread)' : 'Notifications'}
+        className="efin-topbar-icon-btn relative"
       >
-        <Bell size={18} />
-        {hasUnread && (
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-efin-red" />
-        )}
+        <Bell size={18} className={ring ? 'notif-bell-ring' : undefined} />
+        {hasUnread && <span className="efin-topbar-notif-dot" />}
       </button>
 
       {open && (
         <div ref={panelRef}
-          className="absolute top-11 right-0 w-80 max-h-[420px] overflow-y-auto bg-white border border-gray-200 rounded-2xl shadow-2xl z-50">
-          <div className="flex items-center justify-between px-4 py-3.5 border-b border-gray-200">
-            <span className="text-sm font-bold text-gray-800">Notifications</span>
+          className="notif-panel-enter absolute top-11 right-0 w-[22rem] max-h-[440px] overflow-y-auto rounded-2xl z-50"
+          style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: '0 24px 64px rgba(12,23,61,.22)' }}>
+          <div className="notif-panel-head sticky top-0 z-10">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold" style={{ fontFamily: 'var(--font-head)', color: 'var(--text)' }}>Notifications</span>
+              {unreadCount > 0 && <span className="notif-count-badge">{unreadCount}</span>}
+            </div>
             <button
               onClick={() => markReadLocally(notifications.filter(n => !n.isRead).map(n => n.id))}
-              className="text-xs font-semibold text-efin-blue"
+              className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--accent)' }}
             >
-              Mark all read
+              <CheckCheck size={13} /> Mark all read
             </button>
           </div>
           {visible.length === 0 ? (
-            <div className="text-center py-8 text-sm text-gray-400">No notifications</div>
+            <div className="text-center py-10">
+              <div className="empty-illustration mx-auto mb-3"><Bell size={26} className="empty-illustration-icon" /></div>
+              <p className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>You're all caught up</p>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text3)' }}>No notifications right now</p>
+            </div>
           ) : (
             visible.map(n => (
               <div
                 key={n.id}
                 onClick={() => markReadLocally([n.id])}
-                className={`flex items-start gap-2.5 px-4 py-3 border-b border-gray-100 cursor-pointer ${n.isRead ? '' : 'bg-blue-50'}`}
+                className={`notif-item ${n.isRead ? '' : 'is-unread'}`}
               >
-                <span className="text-lg shrink-0">{n.icon || '🔔'}</span>
+                <span className="notif-icon-tile">{n.icon || '🔔'}</span>
                 <div className="flex-1 min-w-0">
-                  <p className={`text-xs leading-snug ${n.isRead ? 'text-gray-400' : 'text-gray-800 font-medium'}`}>
+                  <p className="text-xs leading-snug" style={{ color: n.isRead ? 'var(--text3)' : 'var(--text)', fontWeight: n.isRead ? 400 : 600 }}>
                     {n.message || n.type}
                   </p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">{timeAgo(n.createdAt)}</p>
+                  <p className="text-[11px] mt-1 flex items-center gap-1" style={{ color: 'var(--text3)' }}>
+                    <Clock size={10} /> {timeAgo(n.createdAt)}
+                    {!n.isRead && <span className="ml-1 font-bold" style={{ color: 'var(--accent)' }}>· New</span>}
+                  </p>
                 </div>
-                {!n.isRead && <div className="w-1.5 h-1.5 rounded-full bg-efin-blue shrink-0 mt-1" />}
               </div>
             ))
           )}

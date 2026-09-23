@@ -2,6 +2,10 @@ namespace LoanMS.Application.DTOs;
 
 public class UpdateLoanSanctionDetailRequestDto
 {
+    public decimal? SanctionLoanAmt { get; set; }
+    public int? SanctionTenureMonths { get; set; }
+    public decimal? SanctionRoi { get; set; }
+    public decimal? SanctionEmi { get; set; }
     public string? StampDuty { get; set; }
     public decimal? Gst { get; set; }
     public decimal? Insurance { get; set; }

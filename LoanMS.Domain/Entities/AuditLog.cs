@@ -11,6 +11,12 @@ public class AuditLog
     public string? EntityId { get; set; }
     public string? OldValues { get; set; }
     public string? NewValues { get; set; }
+    /// <summary>Phase 2 RBAC — G-23. Structured, first-class reason for a
+    /// sensitive action (Admin stage override, etc.). The global AuditMiddleware
+    /// also opportunistically lifts a top-level "reason"/"comment" from a write
+    /// request body into this column, so reasons are queryable rather than
+    /// buried inside NewValues.</summary>
+    public string? Reason { get; set; }
     public int? UserId { get; set; }
     public string? UserName { get; set; }
     public string? IpAddress { get; set; }

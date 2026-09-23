@@ -26,4 +26,13 @@ public interface IFileStorageService
     Task<(Stream Content, string? ContentType)?> GetAsync(string key, CancellationToken ct = default);
 
     Task<bool> ExistsAsync(string key, CancellationToken ct = default);
+
+    /// <summary>
+    /// Removes the object at <paramref name="key"/>. Idempotent — deleting a
+    /// key that doesn't exist is a no-op, not an error (S3's DeleteObject is
+    /// already idempotent; the local backend guards on File.Exists). Callers
+    /// treat this as best-effort cleanup: a storage failure must not fail a
+    /// database deletion that has already committed.
+    /// </summary>
+    Task DeleteAsync(string key, CancellationToken ct = default);
 }

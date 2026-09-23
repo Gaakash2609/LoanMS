@@ -17,9 +17,6 @@ export const aiApi = {
       `/api/ai/customer/${customerId}/summary`
     ),
 
-  loanInsight: (loanId: number) =>
-    api.get<{ data: AIInsightResponse }>(`/api/ai/loan/${loanId}/insight`),
-
   underwriting: (loanId: number) =>
     api.get<{ data: AIInsightResponse }>(`/api/ai/loan/${loanId}/underwriting`),
 

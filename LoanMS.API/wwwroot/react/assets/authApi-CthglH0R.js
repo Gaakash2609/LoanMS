@@ -1,0 +1,1 @@
+import{a}from"./axios-BFia-YXw.js";const t={login:o=>a.post("/api/auth/login",o),logout:()=>a.post("/api/auth/logout"),refresh:o=>a.post("/api/auth/refresh",{refreshToken:o}),forgotPassword:o=>a.post("/api/auth/forgot-password",o),resetPassword:o=>a.post("/api/auth/reset-password",o)};export{t as a};

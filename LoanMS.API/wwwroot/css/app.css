@@ -8786,8 +8786,8 @@
         .calc-field { margin-bottom: 22px; }
         .calc-field label { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
         .calc-field label span.val-badge { font-family: var(--font-head); font-size: 15px; font-weight: 800; color: var(--accent); text-transform: none; letter-spacing: 0; }
-        .calc-field input[type=number] { width: 100%; background: var(--surface2); border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 14px; font-weight: 600; color: var(--text); font-family: var(--font-head); outline: none; transition: border-color .18s, box-shadow .18s; }
-        .calc-field input[type=number]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+        .calc-field input[data-numeric] { width: 100%; background: var(--surface2); border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 14px; font-weight: 600; color: var(--text); font-family: var(--font-head); outline: none; transition: border-color .18s, box-shadow .18s; }
+        .calc-field input[data-numeric]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
         .calc-field input[type=range] { -webkit-appearance: none; width: 100%; height: 5px; border-radius: 99px; background: var(--surface3); outline: none; margin-top: 10px; cursor: pointer; }
         .calc-field input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); box-shadow: 0 2px 8px rgba(26,79,163,.35); cursor: pointer; transition: transform .15s; }
         .calc-field input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }

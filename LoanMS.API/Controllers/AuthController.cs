@@ -19,8 +19,25 @@ public abstract class BaseController : ControllerBase
     protected int CurrentUserId =>
         int.TryParse(User.FindFirst("userId")?.Value, out var id) ? id : 0;
 
+    // BUGFIX (verified at runtime — GET /api/auth/me returned role:"" for
+    // every user, Admin included): AddJwtBearer defaults to
+    // MapInboundClaims = true, which RENAMES the inbound short "role" claim
+    // (JwtService.cs:31) to ClaimTypes.Role. The principal therefore ends up
+    // holding two ClaimTypes.Role claims and none named "role", so this
+    // lookup found nothing and returned "" for everyone. That empty role then
+    // fell past every named-role branch in LoanRepository.ApplyVisibilityScope
+    // into its "unrecognized role" fallback (query.Where(l => false)), scoping
+    // EVERY loan query to zero rows — the `WHERE 0` seen in the SQL log for
+    // dashboard, loans list and reports alike.
+    //
+    // ClaimTypes.Role is read first (that is where the value actually lives —
+    // both from JwtService.cs:29 and from the renamed short claim), keeping
+    // the raw "role" name as a fallback so this still resolves if
+    // MapInboundClaims is ever turned off. Same shape CurrentUserEmail below
+    // already uses. [Authorize(Roles=...)] is untouched and unaffected — it
+    // reads ClaimTypes.Role through IsInRole and was always working.
     protected string CurrentUserRole =>
-        User.FindFirst("role")?.Value ?? string.Empty;
+        User.FindFirst(ClaimTypes.Role)?.Value ?? User.FindFirst("role")?.Value ?? string.Empty;
 
     protected string CurrentUserEmail =>
         User.FindFirst(ClaimTypes.Email)?.Value ?? string.Empty;

@@ -167,6 +167,85 @@ public class LenderConfigController : BaseController
         return Ok(ApiResponseDto<bool>.Ok(true, "Category deleted."));
     }
 
+    // ── Per-product Income/Turnover Categories ──────────────────────────────────
+    // Non-personal multi-config "Categories" tab (efin-app.js lcBlRenderCategories
+    // / LA_DB.productCategories[productKey]). Keyed by (ProductKey, BankId) — a
+    // turnover tier per bank per product. Distinct from AnalyticCategories above.
+
+    [HttpGet("product-categories/{productKey}")]
+    public async Task<IActionResult> GetProductCategories(string productKey)
+    {
+        var cats = await _db.BankProductCategories
+            .Where(c => c.ProductKey == productKey)
+            .OrderBy(c => c.Name)
+            .Select(c => new { c.Id, c.BankId, c.ProductKey, c.Name, c.MinTurnover, c.Color, c.Notes })
+            .ToListAsync();
+        return Ok(ApiResponseDto<object>.Ok(cats));
+    }
+
+    [HttpPost("product-categories")]
+    [Authorize(Roles = "Admin,ProductTeam")]
+    public async Task<IActionResult> CreateProductCategory([FromBody] BankProductCategoryDto dto)
+    {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(ApiResponseDto<object>.Fail("Category name is required."));
+        if (string.IsNullOrWhiteSpace(dto.ProductKey))
+            return BadRequest(ApiResponseDto<object>.Fail("Product key is required."));
+        if (!await _db.Banks.AnyAsync(b => b.Id == dto.BankId))
+            return BadRequest(ApiResponseDto<object>.Fail("Bank not found."));
+
+        var cat = new BankProductCategory
+        {
+            BankId = dto.BankId,
+            ProductKey = dto.ProductKey.Trim(),
+            Name = dto.Name.Trim(),
+            MinTurnover = dto.MinTurnover,
+            Color = string.IsNullOrWhiteSpace(dto.Color) ? "standard" : dto.Color.Trim(),
+            Notes = dto.Notes?.Trim(),
+            CreatedAt = DateTime.UtcNow
+        };
+        _db.BankProductCategories.Add(cat);
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<object>.Ok(new { cat.Id }, "Category added."));
+    }
+
+    [HttpPut("product-categories/{id:int}")]
+    [Authorize(Roles = "Admin,ProductTeam")]
+    public async Task<IActionResult> UpdateProductCategory(int id, [FromBody] BankProductCategoryDto dto)
+    {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+        var cat = await _db.BankProductCategories.FindAsync(id);
+        if (cat == null) return NotFound(ApiResponseDto<bool>.Fail("Category not found."));
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(ApiResponseDto<object>.Fail("Category name is required."));
+
+        if (dto.BankId > 0) cat.BankId = dto.BankId;
+        cat.Name = dto.Name.Trim();
+        cat.MinTurnover = dto.MinTurnover;
+        if (!string.IsNullOrWhiteSpace(dto.Color)) cat.Color = dto.Color.Trim();
+        cat.Notes = dto.Notes?.Trim();
+        cat.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Category updated."));
+    }
+
+    [HttpDelete("product-categories/{id:int}")]
+    [Authorize(Roles = "Admin,ProductTeam")]
+    public async Task<IActionResult> DeleteProductCategory(int id)
+    {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "policy-product"))
+            return Forbid();
+        var cat = await _db.BankProductCategories.FindAsync(id);
+        if (cat == null) return NotFound(ApiResponseDto<bool>.Fail("Category not found."));
+        cat.IsDeleted = true;
+        cat.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<bool>.Ok(true, "Category deleted."));
+    }
+
     // ── Bank Eligibility Lines ────────────────────────────────────────────────
     // A "line" pairs a Company + Category (+ optional PIN/PF) under a
     // specific Bank — this is what makes that bank "Path A — Company List"
@@ -248,10 +327,22 @@ public class LenderConfigController : BaseController
         var banks = await _db.Banks
             .Where(b => b.IsActive && !b.IsDeleted)
             .Include(b => b.Lines)
+            // PHASE 5 FIX: ProductRules were never loaded, so every per-product
+            // override configured on the Lender Configuration screen (Max Loan,
+            // CIBIL, tenure, FOIR, age, employment/company types) was silently
+            // ignored by this engine — the single consumer of that config.
+            .Include(b => b.ProductRules)
             .ToListAsync();
         var categories = await _db.AnalyticCategories.ToListAsync();
 
         var loanType = string.IsNullOrWhiteSpace(req.LoanType) ? "personal_loan" : req.LoanType;
+        // Canonical product key for the requested loan type — the request may
+        // arrive as a React key ('personal', 'newcar'), a wizard key
+        // ('personal_loan', 'new_car'), a legacy key ('loan_against_property')
+        // or the enum name ('Personal', 'AgainstProperty'); all normalise to
+        // the same canonical form so the per-bank product filter below matches
+        // regardless of caller. (See NormalizeLoanType.)
+        var reqLoanType = NormalizeLoanType(loanType);
         var empType  = string.IsNullOrWhiteSpace(req.EmpType) ? "SALARIED" : req.EmpType.ToUpperInvariant();
         var compType = (req.CompType ?? "").ToLowerInvariant();
         var foir     = req.Salary > 0 && req.Obligations.HasValue
@@ -260,9 +351,62 @@ public class LenderConfigController : BaseController
 
         foreach (var bank in banks)
         {
+            // 1. Product assignment filter (legacy laLoadEligibility:16654) —
+            //    a bank with a non-empty LoanTypesJson only offers those
+            //    products; an empty/absent list means "all products" and is
+            //    NEVER filtered (so existing banks that were never assigned
+            //    keep showing everywhere, exactly like Vanilla's null case).
+            var bankLoanTypes = SafeDeserializeStringList(bank.LoanTypesJson);
+            if (bankLoanTypes.Count > 0 && !string.IsNullOrEmpty(reqLoanType) &&
+                !bankLoanTypes.Any(x => NormalizeLoanType(x) == reqLoanType))
+            {
+                results.Add(new LenderMatchResultDto
+                {
+                    BankId = bank.Id, BankName = bank.BankName, Eligible = false,
+                    Reason = $"Not offered for {loanType}"
+                });
+                continue;
+            }
+
             var reasons = new List<string>();
-            List<string> empTypes  = SafeDeserializeStringList(bank.EmpTypesJson);
-            List<string> compTypes = SafeDeserializeStringList(bank.CompTypesJson);
+
+            // ── Effective rule resolution (PHASE 5 FIX) ──────────────────────
+            // Personal Loan stores its rules on the BankMaster row itself; the
+            // other 8 products store them in BankProductRule keyed by
+            // ProductKey. That split is the data model the Lender Configuration
+            // UI already writes to (BanksController.UpsertProductRule), but this
+            // engine only ever read the base columns — so a Business Loan was
+            // scored against the bank's PERSONAL loan limits.
+            //
+            // Fallback is per-field, not per-row: a product rule that only sets
+            // MaxLoanAmt still inherits CIBIL/tenure/age from the bank, matching
+            // the UI, where a blank per-product field means "no override".
+            var rule = bank.ProductRules
+                .FirstOrDefault(r => NormalizeLoanType(r.ProductKey) == reqLoanType);
+
+            var effMinCibil     = rule?.MinCibil     ?? bank.MinCibil;
+            var effMaxLoanAmt   = rule?.MaxLoanAmt   ?? bank.MaxLoanAmt;
+            var effMinTenure    = rule?.MinTenure    ?? bank.MinTenure;
+            var effMaxTenure    = rule?.MaxTenure    ?? bank.MaxTenure;
+            var effFoirLimit    = rule?.FoirLimit    ?? bank.FoirLimit;
+            // PfRequired is a non-nullable bool on BankProductRule, so a rule row
+            // created to override some OTHER field carries PfRequired=false and
+            // is indistinguishable from a deliberate "false". OR-ing means a
+            // product rule can ADD a PF requirement but an incidental default
+            // can never silently drop the bank's own one. Behaviour is unchanged
+            // for banks with no product rule at all.
+            var effPfRequired   = bank.PfRequired || (rule?.PfRequired ?? false);
+            var effMinAge       = rule?.MinAge       ?? bank.MinAge;
+            var effMaxAge       = rule?.MaxAge       ?? bank.MaxAge;
+
+            // List overrides apply only when the product actually defines a
+            // non-empty list — an empty per-product list means "not configured"
+            // (inherit), never "accept nothing", which would wrongly reject
+            // every applicant the moment any other field was overridden.
+            var ruleEmpTypes  = SafeDeserializeStringList(rule?.EmpTypesJson);
+            var ruleCompTypes = SafeDeserializeStringList(rule?.CompTypesJson);
+            List<string> empTypes  = ruleEmpTypes.Count  > 0 ? ruleEmpTypes  : SafeDeserializeStringList(bank.EmpTypesJson);
+            List<string> compTypes = ruleCompTypes.Count > 0 ? ruleCompTypes : SafeDeserializeStringList(bank.CompTypesJson);
 
             // 2. Two-path company / salary matching (Path A vs Path B — see
             // class doc comment on BankEligibilityLine for the concept).
@@ -318,49 +462,61 @@ public class LenderConfigController : BaseController
             }
 
             // 3. PF requirement (Path A only — matchedLine is null on Path B)
-            if (matchedLine != null && bank.PfRequired)
+            if (matchedLine != null && effPfRequired)
             {
                 var likelyPf = empType == "SALARIED" && new[] { "plcc", "plc", "govt", "psu" }.Contains(compType);
                 if (!likelyPf && matchedLine.Pf) reasons.Add("PF required by this bank");
             }
 
-            // 4. PIN code — derived serviceable-PIN set (see class doc comment above)
-            var bankPins = bank.Lines.Where(l => !string.IsNullOrWhiteSpace(l.PinCode)).Select(l => l.PinCode).Distinct().ToList();
+            // 4. PIN code — PHASE 5 FIX: BankMaster.ServiceablePinsJson now
+            // exists (added after this method was written; the doc comment above
+            // predates it) and is what the Lender Configuration PIN Codes grid
+            // actually writes to. Prefer it; fall back to the PINs derived from
+            // the bank's own eligibility Lines only when no bank-level list has
+            // been configured, so existing Path-A banks keep their behaviour.
+            var configuredPins = SafeDeserializeStringList(bank.ServiceablePinsJson)
+                .Select(p => p.Trim()).Where(p => !string.IsNullOrWhiteSpace(p)).Distinct().ToList();
+            var bankPins = configuredPins.Count > 0
+                ? configuredPins
+                : bank.Lines.Where(l => !string.IsNullOrWhiteSpace(l.PinCode)).Select(l => l.PinCode!).Distinct().ToList();
             if (bankPins.Count > 0 && !string.IsNullOrWhiteSpace(req.PinCode) && !bankPins.Contains(req.PinCode))
                 reasons.Add($"PIN {req.PinCode} not serviceable");
 
             // 5. CIBIL
-            if (bank.MinCibil > 0 && req.Cibil.HasValue && req.Cibil.Value > 0 && req.Cibil.Value < bank.MinCibil)
-                reasons.Add($"CIBIL {req.Cibil.Value} < min {bank.MinCibil}");
+            if (effMinCibil > 0 && req.Cibil.HasValue && req.Cibil.Value > 0 && req.Cibil.Value < effMinCibil)
+                reasons.Add($"CIBIL {req.Cibil.Value} < min {effMinCibil}");
 
             // 6. Employment type
             if (empTypes.Count > 0 && !empTypes.Contains(empType))
                 reasons.Add($"Employment type {empType} not accepted");
 
-            // 7. Company type
-            if (compTypes.Count > 0 && !string.IsNullOrWhiteSpace(compType) && !compTypes.Contains(compType))
+            // 7. Company type — case-insensitive: the request compType is
+            // lower-cased above but bank CompTypesJson stores the original
+            // casing ("Pvt Ltd"), so a plain Contains never matched.
+            if (compTypes.Count > 0 && !string.IsNullOrWhiteSpace(compType) &&
+                !compTypes.Any(c => string.Equals(c, compType, StringComparison.OrdinalIgnoreCase)))
                 reasons.Add($"Company type {compType} not preferred");
 
             // 8. Max loan amount
-            if (bank.MaxLoanAmt > 0 && req.LoanAmount.HasValue && req.LoanAmount.Value > bank.MaxLoanAmt)
-                reasons.Add($"Loan ₹{req.LoanAmount.Value:N0} > max ₹{bank.MaxLoanAmt:N0}");
+            if (effMaxLoanAmt > 0 && req.LoanAmount.HasValue && req.LoanAmount.Value > effMaxLoanAmt)
+                reasons.Add($"Loan ₹{req.LoanAmount.Value:N0} > max ₹{effMaxLoanAmt:N0}");
 
             // 9. Tenure
             if (req.Tenure.HasValue && req.Tenure.Value > 0)
             {
-                if (bank.MinTenure > 0 && req.Tenure.Value < bank.MinTenure) reasons.Add($"Tenure {req.Tenure.Value}mo < min {bank.MinTenure}mo");
-                if (bank.MaxTenure > 0 && req.Tenure.Value > bank.MaxTenure) reasons.Add($"Tenure {req.Tenure.Value}mo > max {bank.MaxTenure}mo");
+                if (effMinTenure > 0 && req.Tenure.Value < effMinTenure) reasons.Add($"Tenure {req.Tenure.Value}mo < min {effMinTenure}mo");
+                if (effMaxTenure > 0 && req.Tenure.Value > effMaxTenure) reasons.Add($"Tenure {req.Tenure.Value}mo > max {effMaxTenure}mo");
             }
 
             // 10. FOIR
-            if (bank.FoirLimit > 0 && foir > 0 && foir > bank.FoirLimit)
-                reasons.Add($"FOIR {foir}% > limit {bank.FoirLimit}%");
+            if (effFoirLimit > 0 && foir > 0 && foir > effFoirLimit)
+                reasons.Add($"FOIR {foir}% > limit {effFoirLimit}%");
 
             // 11. Age
             if (req.Age.HasValue && req.Age.Value > 0)
             {
-                if (bank.MinAge > 0 && req.Age.Value < bank.MinAge) reasons.Add($"Age {req.Age.Value} < min {bank.MinAge}");
-                if (bank.MaxAge > 0 && req.Age.Value > bank.MaxAge) reasons.Add($"Age {req.Age.Value} > max {bank.MaxAge}");
+                if (effMinAge > 0 && req.Age.Value < effMinAge) reasons.Add($"Age {req.Age.Value} < min {effMinAge}");
+                if (effMaxAge > 0 && req.Age.Value > effMaxAge) reasons.Add($"Age {req.Age.Value} > max {effMaxAge}");
             }
 
             if (reasons.Count > 0)
@@ -371,9 +527,9 @@ public class LenderConfigController : BaseController
             {
                 double score = 0;
                 if (matchedCat != null && req.Salary > 0) score += Math.Min((double)matchedCat.Salary / (double)req.Salary * 30, 30);
-                if (bank.MinCibil > 0) score += Math.Max(0, 30 - (bank.MinCibil - 650) / 10.0);
-                if (bank.MaxLoanAmt > 0) score += Math.Min((double)bank.MaxLoanAmt / 1000000 * 5, 20);
-                if (bank.FoirLimit > 0) score += bank.FoirLimit >= foir + 10 ? 10 : 0;
+                if (effMinCibil > 0) score += Math.Max(0, 30 - (effMinCibil - 650) / 10.0);
+                if (effMaxLoanAmt > 0) score += Math.Min((double)effMaxLoanAmt / 1000000 * 5, 20);
+                if (effFoirLimit > 0) score += effFoirLimit >= foir + 10 ? 10 : 0;
                 results.Add(new LenderMatchResultDto { BankId = bank.Id, BankName = bank.BankName, Eligible = true, Score = Math.Round(score, 1) });
             }
         }
@@ -393,6 +549,22 @@ public class LenderConfigController : BaseController
         if (string.IsNullOrWhiteSpace(json)) return new List<string>();
         try { return System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>(); }
         catch { return new List<string>(); }
+    }
+
+    // Canonicalise a loan-type token from any caller so per-bank product
+    // assignment matches regardless of key scheme: React LOAN_PRODUCTS keys
+    // ('personal','newcar','lap'…), wizard keys ('personal_loan','new_car'…),
+    // legacy keys ('loan_against_property','over_draft'…) and the LoanType
+    // enum ('Personal','NewCar','AgainstProperty'). Lower-case, strip
+    // non-alphanumerics, drop a trailing "loan", then alias the LAP variants.
+    // Must mirror the frontend normalizeLoanType (banksApi.ts).
+    private static string NormalizeLoanType(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "";
+        var x = new string(s.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+        if (x.Length > 4 && x.EndsWith("loan")) x = x.Substring(0, x.Length - 4);
+        if (x == "loanagainstproperty" || x == "againstproperty") return "lap";
+        return x;
     }
 }
 
@@ -430,6 +602,16 @@ public class AnalyticCategoryDto
 {
     public string Name { get; set; } = string.Empty;
     public decimal Salary { get; set; }
+}
+
+public class BankProductCategoryDto
+{
+    public int BankId { get; set; }
+    public string ProductKey { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public decimal MinTurnover { get; set; }
+    public string? Color { get; set; }
+    public string? Notes { get; set; }
 }
 
 public class BankEligibilityLineDto

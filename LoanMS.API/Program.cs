@@ -189,12 +189,39 @@ try
     builder.Services.AddScoped<ICustomerService, CustomerService>();
     builder.Services.AddScoped<ILoanService, LoanService>();
     builder.Services.AddScoped<LoanMS.API.Services.IRolePermissionService, LoanMS.API.Services.RolePermissionService>();
+    // Phase 2 RBAC — G-05 Login-User auto-assignment engine.
+    builder.Services.AddScoped<LoanMS.API.Services.ILoginUserAssignmentService, LoanMS.API.Services.LoginUserAssignmentService>();
     builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
     builder.Services.AddScoped<LoanMS.Infrastructure.Services.IEmailConfigStore, LoanMS.Infrastructure.Services.EmailConfigStore>();
     builder.Services.AddScoped<IEmailService, LoanMS.Infrastructure.Services.EmailService>();
     builder.Services.AddScoped<LoanMS.Application.Interfaces.IEmailTemplateProvider, LoanMS.Infrastructure.Services.EmailTemplateProvider>();
     builder.Services.AddScoped<LoanMS.Application.Interfaces.IEmployeeCodeGenerator, LoanMS.Infrastructure.Services.EmployeeCodeGenerator>();
     builder.Services.AddScoped<ICibilAnalysisService, CibilAnalysisService>();
+
+    // ── Income Verification — Phase 3 trusted inputs ────────────────────────────
+    // Server-side Perfios normalization (pure) + trusted salary re-extraction
+    // (S3 + existing AI-vision relay, with an untrusted fallback). These produce
+    // the trusted inputs the Phase 4 verification engine will consume — the engine
+    // never reads client state.
+    builder.Services.AddScoped<LoanMS.Application.IncomeVerification.IPerfiosNormalizationService,
+        LoanMS.Application.IncomeVerification.PerfiosNormalizationService>();
+    builder.Services.AddScoped<LoanMS.Application.IncomeVerification.ITrustedSalaryExtractionService,
+        LoanMS.Infrastructure.Services.TrustedSalaryExtractionService>();
+    // Phase 4 — canonical verification engine (pure; the single source of truth).
+    builder.Services.AddScoped<LoanMS.Application.IncomeVerification.IIncomeVerificationEngine,
+        LoanMS.Application.IncomeVerification.IncomeVerificationEngine>();
+    // Phase 5 — authoritative orchestration service (run/persist/review/override).
+    builder.Services.AddScoped<LoanMS.Application.Interfaces.IIncomeVerificationService,
+        LoanMS.Infrastructure.Services.IncomeVerificationService>();
+
+    // ── Obligations — credit-review authority (FOIR + detection + reconciliation) ─
+    // Deterministic bank-statement detection (pure) + the authoritative orchestration
+    // service that owns CRUD, server-side FOIR (with the resolved lender/product
+    // policy), import, verification and reconciliation. React only renders results.
+    builder.Services.AddScoped<LoanMS.Application.Obligations.IObligationDetectionService,
+        LoanMS.Application.Obligations.ObligationDetectionService>();
+    builder.Services.AddScoped<LoanMS.Application.Interfaces.IObligationService,
+        LoanMS.Infrastructure.Services.ObligationService>();
 
     // ── SLA breach + task follow-up automation (🔴 CRITICAL item #4/#9) ──────
     // Registered as a hosted BackgroundService — see SlaAndTaskAutomationService's
@@ -236,10 +263,26 @@ try
     if (!string.IsNullOrWhiteSpace(s3Bucket))
     {
         var s3Region = builder.Configuration["Storage:S3Region"];
+        // Optional S3-compatible endpoint override (MinIO / LocalStack / moto /
+        // any S3-API store). When set, the AWS SDK talks to this endpoint with
+        // path-style addressing instead of the real AWS S3 service — lets the
+        // ACTUAL S3FileStorageService code path run against a local emulator
+        // without an AWS account. Production (no ServiceUrl) is unchanged:
+        // credentials still resolve from the ECS task's IAM role / default
+        // chain; for a local emulator any dummy AWS_ACCESS_KEY_ID/SECRET works.
+        var s3ServiceUrl = builder.Configuration["Storage:S3ServiceUrl"];
         builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ =>
-            string.IsNullOrWhiteSpace(s3Region)
+        {
+            if (!string.IsNullOrWhiteSpace(s3ServiceUrl))
+            {
+                var cfg = new Amazon.S3.AmazonS3Config { ServiceURL = s3ServiceUrl, ForcePathStyle = true };
+                if (!string.IsNullOrWhiteSpace(s3Region)) cfg.AuthenticationRegion = s3Region;
+                return new Amazon.S3.AmazonS3Client(cfg);
+            }
+            return string.IsNullOrWhiteSpace(s3Region)
                 ? new Amazon.S3.AmazonS3Client()
-                : new Amazon.S3.AmazonS3Client(Amazon.RegionEndpoint.GetBySystemName(s3Region)));
+                : new Amazon.S3.AmazonS3Client(Amazon.RegionEndpoint.GetBySystemName(s3Region));
+        });
         builder.Services.AddScoped<LoanMS.Application.Interfaces.IFileStorageService>(sp =>
             new LoanMS.Infrastructure.Services.S3FileStorageService(sp.GetRequiredService<Amazon.S3.IAmazonS3>(), s3Bucket));
     }
@@ -433,7 +476,7 @@ try
     // ── CORS ──────────────────────────────────────────────────────────────────
     var allowedOrigins = builder.Configuration
         .GetSection("Cors:AllowedOrigins").Get<string[]>()
-        ?? new[] { "http://localhost:7070", "https://localhost:7071" };
+        ?? new[] { "http://localhost:5099", "https://localhost:5100" };
 
     builder.Services.AddCors(options =>
     {
@@ -719,6 +762,30 @@ try
     }
 
     // ── Middleware Pipeline ───────────────────────────────────────────────────
+    // ROOT CAUSE FIX (/app/assets/* 404s even though the files exist on disk):
+    // this app never called app.UseRouting() explicitly. Without it, ASP.NET
+    // Core's minimal hosting model auto-inserts BOTH routing AND endpoint
+    // EXECUTION at the position of the FIRST app.Map...() call — here, that
+    // was app.MapHealthChecks("/health") below. Every plain app.Use...()
+    // middleware registered AFTER that point in source (including the /app
+    // UseStaticFiles(...) further down, which serves the built React
+    // assets) was therefore running AFTER routing had already matched and
+    // fully executed an endpoint for the request — and app.MapFallback(
+    // "/app/{**path}", ...) matches every "/app/**" URL, so it always won
+    // that race and returned its own 404 before the static-file middleware
+    // ever got a chance to serve the real file. Confirmed directly from the
+    // server log: "Executing endpoint 'Fallback /app/{**path}'" appears for
+    // /app/assets/index-nsD2V_5W.js, /router-BIqs5oAk.js, /query-C-zbL-AZ.js
+    // and /index-91yS91os.css — never a static-file hit.
+    //
+    // Fix: call UseRouting() explicitly, here, before anything else in the
+    // pipeline (including Swagger/health checks below). This defers actual
+    // endpoint execution to the end of the pipeline as usual, so every
+    // regular middleware registered in between (static files, security
+    // headers, rate limiting, etc.) runs first, exactly in the order it's
+    // written below — no other reordering needed.
+    app.UseRouting();
+
     if (app.Environment.IsDevelopment())
     {
         app.UseSwagger();
@@ -745,27 +812,13 @@ try
 
     app.UseCors("RestrictedCors");
 
-    // ── Legacy root retirement (Phase 1: redirect only, no deletion) ───────
-    // Root "/" would otherwise be served directly as a static file by
-    // UseDefaultFiles()+UseStaticFiles() below (wwwroot/index.html, the
-    // legacy app) — that happens before endpoint routing/MapFallback ever
-    // runs, so redirecting "/" has to happen here, ahead of static files.
-    // Scoped to the EXACT root path only: "/app", "/api/*", "/swagger",
-    // "/health", and every other static asset path are untouched and fall
-    // straight through to the existing pipeline unchanged.
-    app.Use(async (context, next) =>
-    {
-        if (context.Request.Path == "/" && context.Request.Method == "GET")
-        {
-            context.Response.Redirect("/app", permanent: false);
-            return;
-        }
-        await next();
-    });
-
     // ── Static files MUST come before Auth/Security middleware ─────────────
-    // UseDefaultFiles enables serving index.html at "/"
-    app.UseDefaultFiles();
+    // ROOT CUTOVER: UseDefaultFiles() used to be here, which is what mapped
+    // "/" to wwwroot/index.html — the legacy vanilla shell. It is deliberately
+    // NOT registered any more: "/" now falls through to the MapFallback at the
+    // bottom, which serves the React shell. The legacy file itself is left on
+    // disk and stays reachable at its explicit path "/index.html" (served by
+    // the static middleware below) as a grace-period escape hatch.
 
     // Serve wwwroot static files; block /uploads/* from direct browser access
     app.UseStaticFiles(new StaticFileOptions
@@ -804,60 +857,150 @@ try
         return lastSegment.Contains('.');
     }
 
-    // Serve React app from /app path (the only frontend now — legacy shell
-    // retired in this phase; wwwroot/index.html no longer exists, "/" 302s
-    // to "/app" via the redirect middleware above).
-    if (Directory.Exists(Path.Combine(app.Environment.WebRootPath, "react")))
+    // Serve the React app. (This comment previously claimed the legacy shell
+    // had been retired, that wwwroot/index.html no longer existed and that "/"
+    // 302'd to "/app" — none of which was ever true. As of the root cutover the
+    // accurate statement is: React is served from "/", "/app/**" 301-redirects
+    // to the root equivalent, and the legacy shell is still on disk, reachable
+    // only at its explicit "/index.html" path.)
+    //
+    // ROOT CAUSE FIX (blank /app + 404s on /app/assets/*.js + empty-MIME CSS):
+    // this block used to be gated behind `if (Directory.Exists(wwwroot/react))`,
+    // checked ONCE at startup. Middleware registration only happens while the
+    // pipeline is being built — if `dotnet run` started before `npm run build`
+    // had produced wwwroot/react (or a later frontend rebuild happened without
+    // restarting the API), this entire block silently never got wired up for
+    // the rest of that process's life. Every /app/assets/* request then fell
+    // through, unmatched, to the generic bottom MapFallback further down,
+    // which correctly refuses to serve *.js/*.css as index.html and instead
+    // returns a bare 404 with no Content-Type set — exactly the "404 on the
+    // JS bundles" / "CSS refused, MIME type is empty" errors reported (Chrome
+    // phrases the same contentless 404 differently for a <script type=module>
+    // vs a <link rel=stylesheet>). Meanwhile bare "/app" (no dot in the path)
+    // still resolved to index.html via that same bottom fallback, which is
+    // why the page loaded (blank) instead of 404ing outright.
+    //
+    // Fix: always register this middleware — never make it conditional on
+    // build timing. PhysicalFileProvider throws if its root directory is
+    // missing at construction time, so we just ensure the directory exists
+    // first (harmless no-op if it's already there from a build). Because
+    // PhysicalFileProvider reads from disk on every request, a later
+    // `npm run build` is picked up immediately with no backend restart
+    // needed — only a truly empty/missing wwwroot/react (nothing built yet)
+    // will 404, which is correct behavior.
+    var reactRoot = Path.Combine(app.Environment.WebRootPath, "react");
+    Directory.CreateDirectory(reactRoot);
+
+    // ROOT CUTOVER: the React build is now served from the site ROOT, not from
+    // "/app". RequestPath is empty, so wwwroot/react/assets/* answers
+    // /assets/* — which is exactly what the built index.html references after
+    // vite.config.ts's base was switched to '/'.
+    //
+    // Registered AFTER the wwwroot provider above, which is what keeps the two
+    // trees from fighting: the only filename present in both is index.html, and
+    // wwwroot's copy (legacy) wins for the explicit "/index.html" request — the
+    // escape hatch. Everything else is disjoint: legacy owns /js, /css,
+    // /perfios; React owns /assets. Bare "/" matches neither provider (no
+    // UseDefaultFiles any more) and falls through to MapFallback -> React.
+    app.UseStaticFiles(new StaticFileOptions
     {
-        var reactRoot = Path.Combine(app.Environment.WebRootPath, "react");
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot),
+        RequestPath = ""
+    });
 
-        app.UseStaticFiles(new StaticFileOptions
+    // ROOT CAUSE FIX #2 (still 404ing after the UseRouting() fix above):
+    // confirmed by actually running this exact pipeline shape against a
+    // live Kestrel server and curl-testing it directly. A MapGet/MapFallback
+    // registered under "/app" are ENDPOINTS (resolved via routing), and an
+    // endpoint that matches — MapFallback("/app/{**path}") matches every
+    // "/app/**" URL — always wins the request over the earlier
+    // UseStaticFiles(/app) middleware above, no matter the registration
+    // order or whether UseRouting() is called explicitly. Verified: with
+    // MapFallback in place, a request for a file that genuinely exists on
+    // disk under wwwroot/react/assets still gets a bare 404 from the
+    // fallback, never reaching the static file middleware. Removing the
+    // Map*() endpoints entirely and replacing them with a plain
+    // app.Use(...) middleware — not routing/endpoints at all — removes
+    // that conflict: verified serving the same real file returns
+    // 200 + correct Content-Type, a missing file still correctly 404s, and
+    // a client-side route like "/app/dashboard" still correctly falls back
+    // to index.html.
+    // ROOT CUTOVER: "/app/**" is no longer a mount point, it is a permanent
+    // redirect to the same path at the root. This is what keeps every bookmark,
+    // browser-history entry and previously-sent link working — "/app/loans/42"
+    // becomes "/loans/42", and bare "/app" becomes "/". Query strings are
+    // carried across unchanged.
+    //
+    // 301 (not 302) because this move is permanent and we want browsers and
+    // proxies to stop asking for the old path. Kept as plain middleware rather
+    // than a Map*() endpoint for the same reason the previous implementation
+    // was: an endpoint registered under "/app" wins over the static-file
+    // middleware and would shadow real files.
+    app.Use(async (context, next) =>
+    {
+        if (!context.Request.Path.StartsWithSegments("/app", out var remainder))
         {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot),
-            RequestPath = "/app"
-        });
+            await next();
+            return;
+        }
 
-        // Bare "/app" (no trailing slash) does NOT match the "/app/{**path}" fallback
-        // below, so without this it used to fall through to the root MapFallbackToFile
-        // and render the OLD vanilla UI instead of the React app — this was the
-        // "different look and flow" bug. Handle it explicitly here.
-        app.MapGet("/app", context =>
-        {
-            context.Response.ContentType = "text/html";
-            return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
-        });
-
-        app.MapFallback("/app/{**path}", context =>
-        {
-            if (LooksLikeStaticFile(context.Request.Path))
-            {
-                context.Response.StatusCode = StatusCodes.Status404NotFound;
-                return Task.CompletedTask;
-            }
-            context.Response.ContentType = "text/html";
-            return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
-        });
-    }
+        var target = remainder.HasValue && remainder.Value != "/" ? remainder.Value : "/";
+        context.Response.Redirect(target + context.Request.QueryString, permanent: true);
+    });
 
     app.UseResponseCaching();
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
-    // Final catch-all for any request that matched no static file, no /app
-    // route, and no API controller. Previously served the legacy
-    // wwwroot/index.html (MapFallbackToFile("index.html")); that file is
-    // deleted in this phase, so this now resolves into the React app
-    // instead of 404ing on a stray/legacy bookmark — same fallback target
-    // as "/app/{**path}" above.
+    // Final catch-all for any request that matched no static file and no API
+    // controller. After the root cutover this serves the REACT shell, which is
+    // what makes "/" and every client-side route (and a hard refresh on one)
+    // work. The legacy shell is not deleted — it is simply no longer the
+    // fallback, and is reached only via the explicit "/index.html" path.
     app.MapFallback(context =>
     {
+        // BUGFIX (confirmed at runtime): an unmatched /api/* path fell straight
+        // through to the HTML branch below, so a misspelled or renamed endpoint
+        // answered 200 text/html with the entire 673 KB legacy shell instead of
+        // a 404. Callers using axios then parsed that HTML as the API envelope,
+        // got `undefined` for `data`, and silently rendered an empty screen —
+        // which is exactly how the wrong /api/payout-rules path (the controller
+        // actually serves /api/PayoutRules) stayed hidden: no 404, no console
+        // error, just a permanently empty Payout Rules tab.
+        //
+        // Only genuinely unmatched paths reach here — anything MapControllers
+        // resolved has already been handled, so every existing endpoint is
+        // completely unaffected.
+        //
+        // Note on coverage: MapFallback registers itself as "{*path:nonfile}",
+        // so a path whose last segment contains a dot (e.g. "/api/x/thing.json")
+        // never reaches this delegate at all — it falls off the end of the
+        // pipeline and Kestrel returns a bodyless 404. That is still a 404 and
+        // still not the legacy HTML, which is what matters here; it just does
+        // not carry the JSON envelope below.
+        if (context.Request.Path.StartsWithSegments("/api", out _))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return context.Response.WriteAsJsonAsync(new
+            {
+                success = false,
+                message = $"No API endpoint matches {context.Request.Method} {context.Request.Path}.",
+                data = (object?)null,
+                errors = new[] { "Endpoint not found." },
+            });
+        }
+
         if (LooksLikeStaticFile(context.Request.Path))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return Task.CompletedTask;
         }
+        // ROOT CUTOVER: unmatched client-side routes now fall back to the React
+        // shell, not the legacy one. This is what makes "/loans/42" survive a
+        // hard refresh and what serves bare "/". The legacy shell is still on
+        // disk and still reachable at its explicit "/index.html" path.
         context.Response.ContentType = "text/html";
-        return context.Response.SendFileAsync(Path.Combine(app.Environment.WebRootPath, "react", "index.html"));
+        return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
     });
 
     Log.Information(

@@ -86,12 +86,14 @@ public class ReportsController : BaseController
     }
 
     [HttpGet("pipeline")]
-    public async Task<IActionResult> Pipeline([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    public async Task<IActionResult> Pipeline([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
         // BUGFIX (confirmed real access-control bypass — Reports fix Phase 1):
         // reuses the exact same, single, centralized visibility rule
         // Loans/Dashboard/Search already use.
-        var q = LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
+        var q = LoanRepository.ApplyReportNarrowing(_db,
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Include(l => l.Customer).Include(l => l.CreatedBy).AsQueryable();
         if (from.HasValue) q = q.Where(l => l.CreatedAt >= from.Value);
         if (to.HasValue)   q = q.Where(l => l.CreatedAt <= to.Value);
@@ -107,9 +109,11 @@ public class ReportsController : BaseController
 
     [HttpGet("performance")]
     [Authorize(Roles = "Admin,Manager")]
-    public async Task<IActionResult> Performance([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    public async Task<IActionResult> Performance([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
-        var q = LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
+        var q = LoanRepository.ApplyReportNarrowing(_db,
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Include(l => l.CreatedBy).AsQueryable();
         if (from.HasValue) q = q.Where(l => l.CreatedAt >= from.Value);
         if (to.HasValue)   q = q.Where(l => l.CreatedAt <= to.Value);
@@ -126,10 +130,130 @@ public class ReportsController : BaseController
         return Ok(ApiResponseDto<object>.Ok(data));
     }
 
-    [HttpGet("disbursement")]
-    public async Task<IActionResult> Disbursement([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    /// <summary>
+    /// Active Time aggregated by user or team — parity with Vanilla's
+    /// renderActiveTimeAgg() (efin-app.js:12399). Active hours per loan =
+    /// CreatedAt → the transition into a terminal status (Disbursed/Rejected/
+    /// Closed/OnHold), or → now while still in-flight. Grouped by the sales
+    /// person (CreatedBy) or the sales team, with per-group apps / disbursed /
+    /// avg / total / longest hours, sorted by total desc.
+    /// </summary>
+    [HttpGet("active-time")]
+    [Authorize(Roles = "Admin,Manager")]
+    public async Task<IActionResult> ActiveTime([FromQuery] string? mode, [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
-        var q = LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
+        var q = LoanRepository.ApplyReportNarrowing(_db,
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
+            .Include(l => l.CreatedBy).Include(l => l.StatusHistory).AsQueryable();
+        if (from.HasValue) q = q.Where(l => l.CreatedAt >= from.Value);
+        if (to.HasValue)   q = q.Where(l => l.CreatedAt <= to.Value);
+        var loans = await q.ToListAsync();
+
+        var now = DateTime.UtcNow;
+        static bool IsTerminal(Domain.Enums.LoanStatus s) =>
+            s is Domain.Enums.LoanStatus.Disbursed or Domain.Enums.LoanStatus.Rejected
+              or Domain.Enums.LoanStatus.Closed or Domain.Enums.LoanStatus.OnHold;
+        double ActiveHours(Domain.Entities.Loan l)
+        {
+            var end = now;
+            if (IsTerminal(l.Status))
+            {
+                var term = l.StatusHistory?
+                    .Where(h => IsTerminal(h.ToStatus))
+                    .OrderByDescending(h => h.CreatedAt)
+                    .FirstOrDefault();
+                end = term?.CreatedAt ?? l.DisbursedAt ?? l.ClosedAt ?? l.UpdatedAt ?? now;
+            }
+            return Math.Max(0, (end - l.CreatedAt).TotalHours);
+        }
+
+        var byGroup = string.Equals(mode, "group", StringComparison.OrdinalIgnoreCase);
+        var data = loans
+            .GroupBy(l => byGroup
+                ? (string.IsNullOrWhiteSpace(l.SalesTeamName) ? "— Unassigned —" : l.SalesTeamName!)
+                : (l.CreatedBy?.FullName ?? "— Unassigned —"))
+            .Select(g => new {
+                Name         = g.Key,
+                Count        = g.Count(),
+                Disbursed    = g.Count(l => l.Status == Domain.Enums.LoanStatus.Disbursed),
+                TotalHours   = Math.Round(g.Sum(ActiveHours), 2),
+                AvgHours     = Math.Round(g.Average(ActiveHours), 2),
+                LongestHours = Math.Round(g.Max(ActiveHours), 2),
+            })
+            .OrderByDescending(x => x.TotalHours)
+            .ToList();
+        return Ok(ApiResponseDto<object>.Ok(data));
+    }
+
+    /// <summary>
+    /// Monthly Target achievement — parity with Vanilla's "Monthly Targets &amp;
+    /// Achievements" cards (efin-app.js renderReports, ~13290-13323), which the
+    /// React Reports page has never had a caller for (only /targets, the two
+    /// org-wide TAT/DDR scalars, was ever wired up — this is the separate
+    /// per-month Disb.Amount/Login Count/Disb.Count record ReportTargetsController
+    /// already CRUDs, but nothing computed the *achieved* side against it).
+    ///
+    /// Always the CURRENT calendar month (server UtcNow) — Vanilla computes this
+    /// from `now`, not the Reports page's date-range filter (thisMonthKey,
+    /// efin-app.js:12972), so `from`/`to` are deliberately not accepted here,
+    /// same reasoning as ReportFilters.month being absent client-side. Only the
+    /// scope/userId/teamId sales-scope filter applies, matching Vanilla's
+    /// scopeFilter(ALL_APPS) wrapping thisMonthApps.
+    ///
+    /// "Login Count" = count of loans CREATED this month whose current Status is
+    /// not Draft (Vanilla: status !== 'wip') — i.e. how many progressed past the
+    /// initial Personal-Details/draft stage by now. This is NOT a count of
+    /// literal login audit events and does NOT read LoanStatusHistory: Vanilla's
+    /// own code comment (efin-app.js ~13092-13096, on the sibling `logins` var
+    /// this reuses) says the previous 'EFIN-Login' tracking-entry lookup never
+    /// matched because no such tracking entry is ever created, so Vanilla
+    /// replaced it with this current-status check — the same
+    /// terminal/non-terminal distinction already used by ActiveTime above.
+    /// </summary>
+    [HttpGet("target-achievement")]
+    public async Task<IActionResult> TargetAchievement([FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId)
+    {
+        var now = DateTime.UtcNow;
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var monthEnd   = monthStart.AddMonths(1);
+        var monthKey   = $"{now.Year}-{now.Month:D2}";
+
+        var q = LoanRepository.ApplyReportNarrowing(_db,
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            CurrentUserId, CurrentUserRole, scope, userId, teamId, null)
+            .Where(l => l.CreatedAt >= monthStart && l.CreatedAt < monthEnd);
+
+        var stats = await q.GroupBy(_ => 1).Select(g => new {
+            LoginCount = g.Count(l => l.Status != Domain.Enums.LoanStatus.Draft),
+            DisbCount  = g.Count(l => l.Status == Domain.Enums.LoanStatus.Disbursed),
+            DisbAmt    = g.Where(l => l.Status == Domain.Enums.LoanStatus.Disbursed).Sum(l => l.ApprovedAmount ?? 0)
+        }).FirstOrDefaultAsync();
+
+        // Org-wide target row for this month (UserId/TeamId both null — the
+        // only shape the Target Editor ever writes today). Falls back to the
+        // same defaults as a freshly-added editor row (NEW_TARGET_DEFAULTS /
+        // efin-app.js:12665) when no row exists yet for this month.
+        var target = await _db.ReportTargets.FirstOrDefaultAsync(t =>
+            t.TargetMonth == monthKey && t.UserId == null && t.TeamId == null && !t.IsDeleted);
+
+        return Ok(ApiResponseDto<object>.Ok(new {
+            month       = monthKey,
+            achDisbAmt  = stats?.DisbAmt ?? 0,
+            achLoginCnt = stats?.LoginCount ?? 0,
+            achDisbCnt  = stats?.DisbCount ?? 0,
+            tgtDisbAmt  = target?.DisbAmt ?? 5_000_000m,
+            tgtLoginCnt = target?.LoginCount ?? 20,
+            tgtDisbCnt  = target?.DisbCount ?? 8,
+        }));
+    }
+
+    [HttpGet("disbursement")]
+    public async Task<IActionResult> Disbursement([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
+    {
+        var q = LoanRepository.ApplyReportNarrowing(_db,
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Where(l => l.Status == Domain.Enums.LoanStatus.Disbursed)
             .Include(l => l.Customer).Include(l => l.CreatedBy)
             .AsQueryable();
@@ -145,9 +269,11 @@ public class ReportsController : BaseController
     }
 
     [HttpGet("rejection")]
-    public async Task<IActionResult> RejectionAnalysis([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    public async Task<IActionResult> RejectionAnalysis([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
-        var q = LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
+        var q = LoanRepository.ApplyReportNarrowing(_db,
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Where(l => l.Status == Domain.Enums.LoanStatus.Rejected)
             .Include(l => l.Customer)
             .AsQueryable();
@@ -262,13 +388,19 @@ public class ReportsController : BaseController
     }
 
     [HttpGet("summary")]
-    public async Task<IActionResult> Summary([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    public async Task<IActionResult> Summary([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
         if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "reports"))
             return Forbid();
 
         var now   = DateTime.UtcNow;
-        var month = new DateTime(now.Year, now.Month, 1);
+        // Kind MUST be Utc. new DateTime(y, m, 1) yields Kind=Unspecified, and
+        // Npgsql refuses to write an Unspecified DateTime to a
+        // 'timestamp with time zone' column -- it threw ArgumentException
+        // ("only UTC is supported") on every call to this endpoint. Worse, the
+        // ExceptionMiddleware maps ArgumentException to 400, so a server-side
+        // bug was being reported to callers as a client error.
+        var month = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
 
         // Base query with date range
         // BUGFIX (confirmed real access-control bypass — Reports fix Phase 1,
@@ -277,7 +409,9 @@ public class ReportsController : BaseController
         // from it, plus two entirely separate _db.Loans queries below —
         // monthlyDisbursements and topAgents — that didn't even reuse this
         // `q` at all). All four now go through the same centralized rule.
-        var q = LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole);
+        var q = LoanRepository.ApplyReportNarrowing(_db,
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            CurrentUserId, CurrentUserRole, scope, userId, teamId, status);
         if (from.HasValue) q = q.Where(l => l.CreatedAt >= from.Value);
         if (to.HasValue)   q = q.Where(l => l.CreatedAt <= to.Value);
 
@@ -351,20 +485,47 @@ public class ReportsController : BaseController
                 totalAmount = g.Sum(l => l.RequestedAmount)
             }).ToListAsync();
 
-        var monthlyDisbursements = await LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
+        // BUGFIX (confirmed 500 at runtime — this endpoint threw
+        // "The LINQ expression ... could not be translated. Additional
+        // information: Translation of method 'string.Format' failed"): the
+        // month label was being built with $"{...:D2}" INSIDE the .Select()
+        // EF Core has to translate, and string.Format has no SQL translation
+        // on ANY relational provider — SQLite and Npgsql alike — so this was
+        // failing in production too, not just on the local dev database.
+        //
+        // Fixed with the same shape Monthly() above already uses: the
+        // filtering, grouping and aggregates stay in SQL (unchanged, so no
+        // extra rows are pulled), the result is materialised, and only the
+        // string formatting — plus the ordering that depends on it — happens
+        // in memory. Same rows, same property names, same order: the response
+        // shape is byte-for-byte what it was before.
+        var monthlyRaw = await LoanRepository.ApplyReportNarrowing(_db,
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Where(l => l.Status == Domain.Enums.LoanStatus.Disbursed)
             .Where(l => from == null || l.DisbursedAt >= from.Value)
             .Where(l => to == null || l.DisbursedAt <= to.Value)
             .GroupBy(l => new { l.DisbursedAt!.Value.Year, l.DisbursedAt!.Value.Month })
             .Select(g => new {
-                month = $"{g.Key.Year}-{g.Key.Month:D2}",
+                g.Key.Year,
+                g.Key.Month,
                 count = g.Count(),
                 amount = g.Sum(l => l.ApprovedAmount ?? 0)
             })
-            .OrderBy(x => x.month)
             .ToListAsync();
 
-        var topAgents = await LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
+        var monthlyDisbursements = monthlyRaw
+            .Select(x => new {
+                month = $"{x.Year}-{x.Month:D2}",
+                count = x.count,
+                amount = x.amount
+            })
+            .OrderBy(x => x.month)
+            .ToList();
+
+        var topAgents = await LoanRepository.ApplyReportNarrowing(_db,
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Where(l => from == null || l.CreatedAt >= from.Value)
             .Where(l => to == null || l.CreatedAt <= to.Value)
             .Include(l => l.CreatedBy)

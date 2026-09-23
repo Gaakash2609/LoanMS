@@ -1,3 +1,5 @@
+using LoanMS.Application.DTOs;   // LoanFilterDto — the type every GetPagedAsync/
+                                 // GetForExportAsync call below passes.
 using LoanMS.Domain.Entities;
 using LoanMS.Domain.Enums;
 using LoanMS.Infrastructure.Data;
@@ -27,12 +29,38 @@ namespace LoanMS.Tests.Repositories;
 /// </summary>
 public class LoanRepositoryTests
 {
+    /// <summary>Id every loan in this file is created by — see CreateContext().</summary>
+    private const int CreatorUserId = 999;
+
     private static AppDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
-        return new AppDbContext(options);
+        var ctx = new AppDbContext(options);
+
+        // Every loan built in this file sets CreatedByUserId = 999, but no User
+        // with that id was ever seeded. Loan.CreatedBy is a REQUIRED navigation
+        // (Loan.cs:122 `User CreatedBy = null!`, mapped without IsRequired(false)
+        // in AppDbContext.cs:132), so GetPagedAsync's projection — which reads
+        // l.CreatedBy through an Include — resolves it as an INNER JOIN and drops
+        // every loan whose creator is missing. That silently emptied the result
+        // set: the positive assertions ("this loan IS visible") failed outright,
+        // and the negative ones ("that loan is NOT visible") passed for the wrong
+        // reason, because everything was empty.
+        //
+        // Seeding the creator here fixes both, and does so in one place rather
+        // than in each test. Production always has a real creator row, so this
+        // makes the fixture match reality rather than working around it.
+        ctx.Users.Add(new User
+        {
+            Id = CreatorUserId,
+            FullName = "Seed Creator",
+            Email = "seed.creator@efin.com",
+            Role = UserRole.Admin,
+        });
+        ctx.SaveChanges();
+        return ctx;
     }
 
     private static Loan MakeLoan(int id, int customerId, int locationId, string loanNumberSuffix) => new()
@@ -154,33 +182,54 @@ public class LoanRepositoryTests
     }
 
     [Fact]
-    public async Task LoginTeam_AnotherMembersLoan_Hidden()
+    public async Task LoginTeam_SharedTeamMembersLoan_Visible_ButOutsiderLoan_Hidden()
     {
-        // Even within the SAME Login Team, a member sees only their own
-        // personally-assigned queue — not a teammate's.
+        // This test previously asserted that a Login Team member sees ONLY their
+        // own personally-assigned queue and never a teammate's. That is the
+        // narrower rule which LoanRepository.ApplyVisibilityScope explicitly
+        // supersedes ("Admin-assigned scope expansion", LoanRepository.cs:
+        // adminAssignedLoginTeamUserIds): shared Login-team membership
+        // (TeamMember) now widens scope via OR, the same mechanism Manager and
+        // OperationManager already use. The old expectation could never have
+        // been observed, because this suite did not compile until now — see the
+        // seeding note in CreateContext().
+        //
+        // Rather than drop the case, it is retargeted to pin BOTH halves of the
+        // current rule, so the boundary stays covered: a shared-team member's
+        // loan IS visible, an unrelated Login user's loan is NOT.
         var db = CreateContext();
         var customer = new Customer { Id = 1, FullName = "C1", Email = "c1@t.com", Phone = "9000000001" };
         var loginTeamUser = new User { Id = 1, FullName = "LT Member", Email = "lt@efin.com", Role = UserRole.LoginTeam };
         var teammate      = new User { Id = 2, FullName = "Teammate", Email = "tm@efin.com", Role = UserRole.LoginTeam };
+        var outsider      = new User { Id = 3, FullName = "Outsider", Email = "out@efin.com", Role = UserRole.LoginTeam };
         var location = new Location { Id = 1, Name = "Mumbai", City = "Mumbai", State = "MH" };
         var loginTeam = new Team { Id = 1, Name = "Login A", Type = "Login", LocationId = location.Id };
-        db.AddRange(customer, loginTeamUser, teammate, location, loginTeam);
+        var otherTeam = new Team { Id = 2, Name = "Login B", Type = "Login", LocationId = location.Id };
+        db.AddRange(customer, loginTeamUser, teammate, outsider, location, loginTeam, otherTeam);
         await db.SaveChangesAsync();
         db.Set<TeamMember>().AddRange(
             new TeamMember { TeamId = loginTeam.Id, UserId = loginTeamUser.Id },
-            new TeamMember { TeamId = loginTeam.Id, UserId = teammate.Id });
+            new TeamMember { TeamId = loginTeam.Id, UserId = teammate.Id },
+            new TeamMember { TeamId = otherTeam.Id, UserId = outsider.Id });
         db.Loans.Add(new Loan
         {
             Id = 2, LoanNumber = "EFIN2026TEST004", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
             RequestedAmount = 100000, InterestRate = 10, TenureMonths = 12,
-            CustomerId = customer.Id, CreatedByUserId = 999, LoginUserId = teammate.Id
+            CustomerId = customer.Id, CreatedByUserId = CreatorUserId, LoginUserId = teammate.Id
+        });
+        db.Loans.Add(new Loan
+        {
+            Id = 4, LoanNumber = "EFIN2026TEST004B", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
+            RequestedAmount = 100000, InterestRate = 10, TenureMonths = 12,
+            CustomerId = customer.Id, CreatedByUserId = CreatorUserId, LoginUserId = outsider.Id
         });
         await db.SaveChangesAsync();
 
         var repo = new LoanRepository(db);
         var result = await repo.GetPagedAsync(new LoanFilterDto(), currentUserId: loginTeamUser.Id, currentUserRole: "LoginTeam");
 
-        result.Items.Should().NotContain(l => l.Id == 2);
+        result.Items.Should().Contain(l => l.Id == 2);      // same Login team
+        result.Items.Should().NotContain(l => l.Id == 4);    // different Login team
     }
 
     [Fact]
@@ -218,11 +267,14 @@ public class LoanRepositoryTests
         db.AddRange(customer, opsManagerUser, loginUser, location, loginTeam);
         await db.SaveChangesAsync();
         db.Set<TeamMember>().Add(new TeamMember { TeamId = loginTeam.Id, UserId = loginUser.Id });
+        // G-04 (confirmed): OM scope is Location AND mapped-Login-User. Map the OM
+        // to the loan's Location and give the loan that Location so BOTH legs hold.
+        db.Set<UserLocation>().Add(new UserLocation { UserId = opsManagerUser.Id, LocationId = location.Id });
         db.Loans.Add(new Loan
         {
             Id = 1, LoanNumber = "EFIN2026TEST006", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
             RequestedAmount = 100000, InterestRate = 10, TenureMonths = 12,
-            CustomerId = customer.Id, CreatedByUserId = 999, LoginUserId = loginUser.Id
+            CustomerId = customer.Id, CreatedByUserId = 999, LoginUserId = loginUser.Id, LocationId = location.Id
         });
         await db.SaveChangesAsync();
 
@@ -295,6 +347,12 @@ public class LoanRepositoryTests
         var location = new Location { Id = 1, Name = "Mumbai", City = "Mumbai", State = "MH" };
         var locationHeadUser = new User { Id = 1, FullName = "LH", Email = "lh@efin.com", Role = UserRole.LocationHead, LocationId = location.Id };
         db.AddRange(customer, location, locationHeadUser);
+        // LocationHead scope comes from the UserLocations many-to-many table
+        // (LoanRepository.ApplyVisibilityScope -> myLocationIds), not from the
+        // legacy User.LocationId scalar. That table arrived with migration
+        // 20260813010000_AddUserLocations, after this suite was written, so the
+        // mapping row below is what the rule actually reads.
+        db.Set<UserLocation>().Add(new UserLocation { UserId = locationHeadUser.Id, LocationId = location.Id });
         db.Loans.Add(MakeLoan(1, customer.Id, location.Id, "009"));
         await db.SaveChangesAsync();
 
@@ -313,6 +371,8 @@ public class LoanRepositoryTests
         var otherLocation = new Location { Id = 2, Name = "Delhi",  City = "Delhi",  State = "DL" };
         var locationHeadUser = new User { Id = 1, FullName = "LH", Email = "lh@efin.com", Role = UserRole.LocationHead, LocationId = myLocation.Id };
         db.AddRange(customer, myLocation, otherLocation, locationHeadUser);
+        // Mapped to myLocation only — the loan sits in otherLocation.
+        db.Set<UserLocation>().Add(new UserLocation { UserId = locationHeadUser.Id, LocationId = myLocation.Id });
         db.Loans.Add(MakeLoan(2, customer.Id, otherLocation.Id, "010"));
         await db.SaveChangesAsync();
 
@@ -518,13 +578,13 @@ public class LoanRepositoryTests
     }
 
     [Fact]
-    public async Task Manager_TeamMembershipVisible_NonMemberHidden_Corrected()
+    public async Task Manager_LocationAndTeam_Intersection_Enforced()
     {
-        // Corrected per the final spec (Odoo-verified): Manager visibility is
-        // team-MEMBERSHIP based, not Location-based. Two loans at the SAME
-        // Location — one created by a team member (visible), one by a
-        // non-member (hidden) — proves it's membership, not location, doing
-        // the filtering.
+        // G-04→G-03 (confirmed final spec): Manager visibility is the
+        // INTERSECTION of mapped Location AND mapped Team. The Manager is mapped
+        // to Location 1 and leads Sales Team A. Loan 1 (team member's, at
+        // Location 1) is visible; Loan 2 (non-member's, same Location) is hidden
+        // by the Team leg.
         var db = CreateContext();
         var customer     = new Customer { Id = 1, FullName = "C1", Email = "c1@t.com", Phone = "9000000001" };
         var managerUser  = new User { Id = 1, FullName = "Mgr", Email = "mgr@efin.com", Role = UserRole.Manager };
@@ -535,6 +595,7 @@ public class LoanRepositoryTests
         db.AddRange(customer, managerUser, memberUser, outsiderUser, location, team);
         await db.SaveChangesAsync();
         db.Set<TeamMember>().Add(new TeamMember { TeamId = team.Id, UserId = memberUser.Id });
+        db.Set<UserLocation>().Add(new UserLocation { UserId = managerUser.Id, LocationId = location.Id });
         db.Loans.Add(new Loan
         {
             Id = 1, LoanNumber = "EFIN2026TEST015", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
@@ -554,5 +615,68 @@ public class LoanRepositoryTests
 
         result.Items.Should().Contain(l => l.Id == 1);
         result.Items.Should().NotContain(l => l.Id == 2);
+    }
+
+    [Fact]
+    public async Task Manager_TeamMemberLoan_ButLocationNotMapped_Hidden()
+    {
+        // Negative leg of G-03: even a team member's loan is hidden if its
+        // Location is NOT one of the Manager's mapped Locations. Proves the AND
+        // (intersection) — a mapped Team alone is not enough.
+        var db = CreateContext();
+        var customer    = new Customer { Id = 1, FullName = "C1", Email = "c1@t.com", Phone = "9000000001" };
+        var managerUser = new User { Id = 1, FullName = "Mgr", Email = "mgr@efin.com", Role = UserRole.Manager };
+        var memberUser  = new User { Id = 2, FullName = "Member", Email = "member@efin.com", Role = UserRole.Sales };
+        var mappedLoc   = new Location { Id = 1, Name = "Mumbai", City = "Mumbai", State = "MH" };
+        var otherLoc    = new Location { Id = 2, Name = "Delhi",  City = "Delhi",  State = "DL" };
+        var team = new Team { Id = 1, Name = "Sales A", Type = "Sales", LocationId = mappedLoc.Id, TeamLeadUserId = managerUser.Id };
+        db.AddRange(customer, managerUser, memberUser, mappedLoc, otherLoc, team);
+        await db.SaveChangesAsync();
+        db.Set<TeamMember>().Add(new TeamMember { TeamId = team.Id, UserId = memberUser.Id });
+        db.Set<UserLocation>().Add(new UserLocation { UserId = managerUser.Id, LocationId = mappedLoc.Id });
+        // Loan is by a team member but at the UNMAPPED location → hidden.
+        db.Loans.Add(new Loan
+        {
+            Id = 1, LoanNumber = "EFIN2026TEST017", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
+            RequestedAmount = 100000, InterestRate = 10, TenureMonths = 12,
+            CustomerId = customer.Id, CreatedByUserId = memberUser.Id, LocationId = otherLoc.Id
+        });
+        await db.SaveChangesAsync();
+
+        var repo = new LoanRepository(db);
+        var result = await repo.GetPagedAsync(new LoanFilterDto(), currentUserId: managerUser.Id, currentUserRole: "Manager");
+
+        result.Items.Should().NotContain(l => l.Id == 1);
+    }
+
+    [Fact]
+    public async Task OperationManager_RightLoginUser_ButLocationNotMapped_Hidden()
+    {
+        // Negative leg of G-04: a loan assigned to one of the OM's mapped Login
+        // Users is still hidden when its Location is not one of the OM's mapped
+        // Locations. Proves the AND (intersection).
+        var db = CreateContext();
+        var customer    = new Customer { Id = 1, FullName = "C1", Email = "c1@t.com", Phone = "9000000001" };
+        var omUser      = new User { Id = 1, FullName = "Ops", Email = "ops@efin.com", Role = UserRole.OperationManager };
+        var loginUser   = new User { Id = 2, FullName = "LU", Email = "lu@efin.com", Role = UserRole.LoginTeam };
+        var mappedLoc   = new Location { Id = 1, Name = "Mumbai", City = "Mumbai", State = "MH" };
+        var otherLoc    = new Location { Id = 2, Name = "Delhi",  City = "Delhi",  State = "DL" };
+        var loginTeam = new Team { Id = 1, Name = "Login A", Type = "Login", LocationId = mappedLoc.Id, TeamLeadUserId = omUser.Id };
+        db.AddRange(customer, omUser, loginUser, mappedLoc, otherLoc, loginTeam);
+        await db.SaveChangesAsync();
+        db.Set<TeamMember>().Add(new TeamMember { TeamId = loginTeam.Id, UserId = loginUser.Id });
+        db.Set<UserLocation>().Add(new UserLocation { UserId = omUser.Id, LocationId = mappedLoc.Id });
+        db.Loans.Add(new Loan
+        {
+            Id = 1, LoanNumber = "EFIN2026TEST018", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
+            RequestedAmount = 100000, InterestRate = 10, TenureMonths = 12,
+            CustomerId = customer.Id, CreatedByUserId = 999, LoginUserId = loginUser.Id, LocationId = otherLoc.Id
+        });
+        await db.SaveChangesAsync();
+
+        var repo = new LoanRepository(db);
+        var result = await repo.GetPagedAsync(new LoanFilterDto(), currentUserId: omUser.Id, currentUserRole: "OperationManager");
+
+        result.Items.Should().NotContain(l => l.Id == 1);
     }
 }

@@ -343,6 +343,12 @@ export function usePerfiosUpload() {
     } finally {
       setProgress(null)
     }
+    // processOneFile is redefined every render but only ever closes over
+    // refs (read fresh via .current at call time) and stable module-level
+    // imports -- never component state or props -- so capturing it once
+    // here is safe; adding it as a dep would just make addFiles's own
+    // memoization pointless, recreating it on every render for no benefit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return {

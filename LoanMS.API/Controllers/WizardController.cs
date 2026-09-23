@@ -20,13 +20,15 @@ public class WizardController : BaseController
     private readonly ILogger<WizardController> _logger;
     private readonly ICacheService _cache;
     private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
+    private readonly LoanMS.API.Services.ILoginUserAssignmentService _loginAssign;
 
-    public WizardController(AppDbContext db, ILogger<WizardController> logger, ICacheService cache, LoanMS.API.Services.IRolePermissionService rolePerm)
+    public WizardController(AppDbContext db, ILogger<WizardController> logger, ICacheService cache, LoanMS.API.Services.IRolePermissionService rolePerm, LoanMS.API.Services.ILoginUserAssignmentService loginAssign)
     {
         _db     = db;
         _logger = logger;
         _cache  = cache;
         _rolePerm = rolePerm;
+        _loginAssign = loginAssign;
     }
 
     // NOTE: the wizard frontend sends short keys (new_car, used_car, education, lap)
@@ -46,7 +48,12 @@ public class WizardController : BaseController
         ["education"]             = LoanType.Education,
         ["loan_against_property"] = LoanType.LAP,
         ["lap"]                   = LoanType.LAP,
-        ["insurance"]             = LoanType.Personal,
+        ["over_draft"]            = LoanType.Overdraft,
+        ["overdraft"]             = LoanType.Overdraft,
+        // Insurance keeps its own LoanType now (was folded into Personal) so the
+        // loan-detail/Timeline can show the insurance-labelled actions. The
+        // policy fields still persist via loan.ProductDataJson (ApplyMapping).
+        ["insurance"]             = LoanType.Insurance,
     };
 
     private static decimal CalcEmi(decimal principal, decimal ratePercent, int months)
@@ -186,9 +193,15 @@ public class WizardController : BaseController
         if (existingLoan != null)
             customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == existingLoan.CustomerId);
 
+        // PanNumber has a unique index that is NOT filtered by IsDeleted, so a
+        // soft-deleted customer still physically occupies that PAN. Look it up
+        // with IgnoreQueryFilters (matching the seeder-user reactivation
+        // pattern in Program.cs) — otherwise a filtered lookup misses it and
+        // the subsequent INSERT collides on the unique index → 500. Reused (and
+        // reactivated, below) instead of colliding.
         if (customer == null && !string.IsNullOrWhiteSpace(dto.Pan))
-            customer = await _db.Customers.FirstOrDefaultAsync(c =>
-                c.PanNumber == dto.Pan.ToUpper().Trim() && !c.IsDeleted);
+            customer = await _db.Customers.IgnoreQueryFilters().FirstOrDefaultAsync(c =>
+                c.PanNumber == dto.Pan.ToUpper().Trim());
 
         if (customer == null && !string.IsNullOrWhiteSpace(dto.Mobile))
             customer = await _db.Customers.FirstOrDefaultAsync(c =>
@@ -200,9 +213,12 @@ public class WizardController : BaseController
         // EXISTING customer's email (PAN not yet entered, mobile blank or a
         // typo) would try to INSERT a duplicate, hit the unique constraint,
         // and surface as the same generic 500 "Could not save draft."
+        // Email also has an unfiltered unique index — same IgnoreQueryFilters
+        // reasoning as PanNumber above, so a soft-deleted customer's email
+        // can't trigger a duplicate-INSERT 500.
         if (customer == null && !string.IsNullOrWhiteSpace(dto.Email))
-            customer = await _db.Customers.FirstOrDefaultAsync(c =>
-                c.Email == dto.Email.ToLower().Trim() && !c.IsDeleted);
+            customer = await _db.Customers.IgnoreQueryFilters().FirstOrDefaultAsync(c =>
+                c.Email == dto.Email.ToLower().Trim());
 
         if (customer == null)
         {
@@ -240,12 +256,10 @@ public class WizardController : BaseController
                 PinCode        = dto.Zip,
                 MonthlyIncome  = dto.Salary > 0 ? dto.Salary : null,
                 MonthlyObligations = dto.Obligations > 0 ? dto.Obligations : null,
-                EmploymentType = dto.EmpType == "SALARIED" ? "Salaried"
-                               : dto.EmpType == "SELFEMP" ? "Self-Employed"
-                               : dto.EmpType == "PROFESSIONAL" ? "Professional" : dto.EmpType,
+                EmploymentType = MapEmpType(dto.EmpType),
                 CompanyName    = dto.CompName,
                 CibilScore     = dto.Cibil > 0 ? dto.Cibil : null,
-                Gender         = dto.Gender?.Trim(),
+                Gender         = NormalizeGender(dto.Gender),
                 FatherName     = dto.FatherName?.Trim(),
                 ResidenceType  = dto.HomeType,
                 CreatedAt      = DateTime.UtcNow
@@ -254,20 +268,134 @@ public class WizardController : BaseController
         }
         else
         {
+            // If the matched customer was soft-deleted (found only via the
+            // IgnoreQueryFilters lookups above), reactivate it — a new
+            // application for that PAN/email means the customer is back.
+            if (customer.IsDeleted) customer.IsDeleted = false;
             if (!string.IsNullOrWhiteSpace(dto.FullName)) customer.FullName = dto.FullName.Trim();
+            // Refresh Phone too (guarded). The customer is created on the FIRST
+            // autosave, which can fire while the mobile is still mid-entry (a pause
+            // longer than the ~800ms debounce), so the create branch may have stored
+            // a partial number. Mobile is also what the customer lookup matches on,
+            // so leaving a stale partial here breaks dedup on later saves — a second
+            // application for the same person would miss this customer and insert a
+            // duplicate. Phone has no unique index, so this refresh can't 500 on a
+            // duplicate-key violation (unlike PAN/Email below).
+            if (!string.IsNullOrWhiteSpace(dto.Mobile)) customer.Phone = dto.Mobile.Trim();
             if (!string.IsNullOrWhiteSpace(dto.City))   customer.City   = dto.City;
             if (!string.IsNullOrWhiteSpace(dto.State))  customer.State  = dto.State;
             if (dto.Salary > 0)  customer.MonthlyIncome = dto.Salary;
             if (dto.Obligations > 0) customer.MonthlyObligations = dto.Obligations;
             if (dto.Cibil > 0)   customer.CibilScore    = dto.Cibil;
             if (!string.IsNullOrWhiteSpace(dto.CompName)) customer.CompanyName = dto.CompName;
-            if (!string.IsNullOrWhiteSpace(dto.Gender))     customer.Gender        = dto.Gender.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Gender))     customer.Gender        = NormalizeGender(dto.Gender);
             if (!string.IsNullOrWhiteSpace(dto.FatherName)) customer.FatherName    = dto.FatherName.Trim();
             if (!string.IsNullOrWhiteSpace(dto.HomeType))   customer.ResidenceType = dto.HomeType;
+            // BUGFIX (draft-resume persistence): the update branch previously
+            // dropped these KYC / employment fields. The Customer is created on
+            // the FIRST autosave (Step 1, before they're entered), so every later
+            // draft-save hit this branch and never persisted them — a resumed
+            // draft came back with a blank Aadhaar, Date of Birth and Employment
+            // Type, and the real email replaced by the "<mobile>@efin.auto"
+            // placeholder. The create branch already stores them; mirror that here
+            // (guarded, so a blank never wipes a stored value). Shared by Submit +
+            // SaveDraft, so a submitted-via-draft loan is fixed too.
+            if (!string.IsNullOrWhiteSpace(dto.Aadhar)) customer.AadhaarNumber = dto.Aadhar.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Dob) && DateTime.TryParse(dto.Dob, out var udob))
+                customer.DateOfBirth = DateTime.SpecifyKind(udob, DateTimeKind.Utc);
+            if (!string.IsNullOrWhiteSpace(dto.EmpType)) customer.EmploymentType = MapEmpType(dto.EmpType);
+            // BUGFIX (draft-resume persistence — same class as Aadhaar/DOB/EmpType
+            // above, missed for PAN). The Customer is created on the FIRST autosave,
+            // which normally fires once Mobile/Name are present but before the PAN
+            // is fully entered — so the create branch stored no PAN, and this update
+            // branch never wrote PanNumber either. Result: a PAN typed after that
+            // first save was silently dropped — a resumed draft came back with a
+            // blank PAN, and the completed application's Customer had a null (or
+            // stale/partial) PAN even though the payload carried the correct value.
+            // PanNumber has an UNFILTERED unique index (like Email), so guard it the
+            // same way: only write when it actually changed and no other (incl.
+            // soft-deleted) customer already holds it, rather than 500 the save on a
+            // duplicate-key violation. A true PAN duplicate is still surfaced by the
+            // Validate/Submit duplicate-application check.
+            if (!string.IsNullOrWhiteSpace(dto.Pan))
+            {
+                var realPan = dto.Pan.ToUpper().Trim();
+                if (!string.Equals(customer.PanNumber, realPan, StringComparison.OrdinalIgnoreCase)
+                    && !await _db.Customers.IgnoreQueryFilters().AnyAsync(c => c.Id != customer.Id && c.PanNumber == realPan))
+                    customer.PanNumber = realPan;
+            }
+            // Customer.Email has an UNFILTERED unique index, so only take the real
+            // address when it actually changed and no other (incl. soft-deleted)
+            // customer holds it — otherwise keep the placeholder rather than 500
+            // the save on a duplicate-key violation.
+            if (!string.IsNullOrWhiteSpace(dto.Email))
+            {
+                var realEmail = dto.Email.ToLower().Trim();
+                if (!string.Equals(customer.Email, realEmail, StringComparison.OrdinalIgnoreCase)
+                    && !await _db.Customers.IgnoreQueryFilters().AnyAsync(c => c.Id != customer.Id && c.Email == realEmail))
+                    customer.Email = realEmail;
+            }
             customer.UpdatedAt = DateTime.UtcNow;
         }
 
         return customer;
+    }
+
+    // Defence-in-depth boundary check, not the primary fix (that is the
+    // gender <select>'s options in NewApplicationPage.tsx, which now sends
+    // 'M'/'F'/'O' -- exactly what legacy's own <option value="M">/"F"/"O">
+    // sends, per app.css/efin-app.js:26108-26110). Customers.Gender is
+    // varchar(1) (20260726010000_AddCustomerKycFields.cs) by design; this
+    // exists so a cached pre-fix frontend bundle, or any future direct API
+    // caller, can never again reproduce the 500 that hit production 225
+    // times on 2026-08-24 ("value too long for type character varying(1)")
+    // by sending the full word instead of the code.
+    private static string? NormalizeGender(string? raw)
+    {
+        var g = raw?.Trim();
+        if (string.IsNullOrEmpty(g)) return g;
+        return g[0] is 'M' or 'm' ? "M" : g[0] is 'F' or 'f' ? "F" : "O";
+    }
+
+    // Wizard employment CODE (toEmploymentCode in the frontend: SALARIED /
+    // SELFEMP / PROFESSIONAL) → the stored display value on Customer. Shared by
+    // the create AND update branches of FindOrCreateCustomerAsync so a resumed
+    // draft's EmploymentType round-trips instead of being dropped on update.
+    private static string? MapEmpType(string? code) => code switch
+    {
+        "SALARIED"     => "Salaried",
+        "SELFEMP"      => "Self-Employed",
+        "PROFESSIONAL" => "Professional",
+        _              => code,
+    };
+
+    // Persist the two wizard references (Step 7) onto the loan. Shared by Submit
+    // AND SaveDraft so a resumed draft keeps its references instead of losing
+    // them — SaveDraft previously never wrote LoanReference rows at all, so a
+    // draft resumed before submission came back with empty Reference fields.
+    // `replaceExisting` clears prior rows first (a resume/re-save), matching the
+    // behaviour Submit already had, so a loan never accumulates duplicate refs.
+    private async Task SyncReferencesAsync(Loan loan, WizardSubmitDto dto, bool replaceExisting)
+    {
+        if (replaceExisting)
+        {
+            var oldRefs = await _db.Set<LoanReference>().Where(r => r.LoanId == loan.Id).ToListAsync();
+            if (oldRefs.Count > 0) _db.Set<LoanReference>().RemoveRange(oldRefs);
+        }
+        if (!string.IsNullOrWhiteSpace(dto.R1Name) && !string.IsNullOrWhiteSpace(dto.R1Mobile))
+            _db.Set<LoanReference>().Add(new LoanReference
+            {
+                LoanId = loan.Id, RefNumber = 1,
+                Name = dto.R1Name, Mobile = dto.R1Mobile,
+                Relation = dto.R1Relation ?? "Other", CreatedAt = DateTime.UtcNow
+            });
+        if (!string.IsNullOrWhiteSpace(dto.R2Name) && !string.IsNullOrWhiteSpace(dto.R2Mobile))
+            _db.Set<LoanReference>().Add(new LoanReference
+            {
+                LoanId = loan.Id, RefNumber = 2,
+                Name = dto.R2Name, Mobile = dto.R2Mobile,
+                Relation = dto.R2Relation ?? "Other", CreatedAt = DateTime.UtcNow
+            });
     }
 
     /// <summary>
@@ -450,6 +578,12 @@ public class WizardController : BaseController
                     LocationId      = dto.LocationId,
                     CreatedAt       = DateTime.UtcNow
                 };
+                // Persist product-specific / co-applicant / reference-address /
+                // insurance fields on a FRESH direct submit too — the existing-
+                // draft branch above already calls ApplyMapping, but this create
+                // branch previously dropped ProductDataJson, so a submit that
+                // never went through an autosaved draft lost all of it.
+                ApplyMapping(loan, dto);
                 _db.Loans.Add(loan);
             }
             await _db.SaveChangesAsync();
@@ -467,32 +601,28 @@ public class WizardController : BaseController
                 CreatedAt       = DateTime.UtcNow
             });
 
+            // ── 4b. Login-User auto-assignment (Phase 2 RBAC — G-05) ─────────────
+            // Route the freshly-submitted application to the least-loaded active
+            // Login User at its Location. Sets loan.LoginUserId and adds an
+            // AssignmentAuditLog row to this same context/transaction (no
+            // SaveChanges of its own) — persisted by the SaveChanges below. A
+            // no-op when the loan has no Location or already has a Login User, so
+            // it never blocks a submission. Best-effort: a routing hiccup must
+            // never fail an otherwise-valid application submission.
+            try
+            {
+                await _loginAssign.AutoAssignLoginUserAsync(loan);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Login-User auto-assignment failed for loan {LoanId}; left unassigned.", loan.Id);
+            }
+
             // ── 5. References ─────────────────────────────────────────────────
             // Resuming a draft replaces any references captured earlier so the
             // final submission never ends up with duplicate reference rows.
-            if (existingLoan != null)
-            {
-                var oldRefs = _db.Set<LoanReference>().Where(r => r.LoanId == loan.Id);
-                _db.Set<LoanReference>().RemoveRange(oldRefs);
-            }
-            if (!string.IsNullOrWhiteSpace(dto.R1Name) && !string.IsNullOrWhiteSpace(dto.R1Mobile))
-            {
-                _db.Set<LoanReference>().Add(new LoanReference
-                {
-                    LoanId = loan.Id, RefNumber = 1,
-                    Name = dto.R1Name, Mobile = dto.R1Mobile,
-                    Relation = dto.R1Relation ?? "Other", CreatedAt = DateTime.UtcNow
-                });
-            }
-            if (!string.IsNullOrWhiteSpace(dto.R2Name) && !string.IsNullOrWhiteSpace(dto.R2Mobile))
-            {
-                _db.Set<LoanReference>().Add(new LoanReference
-                {
-                    LoanId = loan.Id, RefNumber = 2,
-                    Name = dto.R2Name, Mobile = dto.R2Mobile,
-                    Relation = dto.R2Relation ?? "Other", CreatedAt = DateTime.UtcNow
-                });
-            }
+            // (Shared with SaveDraft via SyncReferencesAsync.)
+            await SyncReferencesAsync(loan, dto, existingLoan != null);
 
             // ── 6. Auto-calculate payout (server-side only — not user-submitted) ──
             // Phase 3: generate one claim per eligible claimant tied to this loan —
@@ -681,9 +811,17 @@ public class WizardController : BaseController
             // dto.ProductData back onto individual app.insXxx/propXxx/
             // carXxx/eduXxx fields when present, so this alone completes
             // that round-trip.
+            // Deserialize into string values (productData is always a flat
+            // string map from the wizard), then box to object. Deserializing as
+            // Dictionary<string,object> yields JsonElement values, which the
+            // response serializer emits as {"valueKind":"String"} metadata
+            // instead of the actual string — breaking the resume of every
+            // productData field (mother / reference addresses / property /
+            // vehicle / education / co-applicant / insurance / dsaLinkedPartner).
             ProductData = string.IsNullOrWhiteSpace(loan.ProductDataJson)
                 ? null
-                : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(loan.ProductDataJson),
+                : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(loan.ProductDataJson)
+                    ?.ToDictionary(kv => kv.Key, kv => (object)kv.Value),
             // BUGFIX (confirmed real gap — draft resume losing Channel/
             // Source): both are saved, but only ever packed into Remarks
             // as "Source: X | Channel: Y" (see ApplyMapping/Submit's own
@@ -805,6 +943,15 @@ public class WizardController : BaseController
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
+        // Concurrency: two simultaneous NEW drafts for the same person both
+        // pass FindOrCreateCustomerAsync's PAN/Email lookup (neither committed
+        // yet), both INSERT a Customer, and the DB's unique index rejects the
+        // loser — which previously surfaced as an unhandled 500. Retry ONCE:
+        // on the retry the loser's FindOrCreate now finds the winner's
+        // committed customer and reuses it. Any other error still returns 500
+        // immediately. Bounded to a single retry (attempt 0 then 1).
+        for (var attempt = 0; ; attempt++)
+        {
         await using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
@@ -886,10 +1033,23 @@ public class WizardController : BaseController
                     LocationId      = dto.LocationId,
                     CreatedAt       = DateTime.UtcNow
                 };
+                // Persist product-specific / co-applicant / reference-address /
+                // insurance fields on the FIRST draft-save too (this create
+                // branch previously dropped ProductDataJson; only subsequent
+                // updates re-applied it). Mirrors the Submit create-branch fix.
+                ApplyMapping(loan, dto);
                 _db.Loans.Add(loan);
             }
 
             await _db.SaveChangesAsync();
+
+            // Persist Step-7 references on the draft too (shared with Submit) so a
+            // resumed draft keeps them — SaveDraft previously wrote no LoanReference
+            // rows, so references entered before submission vanished on resume.
+            // loan.Id is assigned by the SaveChangesAsync above, which the rows need.
+            await SyncReferencesAsync(loan, dto, existingLoan != null);
+            await _db.SaveChangesAsync();
+
             await tx.CommitAsync();
 
             // Same reasoning as Submit() above — no cache invalidation needed,
@@ -905,13 +1065,41 @@ public class WizardController : BaseController
                 Status     = loan.Status.ToString()
             }, "Draft saved."));
         }
+        catch (Exception ex) when (attempt == 0 && IsCustomerUniqueViolation(ex))
+        {
+            // Lost the customer unique-constraint race to a concurrent request.
+            // Roll back, drop the failed tracked INSERT from the change tracker
+            // (so the retry re-runs cleanly), and loop to try exactly once more.
+            await tx.RollbackAsync();
+            _db.ChangeTracker.Clear();
+        }
         catch (Exception ex)
         {
             await tx.RollbackAsync();
             _logger.LogError(ex, "Wizard draft save failed for user {UserId}", CurrentUserId);
             return StatusCode(500, ApiResponseDto<WizardSubmitResponseDto>.Fail("Could not save draft."));
         }
+        }
         });
+    }
+
+    // True when `ex` (or an inner exception) is a unique-constraint violation on
+    // the Customers table — SQLite ("UNIQUE constraint failed: Customers.*") or
+    // PostgreSQL (SqlState 23505 on IX_Customers_*). Used to detect the
+    // concurrent same-PAN/Email customer-insert race in SaveDraft and retry.
+    private static bool IsCustomerUniqueViolation(Exception ex)
+    {
+        for (Exception? e = ex; e != null; e = e.InnerException)
+        {
+            var m = e.Message;
+            if (m != null
+                && m.IndexOf("Customers", StringComparison.OrdinalIgnoreCase) >= 0
+                && (m.IndexOf("UNIQUE", StringComparison.OrdinalIgnoreCase) >= 0
+                    || m.IndexOf("duplicate", StringComparison.OrdinalIgnoreCase) >= 0
+                    || m.IndexOf("23505", StringComparison.Ordinal) >= 0))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>Validate wizard data before final submit.</summary>

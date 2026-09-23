@@ -1,0 +1,46 @@
+{
+  "build_id": "LoanMS-P13-MasterVisualParityLoop",
+  "baseline": "LoanMS-P12-Final",
+  "date": "2026-08-26",
+  "scope": "Visual-parity redesign of the 7 remaining pages — visible premium UI only. No architecture, backend, API, routing, permission, or business-logic changes.",
+  "pages_completed": [
+    "Reports", "Perfios", "Lender Configuration", "Tickets",
+    "Calculator", "Notifications", "Audit"
+  ],
+  "files_modified": [
+    "frontend/src/styles/globals.css",
+    "frontend/src/pages/ReportsPage.tsx",
+    "frontend/src/components/shared/PerfiosUpload.tsx",
+    "frontend/src/components/shared/PerfiosAnalysisResults.tsx",
+    "frontend/src/pages/LenderConfigPage.tsx",
+    "frontend/src/pages/TicketsPage.tsx",
+    "frontend/src/components/shared/TicketDetailModal.tsx",
+    "frontend/src/pages/CalculatorPage.tsx",
+    "frontend/src/components/shared/NotificationBell.tsx",
+    "frontend/src/pages/AuditLogPage.tsx"
+  ],
+  "files_created": [
+    "MASTER-CHANGELOG.md (updated)",
+    "BUILD-MANIFEST.json (updated)",
+    "UI-PARITY-REPORT.md (updated)",
+    "VALIDATION-REPORT.md (updated)",
+    "RELEASE-CERTIFICATE.md (updated)",
+    "RELEASE-MANIFEST.json (updated)"
+  ],
+  "files_deleted": [],
+  "css_strategy": "Additive only. New shared primitives (.page-hero/.chart-card/.premium-toolbar/.meter-*/.rank-row) plus 7 page-scoped blocks appended to globals.css. No existing class modified; same token vocabulary (--accent/--success/--warn/--danger/--surface*/--border*/--text*/--kpi-*) already used by Dashboard/Loan Detail/Customers.",
+  "validation": {
+    "tsc": "passed",
+    "vite": "passed",
+    "notes": "Only the pre-existing >500kB chunk-size advisory remains (LoanDetailPage.js), unrelated to this pass."
+  },
+  "architecture": "unchanged",
+  "backend_changes": "none",
+  "api_changes": "none",
+  "routing_changes": "none",
+  "permission_changes": "none",
+  "source_only": true,
+  "build_artifacts_excluded": [
+    "frontend/node_modules", "**/dist", "**/dist-node", "**/bin", "**/obj", "**/.vite"
+  ]
+}

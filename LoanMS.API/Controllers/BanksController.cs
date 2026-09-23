@@ -73,7 +73,9 @@ public class BanksController : BaseController
                 ProductRules = b.ProductRules.Select(r => new {
                     r.ProductKey, r.MinCibil, r.AcceptNtc, r.MaxLoanAmt, r.MinTenure, r.MaxTenure,
                     r.FoirLimit, r.PfRequired, r.MinAge, r.MaxAge, r.MinExpMonths,
-                    r.EmpTypesJson, r.CompTypesJson, r.HomeTypesJson
+                    r.EmpTypesJson, r.CompTypesJson, r.HomeTypesJson,
+                    r.MinVintage, r.MinTurnover,
+                    r.MinAcctVintage, r.MinAvgBalance, r.MinCreditScore, r.BankStmtMonths, r.BounceTolerance
                 }),
                 Lines = b.Lines.Select(l => new { l.Id, l.CompanyId, l.CategoryId, l.PinCode, l.Pf })
             })
@@ -161,22 +163,35 @@ public class BanksController : BaseController
         var bank = await _db.Banks.FindAsync(id);
         if (bank == null) return NotFound(ApiResponseDto<bool>.Fail("Bank not found."));
 
-        if (string.IsNullOrWhiteSpace(dto.BankName))
+        // PHASE 5 FIX: BankName was mandatory on every PUT, but the product
+        // bank-assignment save legitimately sends only { loanTypes: [...] } —
+        // that call got a 400 and the assignment was silently lost. Every other
+        // field in this method already follows the partial-update convention, so
+        // an omitted name now means "leave unchanged" rather than "reject".
+        // An explicitly blank name is still rejected: that is a real edit to an
+        // invalid value, not an absent field.
+        if (dto.BankName != null && string.IsNullOrWhiteSpace(dto.BankName))
             return BadRequest(ApiResponseDto<object>.Fail("Bank Name is required."));
 
-        var name = dto.BankName.Trim();
-        var duplicate = await _db.Banks.AnyAsync(b => b.Id != id && b.BankName.ToLower() == name.ToLower());
-        if (duplicate)
-            return BadRequest(ApiResponseDto<object>.Fail("A bank with this name already exists."));
+        if (!string.IsNullOrWhiteSpace(dto.BankName))
+        {
+            var name = dto.BankName.Trim();
+            var duplicate = await _db.Banks.AnyAsync(b => b.Id != id && b.BankName.ToLower() == name.ToLower());
+            if (duplicate)
+                return BadRequest(ApiResponseDto<object>.Fail("A bank with this name already exists."));
+            bank.BankName = name;
+        }
 
-        bank.BankName = name;
-        bank.IfscPrefix = dto.IfscPrefix?.Trim();
-        bank.EmpCode = dto.EmpCode?.Trim();
-        bank.Location = dto.Location?.Trim();
-        bank.RmName = dto.RmName?.Trim();
-        bank.RmMobile = dto.RmMobile?.Trim();
-        bank.Email = dto.Email?.Trim();
-        bank.Remarks = dto.Remarks?.Trim();
+        // Contact fields keep their existing all-or-nothing semantics only when
+        // the caller is actually editing them; a rules-only PUT must not blank
+        // out the RM's name and number as a side effect.
+        if (dto.IfscPrefix != null) bank.IfscPrefix = dto.IfscPrefix.Trim();
+        if (dto.EmpCode    != null) bank.EmpCode    = dto.EmpCode.Trim();
+        if (dto.Location   != null) bank.Location   = dto.Location.Trim();
+        if (dto.RmName     != null) bank.RmName     = dto.RmName.Trim();
+        if (dto.RmMobile   != null) bank.RmMobile   = dto.RmMobile.Trim();
+        if (dto.Email      != null) bank.Email      = dto.Email.Trim();
+        if (dto.Remarks    != null) bank.Remarks    = dto.Remarks.Trim();
         if (dto.IsActive.HasValue) bank.IsActive = dto.IsActive.Value;
         // ── Lender Configuration eligibility fields — only overwritten when
         // the caller actually sent a value, same "partial update" convention
@@ -250,6 +265,13 @@ public class BanksController : BaseController
         if (dto.EmpTypes  != null) rule.EmpTypesJson  = System.Text.Json.JsonSerializer.Serialize(dto.EmpTypes);
         if (dto.CompTypes != null) rule.CompTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.CompTypes);
         if (dto.HomeTypes != null) rule.HomeTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.HomeTypes);
+        if (dto.MinVintage.HasValue)      rule.MinVintage      = dto.MinVintage.Value;
+        if (dto.MinTurnover.HasValue)     rule.MinTurnover     = dto.MinTurnover.Value;
+        if (dto.MinAcctVintage.HasValue)  rule.MinAcctVintage  = dto.MinAcctVintage.Value;
+        if (dto.MinAvgBalance.HasValue)   rule.MinAvgBalance   = dto.MinAvgBalance.Value;
+        if (dto.MinCreditScore.HasValue)  rule.MinCreditScore  = dto.MinCreditScore.Value;
+        if (dto.BankStmtMonths.HasValue)  rule.BankStmtMonths  = dto.BankStmtMonths.Value;
+        if (dto.BounceTolerance.HasValue) rule.BounceTolerance = dto.BounceTolerance.Value;
 
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<bool>.Ok(true, "Product rules saved."));
@@ -275,7 +297,12 @@ public class BanksController : BaseController
 
 public class BankDto
 {
-    public string BankName { get; set; } = string.Empty;
+    // Nullable, NOT `= string.Empty`: Update() has to tell an OMITTED name
+    // (partial save — leave the name alone) apart from an explicitly BLANK one
+    // (a real edit to an invalid value, still rejected). With a non-null default
+    // both arrive as "" and the partial save is impossible. Create() still
+    // requires it via its own IsNullOrWhiteSpace check.
+    public string? BankName { get; set; }
     public string? IfscPrefix { get; set; }
     public string? EmpCode { get; set; }
     public string? Location { get; set; }
@@ -321,4 +348,13 @@ public class BankProductRuleDto
     public List<string>? EmpTypes { get; set; }
     public List<string>? CompTypes { get; set; }
     public List<string>? HomeTypes { get; set; }
+    // Bank Rules extras (multi-config)
+    public int? MinVintage { get; set; }
+    public decimal? MinTurnover { get; set; }
+    // Banking / Credit Score rules (multi-config)
+    public int? MinAcctVintage { get; set; }
+    public decimal? MinAvgBalance { get; set; }
+    public int? MinCreditScore { get; set; }
+    public int? BankStmtMonths { get; set; }
+    public int? BounceTolerance { get; set; }
 }

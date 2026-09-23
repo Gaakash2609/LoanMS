@@ -35,7 +35,13 @@ public class AIController : BaseController
     // (/api/kyc/vision). The browser posts a system + user prompt and the server
     // forwards it to the configured provider. The API key lives ONLY in server
     // configuration and is never exposed to the browser.
-    [AllowAnonymous]
+    // Authenticated (inherits the class-level [Authorize]). This was
+    // [AllowAnonymous], which made it an open, unauthenticated relay to a
+    // metered AI provider — any caller who could reach the server could spend
+    // the organisation's AI budget through it. Every real caller already sends a
+    // Bearer token: React through the axios interceptor (api/axios.ts:17) and
+    // legacy lender-email-workflow.js:481 by setting the header explicitly, so
+    // requiring one breaks no existing flow.
     [HttpPost("parse")]
     public async Task<IActionResult> ParseText([FromBody] AiTextRequestDto request, [FromServices] IServiceProvider sp)
     {

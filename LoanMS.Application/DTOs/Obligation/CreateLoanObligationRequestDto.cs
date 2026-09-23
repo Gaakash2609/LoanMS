@@ -17,4 +17,16 @@ public class CreateLoanObligationRequestDto
     public DateTime? LoanClosureDate { get; set; }
     public string? LoanAccountNumber { get; set; }
     public bool SelectBT { get; set; }
+
+    // ── Credit-review extension (all optional — legacy callers omit them and get
+    // the safe defaults Applicant / Manual / Unverified / active) ────────────────
+    /// <summary>"Applicant" | "CoApplicant" — defaults to Applicant when omitted.</summary>
+    public string? ApplicantRole { get; set; }
+    public string? ApplicantKey { get; set; }
+    public bool IsClosed { get; set; }
+    public decimal? InterestRate { get; set; }
+    public int? TenureMonths { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? MaturityDate { get; set; }
+    public string? Notes { get; set; }
 }

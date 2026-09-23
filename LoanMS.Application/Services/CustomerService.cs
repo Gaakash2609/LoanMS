@@ -72,9 +72,23 @@ public class CustomerService : ICustomerService
             EmploymentType = request.EmploymentType,
             CompanyName    = request.CompanyName,
             CibilScore     = request.CibilScore,
-            Gender         = request.Gender?.Trim(),
+            Gender         = NormalizeGender(request.Gender),
             FatherName     = request.FatherName?.Trim(),
-            ResidenceType  = request.ResidenceType
+            ResidenceType  = request.ResidenceType,
+            MotherName             = request.MotherName?.Trim(),
+            AlternatePhone         = request.AlternatePhone?.Trim(),
+            HouseNo                = request.HouseNo?.Trim(),
+            PermanentHouseNo       = request.PermanentHouseNo?.Trim(),
+            PermanentAddress       = request.PermanentAddress?.Trim(),
+            PermanentCity          = request.PermanentCity?.Trim(),
+            PermanentState         = request.PermanentState?.Trim(),
+            PermanentPinCode       = request.PermanentPinCode?.Trim(),
+            PermanentResidenceType = request.PermanentResidenceType,
+            Designation            = request.Designation?.Trim(),
+            CompanyType            = request.CompanyType?.Trim(),
+            OfficialEmail          = request.OfficialEmail?.Trim(),
+            OfficeAddress          = request.OfficeAddress?.Trim(),
+            OfficePinCode          = request.OfficePinCode?.Trim()
         };
 
         await _uow.Customers.AddAsync(customer);
@@ -106,9 +120,23 @@ public class CustomerService : ICustomerService
         customer.EmploymentType = request.EmploymentType;
         customer.CompanyName    = request.CompanyName;
         customer.CibilScore     = request.CibilScore;
-        customer.Gender         = request.Gender?.Trim();
+        customer.Gender = NormalizeGender(request.Gender);
         customer.FatherName     = request.FatherName?.Trim();
         customer.ResidenceType  = request.ResidenceType;
+        customer.MotherName             = request.MotherName?.Trim();
+        customer.AlternatePhone         = request.AlternatePhone?.Trim();
+        customer.HouseNo                = request.HouseNo?.Trim();
+        customer.PermanentHouseNo       = request.PermanentHouseNo?.Trim();
+        customer.PermanentAddress       = request.PermanentAddress?.Trim();
+        customer.PermanentCity          = request.PermanentCity?.Trim();
+        customer.PermanentState         = request.PermanentState?.Trim();
+        customer.PermanentPinCode       = request.PermanentPinCode?.Trim();
+        customer.PermanentResidenceType = request.PermanentResidenceType;
+        customer.Designation            = request.Designation?.Trim();
+        customer.CompanyType            = request.CompanyType?.Trim();
+        customer.OfficialEmail          = request.OfficialEmail?.Trim();
+        customer.OfficeAddress          = request.OfficeAddress?.Trim();
+        customer.OfficePinCode          = request.OfficePinCode?.Trim();
         customer.UpdatedAt      = DateTime.UtcNow;
 
         await _uow.Customers.UpdateAsync(customer);
@@ -176,6 +204,20 @@ public class CustomerService : ICustomerService
             Gender         = c.Gender,
             FatherName     = c.FatherName,
             ResidenceType  = c.ResidenceType,
+            MotherName             = c.MotherName,
+            AlternatePhone         = c.AlternatePhone,
+            HouseNo                = c.HouseNo,
+            PermanentHouseNo       = c.PermanentHouseNo,
+            PermanentAddress       = c.PermanentAddress,
+            PermanentCity          = c.PermanentCity,
+            PermanentState         = c.PermanentState,
+            PermanentPinCode       = c.PermanentPinCode,
+            PermanentResidenceType = c.PermanentResidenceType,
+            Designation            = c.Designation,
+            CompanyType            = c.CompanyType,
+            OfficialEmail          = c.OfficialEmail,
+            OfficeAddress          = c.OfficeAddress,
+            OfficePinCode          = c.OfficePinCode,
             TotalLoans     = c.Loans?.Count ?? 0,
             CreatedAt      = c.CreatedAt
         };
@@ -186,4 +228,21 @@ public class CustomerService : ICustomerService
 
     public async Task<PagedResultDto<CustomerDto>> GetPagedAsync(int page, int pageSize, string? search, int currentUserId, string callerRole)
         => await _uow.Customers.GetPagedAsync(page, pageSize, search, currentUserId, callerRole);
+
+    // Boundary check, not the primary fix (that is the gender <select> in
+    // NewApplicationPage.tsx, which now sends 'M'/'F'/'O' -- exactly what
+    // legacy's own <option value="M">/"F"/"O"> sends, app.css/efin-app.js:
+    // 26108-26110). Customers.Gender is varchar(1) by design
+    // (20260726010000_AddCustomerKycFields.cs); this exists so any caller
+    // still sending the full word -- a cached pre-fix frontend bundle, a
+    // future direct API call -- can never again reproduce the 500 that hit
+    // production 225 times on 2026-08-24 ("value too long for type
+    // character varying(1)"). Mirrors WizardController.NormalizeGender,
+    // which is the same fix for the same column via a different endpoint.
+    private static string? NormalizeGender(string? raw)
+    {
+        var g = raw?.Trim();
+        if (string.IsNullOrEmpty(g)) return g;
+        return g[0] is 'M' or 'm' ? "M" : g[0] is 'F' or 'f' ? "F" : "O";
+    }
 }

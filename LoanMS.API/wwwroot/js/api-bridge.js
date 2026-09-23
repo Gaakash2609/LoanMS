@@ -22,7 +22,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
     OperationManager: 'operation_manager', ProductTeam: 'product_team'
   };
   var STATUS_MAP = { Draft:'wip', Submitted:'login', UnderReview:'underwriting', Approved:'approved', Rejected:'rejected', Disbursed:'disbursed', Closed:'disbursed', Hold:'hold' };
-  var STATUS_REV = { wip:'Draft', login:'Submitted', underwriting:'UnderReview', approved:'Approved', rejected:'Rejected', disbursed:'Disbursed', hold:'Hold' };
+  var STATUS_REV = { wip:'Draft', login:'Submitted', underwriting:'UnderReview', approved:'Approved', rejected:'Rejected', disbursed:'Disbursed', hold:'OnHold' };
   var LTYPE_MAP  = { Personal:'personal_loan', Home:'home_loan', Business:'business_loan', Education:'education_loan', Car:'new_car_loan' };
   var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -2571,18 +2571,61 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
   }
 
   function _statusActionLabel(newStatus) {
-    if (newStatus === 'approved')  return 'Approval';
-    if (newStatus === 'rejected')  return 'Rejection';
-    if (newStatus === 'disbursed') return 'Disbursement';
+    if (newStatus === 'login')        return 'Submit';
+    if (newStatus === 'underwriting') return 'Move to Underwriting';
+    if (newStatus === 'approved')     return 'Approval';
+    if (newStatus === 'rejected')     return 'Rejection';
+    if (newStatus === 'disbursed')    return 'Disbursement';
+    if (newStatus === 'hold')         return 'Hold';
     return 'Status change';
+  }
+
+  /* Builds the backend write for a given LOCAL status transition. Reads
+     whatever the calling function (confirmHold / holdApp / confirmReject /
+     confirmDisburse / confirmLenderApproval / doUnderwriting / the
+     updateBankLine() wip→login auto-advance) already stashed on `app`
+     *before* changeStatus() ran — no other call site needs to change.
+     Each dedicated endpoint mirrors exactly what loansApi.ts (React) sends
+     for the same transition. */
+  function _statusReq(app, newStatus) {
+    if (newStatus === 'login')
+      return apiReq('PATCH','/loans/'+app._apiId+'/submit');
+    if (newStatus === 'approved')
+      return apiReq('PATCH','/loans/'+app._apiId+'/approve',{approvedAmount:app.sanctionLoanAmt||app.amount,comment:'Approved via EFIN'});
+    if (newStatus === 'rejected')
+      return apiReq('PATCH','/loans/'+app._apiId+'/reject',{reason:app.rejection_reason||'Rejected via EFIN'});
+    if (newStatus === 'disbursed')
+      return apiReq('PATCH','/loans/'+app._apiId+'/disburse');
+    if (newStatus === 'hold')
+      return apiReq('PATCH','/loans/'+app._apiId+'/hold',{reason:app.hold_reason||''});
+    var apiStatus = STATUS_REV[newStatus];
+    if (apiStatus)
+      return apiReq('PATCH','/loans/'+app._apiId+'/status',{newStatus:apiStatus,comment:apiStatus+' via EFIN'});
+    return null;
   }
 
   function _patchStatusChange() {
     if (window._bridgeStatusPatched) return;
     window._bridgeStatusPatched = true;
-    var _orig = window.confirmStatusChange;
+    // NOTE: intentionally wraps changeStatus(), not confirmStatusChange().
+    // confirmStatusChange() only ever fires for the login→underwriting
+    // transition (the sole live caller is the table's "Underwriting"
+    // button) and merely *opens* its confirmation modal — the actual
+    // mutation, and previously this API push, ran here at invocation
+    // time, i.e. as soon as that button was clicked, *before* the user
+    // ever clicked Confirm inside the modal (or even Cancel). Every other
+    // transition — Approve, Reject, Disburse, Hold, and the wip→login
+    // auto-advance — calls changeStatus() directly and never went through
+    // confirmStatusChange() at all, so none of them ever reached the
+    // backend. changeStatus() is the one choke point every transition
+    // actually passes through, and by the time it runs the calling
+    // function has already committed to the change (Confirm was clicked),
+    // so wrapping it here both fixes the premature-fire bug on Underwriting
+    // and gives every other transition its first-ever backend write.
+    var _orig = window.changeStatus;
     if (typeof _orig !== 'function') return;
-    window.confirmStatusChange = function(id, newStatus) {
+    window.changeStatus = function(id, newStatus, triggerEl) {
+      var result = _orig.apply(this, arguments);
       var app = (window.APPLICATIONS||[]).find(function(a){ return a.id===id; });
       if (app && app._apiId) {
         var label = _statusActionLabel(newStatus);
@@ -2593,12 +2636,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           // clearly instead of pretending it was saved.
           _wizardToast('⚠ ' + label + ' NOT saved — you are in offline mode (no server session). Please sign in again once the server is reachable.', 'warn');
         } else {
-          var apiStatus = STATUS_REV[newStatus];
-          var req;
-          if (newStatus==='approved')       req = apiReq('PATCH','/loans/'+app._apiId+'/approve',{approvedAmount:app.amount,comment:'Approved via EFIN'});
-          else if (newStatus==='rejected')  req = apiReq('PATCH','/loans/'+app._apiId+'/reject',{reason:'Rejected via EFIN'});
-          else if (newStatus==='disbursed') req = apiReq('PATCH','/loans/'+app._apiId+'/disburse');
-          else if (apiStatus)               req = apiReq('PATCH','/loans/'+app._apiId+'/status',{newStatus:apiStatus,comment:apiStatus+' via EFIN'});
+          var req = _statusReq(app, newStatus);
 
           if (req) {
             req.then(function(r) {
@@ -2621,7 +2659,7 @@ var _lsRemove = function(k){ try{ localStorage.removeItem(k); }catch(e){} };
           }
         }
       }
-      return _orig.apply(this, arguments);
+      return result;
     };
   }
 

@@ -24,7 +24,8 @@
         { "name": "Redis__Enabled",         "value": "false" },
         { "name": "AI__Enabled",            "value": "true" },
         { "name": "AI__Provider",           "value": "gemini" },
-        { "name": "Storage__S3BucketName",  "value": "loanms-documents-prod" }
+        { "name": "Storage__S3BucketName",  "value": "loanms-documents-prod" },
+        { "name": "App__BaseUrl",           "value": "https://app.mudrahub.com" }
       ],
       "secrets": [
         {

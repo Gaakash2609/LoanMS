@@ -1,6 +1,8 @@
 using LoanMS.Domain.Entities;
 using LoanMS.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace LoanMS.Infrastructure.Data;
 
@@ -8,12 +10,37 @@ public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
+    // Root-caused live in production 2026-08-24: POST /api/loans/{id}/obligations
+    // was throwing ArgumentException("Cannot write DateTime with Kind=Unspecified
+    // to PostgreSQL type 'timestamp with time zone', only UTC is supported") on
+    // every request that set LoanObligation.LoanClosureDate, because
+    // ObligationsController assigned the request DTO's DateTime? straight onto
+    // the entity with no Kind normalization. This is the SAME bug already fixed
+    // once in ReportsController.cs (a `new DateTime(y, m, 1)` with no Kind) --
+    // it kept recurring because each fix so far normalized one call site, not
+    // the underlying gap: nothing enforces Kind=Utc for the whole model.
+    // ConfigureConventions applies a converter to every DateTime/DateTime?
+    // property at once, closing the bug class rather than the next instance of
+    // it (LoanSanctionDetail.EmiDate, LoanTask.DueDate and PayoutClaim.
+    // PaymentDate were the same latent risk, just not yet hit in production).
+    // SpecifyKind, not ToUniversalTime -- this does not shift the clock value,
+    // it only tags an Unspecified value as the UTC it was always meant to be
+    // (mirroring every existing manual DateTimeKind.Utc fix already made).
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        configurationBuilder.Properties<DateTime>().HaveConversion<UtcDateTimeConverter>();
+        configurationBuilder.Properties<DateTime?>().HaveConversion<NullableUtcDateTimeConverter>();
+    }
+
     public DbSet<User>              Users               => Set<User>();
     public DbSet<Customer>          Customers           => Set<Customer>();
     public DbSet<Loan>              Loans               => Set<Loan>();
     public DbSet<LoanDocument>      LoanDocuments       => Set<LoanDocument>();
     public DbSet<LoanBankLine>      LoanBankLines       => Set<LoanBankLine>();
     public DbSet<PerfiosReport>     PerfiosReports      => Set<PerfiosReport>();
+    public DbSet<IncomeVerification>      IncomeVerifications      => Set<IncomeVerification>();
+    public DbSet<IncomeVerificationMonth> IncomeVerificationMonths => Set<IncomeVerificationMonth>();
+    public DbSet<SalarySlipExtraction>    SalarySlipExtractions    => Set<SalarySlipExtraction>();
     public DbSet<LoanSanctionDetail> LoanSanctionDetails => Set<LoanSanctionDetail>();
     public DbSet<LoanObligation>    LoanObligations     => Set<LoanObligation>();
     public DbSet<LoanStatusHistory> LoanStatusHistories => Set<LoanStatusHistory>();
@@ -40,6 +67,7 @@ public class AppDbContext : DbContext
     public DbSet<AnalyticCategory>      AnalyticCategories     => Set<AnalyticCategory>();
     public DbSet<BankEligibilityLine>   BankEligibilityLines   => Set<BankEligibilityLine>();
     public DbSet<BankProductRule>       BankProductRules       => Set<BankProductRule>();
+    public DbSet<BankProductCategory>   BankProductCategories  => Set<BankProductCategory>();
     public DbSet<IncredRmEmail>     IncredRmEmails      => Set<IncredRmEmail>();
     public DbSet<ReportTarget>      ReportTargets       => Set<ReportTarget>();
     public DbSet<AssignmentAuditLog> AssignmentAuditLogs => Set<AssignmentAuditLog>();
@@ -117,6 +145,7 @@ public class AppDbContext : DbContext
             e.Property(l => l.LoanNumber).HasMaxLength(20).IsRequired();
             e.Property(l => l.LoanType).HasConversion<string>();
             e.Property(l => l.Status).HasConversion<string>();
+            e.Property(l => l.PreRejectedStatus).HasConversion<string>();
             e.Property(l => l.RequestedAmount).HasColumnType("decimal(18,2)").IsRequired();
             e.Property(l => l.ApprovedAmount).HasColumnType("decimal(18,2)");
             e.Property(l => l.InterestRate).HasColumnType("decimal(5,2)").IsRequired();
@@ -163,6 +192,10 @@ public class AppDbContext : DbContext
             e.HasKey(d => d.Id);
             e.HasQueryFilter(d => !d.IsDeleted);
             e.HasOne(d => d.Loan).WithMany(l => l.Documents).HasForeignKey(d => d.LoanId).OnDelete(DeleteBehavior.Cascade);
+            // Gap-2: authoritative applicant identity on the source document.
+            e.Property(d => d.ApplicantRole).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(d => d.ApplicantKey).HasMaxLength(100);
+            e.HasIndex(d => new { d.LoanId, d.ApplicantRole, d.ApplicantKey });
         });
 
         mb.Entity<LoanBankLine>(e => {
@@ -176,11 +209,83 @@ public class AppDbContext : DbContext
             e.HasKey(p => p.Id);
             e.HasQueryFilter(p => !p.IsDeleted);
             e.HasOne(p => p.Loan).WithMany(l => l.PerfiosReports).HasForeignKey(p => p.LoanId).OnDelete(DeleteBehavior.Cascade);
+            // Gap-1: evidence-authority columns + binding to the actual bank-statement document.
+            e.Property(p => p.EvidenceSource).HasMaxLength(20).IsRequired();
+            e.Property(p => p.SourcePdfHash).HasMaxLength(128);
+            e.HasIndex(p => p.BankStatementDocumentId);
+            e.HasOne(p => p.BankStatementDocument).WithMany()
+                .HasForeignKey(p => p.BankStatementDocumentId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // ── Income Verification (Phase 2 data foundation) ──────────────────────
+        // Authoritative salary/income verification result + per-month evidence +
+        // immutable slip extraction. States/roles stored as strings (HasConversion)
+        // to match the Loan.Status / LoanDocument.Status convention. .WithMany()
+        // (no navigation on Loan) keeps the Loan entity untouched, mirroring how
+        // AssignmentAuditLog attaches to a loan without a back-collection.
+        mb.Entity<IncomeVerification>(e => {
+            e.HasKey(v => v.Id);
+            e.HasQueryFilter(v => !v.IsDeleted);
+            e.HasIndex(v => v.LoanId);
+            e.HasIndex(v => new { v.LoanId, v.ApplicantRole, v.ApplicantKey });
+            // §26(j) idempotency: a retried/double-clicked verify request with the
+            // same key can never create a second verification record.
+            e.HasIndex(v => v.IdempotencyKey).IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
+            e.Property(v => v.State).HasConversion<string>().HasMaxLength(30).IsRequired();
+            e.Property(v => v.ApplicantRole).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(v => v.ApplicantKey).HasMaxLength(100);
+            e.Property(v => v.RequiredMonthsJson).HasColumnType("text");
+            e.Property(v => v.ReasonCodesJson).HasColumnType("text");
+            e.Property(v => v.DeclaredIncome).HasColumnType("numeric(18,2)");
+            e.Property(v => v.ExtractedIncome).HasColumnType("numeric(18,2)");
+            e.Property(v => v.VerifiedIncome).HasColumnType("numeric(18,2)");
+            e.Property(v => v.SourceReportHash).HasMaxLength(128);
+            e.Property(v => v.IdempotencyKey).HasMaxLength(80);
+            e.Property(v => v.ReviewDecision).HasMaxLength(20);
+            e.Property(v => v.ReviewReason).HasMaxLength(1000);
+            e.HasOne(v => v.Loan).WithMany().HasForeignKey(v => v.LoanId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(v => v.Months).WithOne(m => m.IncomeVerification)
+                .HasForeignKey(m => m.IncomeVerificationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<IncomeVerificationMonth>(e => {
+            e.HasKey(m => m.Id);
+            e.HasQueryFilter(m => !m.IsDeleted);
+            e.HasIndex(m => m.IncomeVerificationId);
+            e.Property(m => m.MonthLabel).HasMaxLength(20).IsRequired();
+            e.Property(m => m.MatchStatus).HasMaxLength(30).IsRequired();
+            e.Property(m => m.ReasonCode).HasMaxLength(40);
+            e.Property(m => m.MatchedTransactionRef).HasMaxLength(120);
+            e.Property(m => m.VerificationMethod).HasMaxLength(40);
+            e.Property(m => m.BankAccountRef).HasMaxLength(120);
+            e.Property(m => m.OriginalExtractedSalary).HasColumnType("numeric(18,2)");
+            e.Property(m => m.EffectiveSalary).HasColumnType("numeric(18,2)");
+            e.Property(m => m.MatchedAmount).HasColumnType("numeric(18,2)");
+        });
+
+        mb.Entity<SalarySlipExtraction>(e => {
+            e.HasKey(s => s.Id);
+            e.HasQueryFilter(s => !s.IsDeleted);
+            e.HasIndex(s => s.LoanId);
+            e.HasIndex(s => new { s.LoanId, s.ApplicantRole, s.ApplicantKey, s.Year, s.Month });
+            e.HasIndex(s => s.ContentHash);
+            e.Property(s => s.ApplicantRole).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(s => s.ApplicantKey).HasMaxLength(100);
+            e.Property(s => s.MonthLabel).HasMaxLength(20);
+            e.Property(s => s.ExtractionMethod).HasMaxLength(30).IsRequired();
+            e.Property(s => s.OverrideReason).HasMaxLength(500);
+            e.Property(s => s.ContentHash).HasMaxLength(128);
+            e.Property(s => s.OriginalNetSalary).HasColumnType("numeric(18,2)");
+            e.Property(s => s.UserEditedSalary).HasColumnType("numeric(18,2)");
+            e.HasOne(s => s.Loan).WithMany().HasForeignKey(s => s.LoanId).OnDelete(DeleteBehavior.Cascade);
         });
 
         mb.Entity<LoanSanctionDetail>(e => {
             e.HasKey(s => s.Id);
             e.HasQueryFilter(s => !s.IsDeleted);
+            e.Property(s => s.SanctionLoanAmt).HasColumnType("numeric(18,2)");
+            e.Property(s => s.SanctionEmi).HasColumnType("numeric(18,2)");
+            e.Property(s => s.SanctionRoi).HasColumnType("numeric(5,2)");
             e.Property(s => s.Gst).HasColumnType("numeric(18,2)");
             e.Property(s => s.Insurance).HasColumnType("numeric(18,2)");
             e.Property(s => s.PfPercent).HasColumnType("numeric(5,2)");
@@ -198,6 +303,37 @@ public class AppDbContext : DbContext
             e.Property(o => o.LoanEmi).HasColumnType("decimal(18,2)");
             e.Property(o => o.AmountOutstanding).HasColumnType("decimal(18,2)");
             e.Property(o => o.LoanAccountNumber).HasMaxLength(50);
+
+            // ── Credit-review extension (additive) ──────────────────────────────
+            // Enums stored as strings (HasConversion) with an explicit default so
+            // the additive migration backfills existing rows safely: every legacy
+            // obligation becomes Source=Manual / VerificationStatus=Unverified /
+            // ApplicantRole=Applicant. Roles/state string-persisted exactly like
+            // IncomeVerification/SalarySlipExtraction.
+            e.Property(o => o.ApplicantRole).HasConversion<string>().HasMaxLength(20)
+                .IsRequired().HasDefaultValue(ApplicantRole.Applicant);
+            e.Property(o => o.ApplicantKey).HasMaxLength(100);
+            e.Property(o => o.Source).HasConversion<string>().HasMaxLength(20)
+                .IsRequired().HasDefaultValue(ObligationSource.Manual);
+            e.Property(o => o.VerificationStatus).HasConversion<string>().HasMaxLength(20)
+                .IsRequired().HasDefaultValue(ObligationVerificationStatus.Unverified);
+
+            e.Property(o => o.InterestRate).HasColumnType("decimal(9,4)");
+            e.Property(o => o.Notes).HasMaxLength(1000);
+
+            e.Property(o => o.DetectedEmi).HasColumnType("decimal(18,2)");
+            e.Property(o => o.DetectedFinancerName).HasMaxLength(150);
+            e.Property(o => o.DetectedAccountNumber).HasMaxLength(50);
+            e.Property(o => o.DetectionSignature).HasMaxLength(200);
+            e.Property(o => o.DetectionEvidenceJson).HasColumnType("text");
+
+            e.Property(o => o.OverrideReason).HasMaxLength(500);
+            e.Property(o => o.VerificationNote).HasMaxLength(500);
+
+            // Applicant-isolated lookups + duplicate-detection guard for re-runs.
+            e.HasIndex(o => new { o.LoanApplicationId, o.ApplicantRole, o.ApplicantKey });
+            e.HasIndex(o => new { o.LoanApplicationId, o.DetectionSignature });
+
             e.HasQueryFilter(o => !o.IsDeleted);
             e.HasOne(o => o.LoanApplication).WithMany().HasForeignKey(o => o.LoanApplicationId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -314,8 +450,22 @@ public class AppDbContext : DbContext
             e.HasQueryFilter(r => !r.IsDeleted);
             e.Property(r => r.ProductKey).HasMaxLength(50).IsRequired();
             e.Property(r => r.MaxLoanAmt).HasColumnType("numeric(18,2)");
+            e.Property(r => r.MinTurnover).HasColumnType("numeric(18,2)");
+            e.Property(r => r.MinAvgBalance).HasColumnType("numeric(18,2)");
             e.HasOne(r => r.Bank).WithMany(b => b.ProductRules).HasForeignKey(r => r.BankId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(r => new { r.BankId, r.ProductKey }).IsUnique();
+        });
+
+        mb.Entity<BankProductCategory>(e => {
+            e.HasKey(c => c.Id);
+            e.HasQueryFilter(c => !c.IsDeleted);
+            e.Property(c => c.ProductKey).HasMaxLength(50).IsRequired();
+            e.Property(c => c.Name).HasMaxLength(100).IsRequired();
+            e.Property(c => c.Color).HasMaxLength(30);
+            e.Property(c => c.Notes).HasMaxLength(500);
+            e.Property(c => c.MinTurnover).HasColumnType("numeric(18,2)");
+            e.HasOne(c => c.Bank).WithMany().HasForeignKey(c => c.BankId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(c => new { c.BankId, c.ProductKey });
         });
 
         mb.Entity<ReportTarget>(e => {
@@ -552,7 +702,26 @@ public class AppDbContext : DbContext
             e.Property(r => r.Relation).HasMaxLength(50).IsRequired();
             e.HasIndex(r => r.LoanId);
             e.HasQueryFilter(r => !r.IsDeleted);
-            e.HasOne(r => r.Loan).WithMany().HasForeignKey(r => r.LoanId).OnDelete(DeleteBehavior.Cascade);
+            // WithMany(l => l.References) — NOT the parameterless WithMany().
+            //
+            // Loan.References was added after this line was written. With a bare
+            // WithMany(), EF treats this as a relationship to an *unnamed*
+            // navigation and then discovers Loan.References separately by
+            // convention, giving TWO relationships between the same pair of
+            // types. The second one needs its own foreign key, and because
+            // LoanId is already taken by this one, EF invents a shadow property
+            // "LoanId1" — logged on every model build as:
+            //   "The foreign key property 'LoanReference.LoanId1' was created in
+            //    shadow state because a conflicting property with the simple name
+            //    'LoanId' exists in the entity type"
+            // and scaffolded into any new migration as a junk LoanReferences.LoanId1
+            // column that no code reads or writes (confirmed absent from the
+            // database — every other pending column in the model already exists).
+            //
+            // Naming the inverse navigation collapses both into the single
+            // relationship that was always intended. No schema change: LoanId is
+            // already the FK column and already indexed above.
+            e.HasOne(r => r.Loan).WithMany(l => l.References).HasForeignKey(r => r.LoanId).OnDelete(DeleteBehavior.Cascade);
         });
 
         mb.Entity<PasswordResetToken>(e => {
@@ -671,4 +840,21 @@ public class AppDbContext : DbContext
             e.Property(sf => sf.Description).HasMaxLength(500);
         });
     }
+}
+
+public class UtcDateTimeConverter : ValueConverter<DateTime, DateTime>
+{
+    public static DateTime AsUtc(DateTime v) =>
+        v.Kind == DateTimeKind.Utc ? v
+        : v.Kind == DateTimeKind.Local ? v.ToUniversalTime()
+        : DateTime.SpecifyKind(v, DateTimeKind.Utc);
+
+    public UtcDateTimeConverter() : base(v => AsUtc(v), v => DateTime.SpecifyKind(v, DateTimeKind.Utc)) { }
+}
+
+public class NullableUtcDateTimeConverter : ValueConverter<DateTime?, DateTime?>
+{
+    public NullableUtcDateTimeConverter() : base(
+        v => v.HasValue ? UtcDateTimeConverter.AsUtc(v.Value) : v,
+        v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v) { }
 }

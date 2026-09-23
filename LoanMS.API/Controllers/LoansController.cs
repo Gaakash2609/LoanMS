@@ -143,6 +143,88 @@ public class LoansController : BaseController
     }
 
     /// <summary>
+    /// Phase 2 RBAC — G-08. Admin stage override: force a loan to any status,
+    /// bypassing the normal state machine. Admin-only, reason mandatory. On
+    /// success writes a structured AuditLog row capturing old→new status, the
+    /// reason, the acting user and IP — the auditable override trail required by
+    /// the Phase 1 audit. The state machine for every non-Admin transition
+    /// endpoint is untouched.
+    /// </summary>
+    [HttpPatch("{id:int}/override-status")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> OverrideStatus(int id, [FromBody] OverrideStatusRequestDto request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.Reason))
+            return BadRequest(ApiResponseDto<LoanDto>.Fail("An override reason is required."));
+
+        // Capture the pre-override status for the audit before the mutation.
+        var before = await _db.Set<Loan>().AsNoTracking()
+            .Where(l => l.Id == id).Select(l => (LoanStatus?)l.Status).FirstOrDefaultAsync();
+
+        var result = await _loanService.OverrideStatusAsync(id, request.NewStatus, request.Reason, CurrentUserId, CurrentUserRole);
+        if (!result.Success) return ApiResult(result);
+
+        // Structured audit entry (old→new + reason). This is IN ADDITION to the
+        // global AuditMiddleware row and to LoanStatusHistory — it is the one
+        // that carries a populated OldValues + Reason for this sensitive action.
+        _db.AuditLogs.Add(new AuditLog
+        {
+            EntityName = "Loans",
+            Action     = "StageOverride",
+            EntityId   = id.ToString(),
+            OldValues  = before?.ToString(),
+            NewValues  = request.NewStatus.ToString(),
+            Reason     = request.Reason,
+            UserId     = CurrentUserId,
+            UserName   = CurrentUserEmail,
+            IpAddress  = HttpContext.Connection.RemoteIpAddress?.ToString(),
+            CreatedAt  = DateTime.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Re-open a Rejected loan [Admin-only — Vanilla parity for reopenApp,
+    /// efin-app.js:10600]. 45-day window from creation date + restore to the
+    /// pre-rejection stage are enforced in LoanService.ReopenAsync; this
+    /// action only adds the same structured audit-log entry OverrideStatus
+    /// writes above, for the same reason (sensitive, needs OldValues+Reason
+    /// beyond what LoanStatusHistory carries).
+    /// </summary>
+    [HttpPatch("{id:int}/reopen")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Reopen(int id, [FromBody] ReopenRequestDto request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.Reason))
+            return BadRequest(ApiResponseDto<LoanDto>.Fail("A remark is required to re-open this application."));
+
+        var before = await _db.Set<Loan>().AsNoTracking()
+            .Where(l => l.Id == id).Select(l => (LoanStatus?)l.Status).FirstOrDefaultAsync();
+
+        var result = await _loanService.ReopenAsync(id, request.Reason, CurrentUserId, CurrentUserRole);
+        if (!result.Success) return ApiResult(result);
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            EntityName = "Loans",
+            Action     = "Reopen",
+            EntityId   = id.ToString(),
+            OldValues  = before?.ToString(),
+            NewValues  = result.Data?.Status.ToString(),
+            Reason     = request.Reason,
+            UserId     = CurrentUserId,
+            UserName   = CurrentUserEmail,
+            IpAddress  = HttpContext.Connection.RemoteIpAddress?.ToString(),
+            CreatedAt  = DateTime.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// 🔴 CRITICAL — bulk status update (item #3). Reuses UpdateStatusAsync
     /// PER LOAN — the exact same HasAccessAsync visibility check and
     /// GetAllowedTransitions validation that already gate the single-loan
@@ -194,9 +276,24 @@ public class LoansController : BaseController
     /// location loan) is verified before the transition — no role list is
     /// added beyond what already existed, only the missing ownership check.
     /// </summary>
+    // BUGFIX (confirmed real, independent-of-frontend audit): this had NEITHER
+    // a role-list [Authorize] NOR the fine-grained _rolePerm check every
+    // sibling transition below has -- the class-level [Authorize] on this
+    // controller is bare, so ANY authenticated role, on ANY loan they can
+    // already see via HasAccessAsync, could submit it. The frontend gates
+    // this button on canCreateApp (LoanDetailPage.tsx ACTION_PERM), which
+    // matches the fact that this transition is meant for the same roles who
+    // create applications (Sales/Dsa/Partner et al), not the narrower
+    // approve/reject/disburse set -- so this does NOT reuse the other four
+    // endpoints' 6-role list, which would have been too strict for exactly
+    // the roles meant to submit their own applications.
     [HttpPatch("{id:int}/submit")]
+    [Authorize]
     public async Task<IActionResult> Submit(int id)
     {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canCreateApp"))
+            return Forbid();
+
         var result = await _loanService.UpdateStatusAsync(id,
             new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Submitted, Comment = "Submitted for review." },
             CurrentUserId, CurrentUserRole);
@@ -208,6 +305,14 @@ public class LoansController : BaseController
     [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
     public async Task<IActionResult> Approve(int id, [FromBody] ApproveRequestDto request)
     {
+        // Same fine-grained check UpdateStatus (PATCH .../status) already
+        // applies for this exact transition -- added here because the UI now
+        // calls this dedicated route directly (see loansApi.ts), so without
+        // this the Settings screen's per-role canChangeStatus toggle stopped
+        // actually governing the button it's meant to control.
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canChangeStatus"))
+            return Forbid();
+
         var result = await _loanService.UpdateStatusAsync(id,
             new UpdateLoanStatusRequestDto
             {
@@ -224,6 +329,11 @@ public class LoansController : BaseController
     [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
     public async Task<IActionResult> Reject(int id, [FromBody] RejectRequestDto request)
     {
+        // Same reasoning as Approve above -- matches UpdateStatus's own
+        // canRejectApp check for this transition.
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canRejectApp"))
+            return Forbid();
+
         var result = await _loanService.UpdateStatusAsync(id,
             new UpdateLoanStatusRequestDto
             {
@@ -239,9 +349,107 @@ public class LoansController : BaseController
     [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
     public async Task<IActionResult> Disburse(int id)
     {
+        // Same reasoning as Approve above -- matches UpdateStatus's own
+        // canDisburse check for this transition.
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDisburse"))
+            return Forbid();
+
         var result = await _loanService.UpdateStatusAsync(id,
             new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Disbursed, Comment = "Loan disbursed." },
             CurrentUserId, CurrentUserRole);
+        return ApiResult(result);
+    }
+
+    /// <summary>
+    /// Put an in-flight loan on hold [Roles with canHoldApp:true]. Restores
+    /// the fixed-role gate + the fine-grained canHoldApp check, same
+    /// two-layer pattern as the other transitions. Legacy exposed this as
+    /// holdApp(); the current UI now surfaces it on Loan Detail. Reason is
+    /// mandatory (recorded in the status-history comment).
+    /// </summary>
+    [HttpPatch("{id:int}/hold")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
+    public async Task<IActionResult> Hold(int id, [FromBody] HoldRequestDto request)
+    {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canHoldApp"))
+            return Forbid();
+
+        var result = await _loanService.HoldAsync(id, request?.Reason ?? "", CurrentUserId, CurrentUserRole);
+        return ApiResult(result);
+    }
+
+    /// <summary>Release a held loan, restoring its pre-hold status [canHoldApp].</summary>
+    [HttpPatch("{id:int}/unhold")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
+    public async Task<IActionResult> Unhold(int id, [FromBody] HoldRequestDto? request)
+    {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canHoldApp"))
+            return Forbid();
+
+        var result = await _loanService.UnholdAsync(id, request?.Reason, CurrentUserId, CurrentUserRole);
+        return ApiResult(result);
+    }
+
+    /// <summary>
+    /// Policy-band deviation flags for this loan (empty = within policy),
+    /// gated on canDeviation — the permission that previously governed
+    /// nothing. Ported from legacy laCheckDeviations: ROI band vs CIBIL,
+    /// FOIR cap, loan-amount income multiplier, tenure max, CIBIL minimum.
+    /// Read-only risk signal for reviewers; does not change loan state.
+    /// </summary>
+    [HttpGet("{id:int}/deviations")]
+    public async Task<IActionResult> GetDeviations(int id)
+    {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDeviation"))
+            return Forbid();
+
+        var result = await _loanService.GetDeviationsAsync(id, CurrentUserId, CurrentUserRole);
+        return ApiResult(result);
+    }
+
+    /// <summary>
+    /// Raise a policy deviation on an Under Review loan → Decision
+    /// [canDeviation]. Type + reason required. Legacy: confirmDeviation.
+    /// </summary>
+    [HttpPatch("{id:int}/deviation/raise")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
+    public async Task<IActionResult> RaiseDeviation(int id, [FromBody] RaiseDeviationRequestDto request)
+    {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDeviation"))
+            return Forbid();
+
+        var result = await _loanService.RaiseDeviationAsync(id, request?.DeviationType ?? "", request?.Reason ?? "", CurrentUserId, CurrentUserRole);
+        return ApiResult(result);
+    }
+
+    /// <summary>
+    /// Decide a raised deviation (approve → Approved, else → Rejected)
+    /// [canDeviation]. The raiser cannot approve their own deviation unless
+    /// Admin (enforced in the service). Legacy: confirmApprovedDeviation.
+    /// </summary>
+    [HttpPatch("{id:int}/deviation/decide")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
+    public async Task<IActionResult> DecideDeviation(int id, [FromBody] DecideDeviationRequestDto request)
+    {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDeviation"))
+            return Forbid();
+
+        var result = await _loanService.DecideDeviationAsync(id, request?.Approve ?? false, request?.Comment, CurrentUserId, CurrentUserRole);
+        return ApiResult(result);
+    }
+
+    /// <summary>
+    /// Skip deviation routing on an Under Review loan → Approved
+    /// [canDeviation]. Legacy: confirmSkipDeviation.
+    /// </summary>
+    [HttpPatch("{id:int}/deviation/skip")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
+    public async Task<IActionResult> SkipDeviation(int id, [FromBody] HoldRequestDto? request)
+    {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDeviation"))
+            return Forbid();
+
+        var result = await _loanService.SkipDeviationAsync(id, request?.Reason, CurrentUserId, CurrentUserRole);
         return ApiResult(result);
     }
 
@@ -261,6 +469,37 @@ public class LoansController : BaseController
     public async Task<IActionResult> UpdateAssignment(int id, [FromBody] UpdateLoanAssignmentRequestDto request)
     {
         var result = await _loanService.UpdateAssignmentAsync(id, request, CurrentUserId, CurrentUserRole);
+        return ApiResult(result);
+    }
+
+    /// <summary>
+    /// Per-loan Lender RM override (Lender Email Workflow) — mirrors Vanilla's
+    /// openRmOverrideModal / _lewSaveRmOverride. Sets the RM contact used for
+    /// lender-email enquiries on THIS application without touching the master
+    /// Bank/NBFC record. Same role gate as UpdateBankLines (bank/lender data).
+    /// </summary>
+    [HttpPatch("{id:int}/lender-rm")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager,Accounts,ProductTeam")]
+    public async Task<IActionResult> UpdateLenderRm(int id, [FromBody] UpdateLenderRmRequestDto request)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ApiResponseDto<LoanDto>.Fail(
+                ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
+
+        var result = await _loanService.UpdateLenderRmAsync(id, request, CurrentUserId, CurrentUserRole);
+        return ApiResult(result);
+    }
+
+    /// <summary>
+    /// Partial update of the Overview parity fields (Vanilla efin-app.js:2479):
+    /// InCred RM, Analytic Bank, and the five underwriting verification flags.
+    /// Same internal-role gate as the other routing/underwriting edits.
+    /// </summary>
+    [HttpPatch("{id:int}/overview")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager,Accounts,ProductTeam")]
+    public async Task<IActionResult> UpdateOverview(int id, [FromBody] UpdateLoanOverviewRequestDto request)
+    {
+        var result = await _loanService.UpdateOverviewAsync(id, request, CurrentUserId, CurrentUserRole);
         return ApiResult(result);
     }
 
@@ -295,20 +534,40 @@ public class LoansController : BaseController
     }
 
     /// <summary>
-    /// "Approval Details" panel — Stamp Duty/GST/Insurance/PF%/Bundled/BT/
-    /// Flat Rate/EMI Date. Same role gate as UpdateStatus/UpdateAssignment
-    /// (this data only exists once a loan reaches approval/sanction stage,
-    /// same roles that can change status). Upserts a single row per loan.
+    /// "Approval Details" / CAM panel — Stamp Duty/GST/Insurance/PF%/Bundled/BT/
+    /// Flat Rate/EMI Date. Upserts a single row per loan.
+    ///
+    /// Authorization mirrors the legacy CAM edit rule (efin-app.js
+    /// renderDetailApproval + efinIsAppLocked), NOT canChangeStatus: legacy lets
+    /// the Sales person who created the loan and the channel Partner edit the CAM,
+    /// so an earlier canChangeStatus gate here (and the matching Sales/Partner/Dsa
+    /// omission from the role list) wrongly rejected exactly those users. Access
+    /// to the loan itself is still enforced below by GetByIdAsync, which applies
+    /// the per-role visibility scope (LoanRepository.ApplyVisibilityScope) — so a
+    /// Sales/Partner user can only reach a loan already in their scope, the
+    /// server-side equivalent of legacy's app-access check. The finalised-loan
+    /// read-only rule stays a client concern (SanctionDetailCard), exactly as in
+    /// legacy where the same backend serves the vanilla UI.
     /// </summary>
     [HttpPut("{id:int}/sanction-detail")]
-    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager,Accounts,ProductTeam")]
+    [Authorize(Roles = "Admin,Manager,Sales,Partner,Dsa,LoginTeam,TeamLeader,LocationHead,OperationManager,Accounts,ProductTeam")]
     public async Task<IActionResult> UpdateSanctionDetail(int id, [FromBody] UpdateLoanSanctionDetailRequestDto request)
     {
-        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canChangeStatus"))
-            return Forbid();
-
         var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(loan);
+
+        // Stage guard — sanction terms are recorded only once the loan is at/after the
+        // approval step (legacy: the "Approve with Details" step is the only writer of
+        // sanction data). UnderReview is allowed because the Approve-with-Details modal
+        // saves the terms just before it moves the loan to Approved; Decision covers the
+        // deviation-approval path. Anything earlier (Draft/Submitted, never approved)
+        // is rejected so a sanction row can't exist for a loan at its initial stage.
+        var stage = loan.Data;
+        var canRecordSanction = stage != null && (stage.ApprovedAt != null
+            || stage.Status == nameof(LoanStatus.UnderReview)
+            || stage.Status == nameof(LoanStatus.Decision));
+        if (!canRecordSanction)
+            return BadRequest(ApiResponseDto<bool>.Fail("Sanction details can only be recorded once the loan has reached the review/approval stage."));
 
         var detail = await _db.Set<LoanSanctionDetail>().FirstOrDefaultAsync(s => s.LoanId == id);
         if (detail == null)
@@ -321,6 +580,10 @@ public class LoansController : BaseController
             detail.UpdatedAt = DateTime.UtcNow;
         }
 
+        if (request.SanctionLoanAmt.HasValue) detail.SanctionLoanAmt = request.SanctionLoanAmt.Value;
+        if (request.SanctionTenureMonths.HasValue) detail.SanctionTenureMonths = request.SanctionTenureMonths.Value;
+        if (request.SanctionRoi.HasValue) detail.SanctionRoi = request.SanctionRoi.Value;
+        if (request.SanctionEmi.HasValue) detail.SanctionEmi = request.SanctionEmi.Value;
         if (request.StampDuty != null) detail.StampDuty = request.StampDuty;
         if (request.Gst.HasValue) detail.Gst = request.Gst.Value;
         if (request.Insurance.HasValue) detail.Insurance = request.Insurance.Value;
@@ -441,7 +704,16 @@ public class LoansController : BaseController
         if (!uploadedTypes.Contains("bank_statement"))
             missing.Add(new { type = "bank_statement", reason = "Mandatory for every application (wizard hard requirement)" });
 
-        var isSelfEmployed = customer?.EmploymentType is "Self-Employed" or "Professional";
+        // Match the same self-employed semantic the rest of the app uses
+        // (frontend isSelfEmployed = /SELF|SENP|BUSIN|PROF/, DeviationEvaluator =
+        // "SELFEMP"/"SELF_EMPLOYED"). The wizard stores "SELFEMP"
+        // (NewApplicationPage empType map), NOT the literal "Self-Employed" this
+        // previously compared against — so ITR/GST were never flagged as missing
+        // for ANY self-employed applicant. Case-insensitive substring keeps it
+        // robust across the stored variants (SELFEMP / SELF_EMPLOYED / SENP /
+        // "Self-Employed" / "Professional" / "Business").
+        var et = (customer?.EmploymentType ?? string.Empty).ToUpperInvariant();
+        var isSelfEmployed = et.Contains("SELF") || et.Contains("SENP") || et.Contains("BUSIN") || et.Contains("PROF");
         if (isSelfEmployed)
         {
             if (!uploadedTypes.Contains("itr"))
@@ -522,7 +794,8 @@ public class LoansController : BaseController
     /// </summary>
     [HttpPost("{id:int}/documents")]
     [RequestSizeLimit(20 * 1024 * 1024)]
-    public async Task<IActionResult> UploadDocument(int id, IFormFile file, [FromForm] string? documentType)
+    public async Task<IActionResult> UploadDocument(int id, IFormFile file, [FromForm] string? documentType,
+        [FromForm] string? applicantRole = null, [FromForm] string? applicantKey = null)
     {
         if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canUploadDocs"))
             return Forbid();
@@ -572,6 +845,12 @@ public class LoansController : BaseController
         // Link the upload to the loan in the database — this is what makes it
         // show up under the loan record (and in GetDocuments below) rather
         // than existing only as an orphaned file in storage.
+        // Gap-2: tag the document's applicant identity. Defaults to primary
+        // Applicant when not supplied (preserves existing single-applicant behavior).
+        var docApplicantRole = string.Equals(applicantRole, "CoApplicant", StringComparison.OrdinalIgnoreCase)
+            ? LoanMS.Domain.Enums.ApplicantRole.CoApplicant
+            : LoanMS.Domain.Enums.ApplicantRole.Applicant;
+
         var docRecord = new LoanDocument
         {
             LoanId           = id,
@@ -580,6 +859,8 @@ public class LoansController : BaseController
             FilePath         = $"{id}/{fileName}",   // opaque ref — no on-disk path
             FileSizeBytes    = file.Length,
             UploadedByUserId = CurrentUserId.ToString(),
+            ApplicantRole    = docApplicantRole,
+            ApplicantKey     = string.IsNullOrWhiteSpace(applicantKey) ? null : applicantKey.Trim(),
             CreatedAt        = DateTime.UtcNow
         };
         _db.Set<LoanDocument>().Add(docRecord);
@@ -657,7 +938,13 @@ public class LoansController : BaseController
                 documentType  = d.DocumentType,
                 fileRef       = d.FilePath,
                 fileSizeBytes = d.FileSizeBytes,
-                uploadedAt    = d.CreatedAt
+                uploadedAt    = d.CreatedAt,
+                // Phase 2 RBAC — G-10/G-11 verification + versioning surface.
+                status           = d.Status,
+                reviewNote       = d.ReviewNote,
+                reviewedByUserId = d.ReviewedByUserId,
+                reviewedAt       = d.ReviewedAt,
+                version          = d.Version
             })
             .ToListAsync();
 
@@ -674,6 +961,16 @@ public class LoansController : BaseController
     [HttpDelete("{id:int}/documents/{documentId:int}")]
     public async Task<IActionResult> DeleteDocument(int id, int documentId)
     {
+        // Deleting a document is a document-MANAGEMENT action, gated by the
+        // same canUploadDocs permission as upload (and as the frontend's own
+        // delete button). Previously this endpoint had NO permission check at
+        // all -- only the class-level [Authorize] + visibility -- so any
+        // authenticated user who could see the loan could delete its
+        // documents by calling the route directly, even with canUploadDocs
+        // off. Frontend gate and backend now agree.
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canUploadDocs"))
+            return Forbid();
+
         var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(loan);
 
@@ -683,7 +980,173 @@ public class LoansController : BaseController
         doc.IsDeleted = true;
         doc.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
+
+        // Purge the stored bytes too, so a deleted KYC/financial document
+        // doesn't linger in the bucket forever (and to reclaim storage). The
+        // DB soft-delete above has already committed and is the source of
+        // truth, so this is best-effort: a storage hiccup must not turn a
+        // successful deletion into a 500. The storage key mirrors the upload
+        // side exactly — "loans/" + the opaque FilePath ("{id}/{fileName}").
+        try
+        {
+            await _fileStorage.DeleteAsync($"loans/{doc.FilePath}");
+        }
+        catch
+        {
+            // Swallowed intentionally — the row is already flagged deleted;
+            // a leftover object is a storage-cost issue, not a correctness
+            // one, and re-throwing would wrongly report the delete as failed.
+        }
+
         return Ok(ApiResponseDto<bool>.Ok(true, "Document deleted."));
+    }
+
+    // ── Phase 2 RBAC — G-10 / G-11 document verification & replace ─────────────
+
+    /// <summary>
+    /// Verify a document (Status → "Verified"). Gated by BOTH a fixed role list
+    /// (the internal processing roles that also change loan status) AND the
+    /// fine-grained, Admin-configurable canVerifyDocs permission — verification
+    /// is a review action, distinct from upload (canUploadDocs). Scope is
+    /// enforced the same way as every other document endpoint: the caller must
+    /// have visibility on the parent loan (GetByIdAsync → 404 otherwise), so a
+    /// direct API call cannot verify a document on a loan outside the caller's
+    /// scope.
+    /// </summary>
+    [HttpPatch("{id:int}/documents/{documentId:int}/verify")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
+    public async Task<IActionResult> VerifyDocument(int id, int documentId, [FromBody] DocumentReviewRequestDto? request)
+    {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canVerifyDocs"))
+            return Forbid();
+
+        var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
+        if (!loan.Success) return NotFound(loan);
+
+        var doc = await _db.Set<LoanDocument>().FirstOrDefaultAsync(d => d.Id == documentId && d.LoanId == id && !d.IsDeleted);
+        if (doc == null) return NotFound(ApiResponseDto<bool>.Fail("Document not found."));
+
+        var oldStatus = doc.Status;
+        doc.Status           = "Verified";
+        doc.ReviewNote       = request?.Note;
+        doc.ReviewedByUserId = CurrentUserId.ToString();
+        doc.ReviewedAt       = DateTime.UtcNow;
+        doc.UpdatedAt        = DateTime.UtcNow;
+
+        AuditHelper.LogChange(_db, HttpContext, "LoanDocument", documentId.ToString(), "DocumentVerified",
+            oldValues: oldStatus, newValues: "Verified", reason: request?.Note,
+            userId: CurrentUserId, userName: CurrentUserEmail);
+
+        await _db.SaveChangesAsync();
+
+        return Ok(ApiResponseDto<bool>.Ok(true, "Document verified."));
+    }
+
+    /// <summary>
+    /// Reject a document (Status → "Rejected"). Same gate as Verify. A rejection
+    /// reason is MANDATORY — recorded in ReviewNote with the reviewer + time,
+    /// satisfying the structured-reason requirement (G-23) for this action.
+    /// </summary>
+    [HttpPatch("{id:int}/documents/{documentId:int}/reject")]
+    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
+    public async Task<IActionResult> RejectDocument(int id, int documentId, [FromBody] DocumentReviewRequestDto request)
+    {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canVerifyDocs"))
+            return Forbid();
+
+        if (request == null || string.IsNullOrWhiteSpace(request.Note))
+            return BadRequest(ApiResponseDto<bool>.Fail("A rejection reason is required."));
+
+        var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
+        if (!loan.Success) return NotFound(loan);
+
+        var doc = await _db.Set<LoanDocument>().FirstOrDefaultAsync(d => d.Id == documentId && d.LoanId == id && !d.IsDeleted);
+        if (doc == null) return NotFound(ApiResponseDto<bool>.Fail("Document not found."));
+
+        var oldStatus = doc.Status;
+        doc.Status           = "Rejected";
+        doc.ReviewNote       = request.Note;
+        doc.ReviewedByUserId = CurrentUserId.ToString();
+        doc.ReviewedAt       = DateTime.UtcNow;
+        doc.UpdatedAt        = DateTime.UtcNow;
+
+        AuditHelper.LogChange(_db, HttpContext, "LoanDocument", documentId.ToString(), "DocumentRejected",
+            oldValues: oldStatus, newValues: "Rejected", reason: request.Note,
+            userId: CurrentUserId, userName: CurrentUserEmail);
+
+        await _db.SaveChangesAsync();
+
+        return Ok(ApiResponseDto<bool>.Ok(true, "Document rejected."));
+    }
+
+    /// <summary>
+    /// Replace a document with a new file, preserving history. The old document
+    /// row is soft-deleted and linked (SupersededByDocumentId) to a NEW row
+    /// whose Version is the old Version + 1 and whose Status resets to
+    /// "Pending" (a fresh file must be re-reviewed). Same document-management
+    /// permission as upload/delete (canUploadDocs) plus the same visibility
+    /// check on the parent loan — no new authorization path. Same file
+    /// validation (extension + magic-byte MIME + size) as upload.
+    /// </summary>
+    [HttpPost("{id:int}/documents/{documentId:int}/replace")]
+    [RequestSizeLimit(20 * 1024 * 1024)]
+    public async Task<IActionResult> ReplaceDocument(int id, int documentId, IFormFile file)
+    {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canUploadDocs"))
+            return Forbid();
+
+        var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
+        if (!loan.Success) return NotFound(loan);
+
+        var oldDoc = await _db.Set<LoanDocument>().FirstOrDefaultAsync(d => d.Id == documentId && d.LoanId == id && !d.IsDeleted);
+        if (oldDoc == null) return NotFound(ApiResponseDto<bool>.Fail("Document not found."));
+
+        if (file == null || file.Length == 0)
+            return BadRequest(ApiResponseDto<object>.Fail("No file provided."));
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        var allowedExts = new[] { ".pdf", ".jpg", ".jpeg", ".png", ".xlsx", ".csv" };
+        if (!allowedExts.Contains(ext))
+            return BadRequest(ApiResponseDto<object>.Fail($"File type '{ext}' is not allowed."));
+        if (!await IsAllowedMimeTypeAsync(file, ext))
+            return BadRequest(ApiResponseDto<object>.Fail("File content does not match its extension."));
+
+        // Store the replacement under a fresh opaque key (never overwrite the
+        // old object — the superseded version stays independently addressable).
+        var fileName   = $"{Guid.NewGuid()}{ext}";
+        var storageKey = $"loans/{id}/{fileName}";
+        await using (var stream = file.OpenReadStream())
+            await _fileStorage.SaveAsync(storageKey, stream, file.ContentType);
+
+        var newDoc = new LoanDocument
+        {
+            LoanId           = id,
+            DocumentName     = Path.GetFileNameWithoutExtension(file.FileName),
+            DocumentType     = oldDoc.DocumentType,   // carry the classification forward
+            FilePath         = $"{id}/{fileName}",
+            FileSizeBytes    = file.Length,
+            UploadedByUserId = CurrentUserId.ToString(),
+            Status           = "Pending",             // a new file must be re-reviewed
+            Version          = oldDoc.Version + 1,
+            CreatedAt        = DateTime.UtcNow
+        };
+        _db.Set<LoanDocument>().Add(newDoc);
+        await _db.SaveChangesAsync();   // materialise newDoc.Id for the link below
+
+        oldDoc.IsDeleted              = true;
+        oldDoc.SupersededByDocumentId = newDoc.Id;
+        oldDoc.UpdatedAt              = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return Ok(ApiResponseDto<object>.Ok(new {
+            id            = newDoc.Id,
+            documentName  = newDoc.DocumentName,
+            documentType  = newDoc.DocumentType,
+            fileRef       = newDoc.FilePath,
+            fileSizeBytes = newDoc.FileSizeBytes,
+            version       = newDoc.Version,
+            replacedId    = documentId
+        }, "Document replaced."));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -718,6 +1181,42 @@ public class ApproveRequestDto
 }
 
 public class RejectRequestDto
+{
+    public string? Reason { get; set; }
+}
+
+public class HoldRequestDto
+{
+    public string? Reason { get; set; }
+}
+
+public class RaiseDeviationRequestDto
+{
+    public string? DeviationType { get; set; }
+    public string? Reason { get; set; }
+}
+
+public class DecideDeviationRequestDto
+{
+    public bool Approve { get; set; }
+    public string? Comment { get; set; }
+}
+
+/// <summary>Body for document verify/reject. Note is optional on verify,
+/// mandatory (the rejection reason) on reject.</summary>
+public class DocumentReviewRequestDto
+{
+    public string? Note { get; set; }
+}
+
+/// <summary>Body for the Admin stage-override endpoint. Reason is mandatory.</summary>
+public class OverrideStatusRequestDto
+{
+    public LoanStatus NewStatus { get; set; }
+    public string? Reason { get; set; }
+}
+
+public class ReopenRequestDto
 {
     public string? Reason { get; set; }
 }

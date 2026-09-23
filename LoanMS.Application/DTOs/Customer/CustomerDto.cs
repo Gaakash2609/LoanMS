@@ -24,6 +24,21 @@ public class CustomerDto
     public string? Gender { get; set; }
     public string? FatherName { get; set; }
     public string? ResidenceType { get; set; }
+    // Applicant-tab parity fields — see Customer entity.
+    public string? MotherName { get; set; }
+    public string? AlternatePhone { get; set; }
+    public string? HouseNo { get; set; }
+    public string? PermanentHouseNo { get; set; }
+    public string? PermanentAddress { get; set; }
+    public string? PermanentCity { get; set; }
+    public string? PermanentState { get; set; }
+    public string? PermanentPinCode { get; set; }
+    public string? PermanentResidenceType { get; set; }
+    public string? Designation { get; set; }
+    public string? CompanyType { get; set; }
+    public string? OfficialEmail { get; set; }
+    public string? OfficeAddress { get; set; }
+    public string? OfficePinCode { get; set; }
     public int TotalLoans { get; set; }
     public DateTime CreatedAt { get; set; }
 }

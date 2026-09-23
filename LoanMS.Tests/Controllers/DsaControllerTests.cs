@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using LoanMS.Tests.TestHelpers;
 
 namespace LoanMS.Tests.Controllers;
 
@@ -39,7 +40,7 @@ public class DsaControllerTests
             new Claim("role", currentUserRole)
         }, "TestAuth");
 
-        var controller = new DsaController(db, new LoanMS.Infrastructure.Services.LocalFileStorageService(System.IO.Path.GetTempPath()))
+        var controller = new DsaController(db, new LoanMS.Infrastructure.Services.LocalFileStorageService(System.IO.Path.GetTempPath()), RolePermissionTestDouble.AllowAll())
         {
             ControllerContext = new ControllerContext
             {

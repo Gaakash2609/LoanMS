@@ -265,7 +265,15 @@ namespace LoanMS.Application.Services
                 insights.Add("Poor credit score. Recent improvement in repayment behaviour required.");
 
             // DPD Insights
-            var maxDPD = report.PaymentHistory?.Max(p => p.DaysOverdue) ?? 0;
+            // Max over int? (not int) so an EMPTY history yields null -> 0 instead of
+            // throwing. The `?.` alone was not enough: BureauReport.PaymentHistory is a
+            // [NotMapped] computed property that flattens the accounts' histories, so it
+            // returns an EMPTY list — never null — for a thin-file borrower with no
+            // credit accounts. Max() on an empty sequence throws
+            // InvalidOperationException ("Sequence contains no elements"), which surfaced
+            // as an unhandled 500 from GET /api/cibil/full-report. Same pattern already
+            // used by the DPD aggregates further down this file.
+            var maxDPD = report.PaymentHistory?.Max(p => (int?)p.DaysOverdue) ?? 0;
             if (maxDPD == 0)
                 insights.Add("No delinquency observed. Consistent on-time payments.");
             else if (maxDPD > 90)
@@ -321,7 +329,15 @@ namespace LoanMS.Application.Services
             risk -= (report.CreditScore - 300) / 600m * 40;
 
             // DPD Factor (30 points)
-            var maxDPD = report.PaymentHistory?.Max(p => p.DaysOverdue) ?? 0;
+            // Max over int? (not int) so an EMPTY history yields null -> 0 instead of
+            // throwing. The `?.` alone was not enough: BureauReport.PaymentHistory is a
+            // [NotMapped] computed property that flattens the accounts' histories, so it
+            // returns an EMPTY list — never null — for a thin-file borrower with no
+            // credit accounts. Max() on an empty sequence throws
+            // InvalidOperationException ("Sequence contains no elements"), which surfaced
+            // as an unhandled 500 from GET /api/cibil/full-report. Same pattern already
+            // used by the DPD aggregates further down this file.
+            var maxDPD = report.PaymentHistory?.Max(p => (int?)p.DaysOverdue) ?? 0;
             if (maxDPD == 0)
                 risk -= 30;
             else if (maxDPD < 30)
@@ -376,7 +392,15 @@ namespace LoanMS.Application.Services
             probability += (report.CreditScore - 550) / 4;
 
             // DPD Impact
-            var maxDPD = report.PaymentHistory?.Max(p => p.DaysOverdue) ?? 0;
+            // Max over int? (not int) so an EMPTY history yields null -> 0 instead of
+            // throwing. The `?.` alone was not enough: BureauReport.PaymentHistory is a
+            // [NotMapped] computed property that flattens the accounts' histories, so it
+            // returns an EMPTY list — never null — for a thin-file borrower with no
+            // credit accounts. Max() on an empty sequence throws
+            // InvalidOperationException ("Sequence contains no elements"), which surfaced
+            // as an unhandled 500 from GET /api/cibil/full-report. Same pattern already
+            // used by the DPD aggregates further down this file.
+            var maxDPD = report.PaymentHistory?.Max(p => (int?)p.DaysOverdue) ?? 0;
             probability -= (maxDPD / 30) * 5;
 
             // Enquiry Impact
@@ -493,7 +517,15 @@ namespace LoanMS.Application.Services
             });
 
             // Delinquency
-            var maxDPD = report.PaymentHistory?.Max(p => p.DaysOverdue) ?? 0;
+            // Max over int? (not int) so an EMPTY history yields null -> 0 instead of
+            // throwing. The `?.` alone was not enough: BureauReport.PaymentHistory is a
+            // [NotMapped] computed property that flattens the accounts' histories, so it
+            // returns an EMPTY list — never null — for a thin-file borrower with no
+            // credit accounts. Max() on an empty sequence throws
+            // InvalidOperationException ("Sequence contains no elements"), which surfaced
+            // as an unhandled 500 from GET /api/cibil/full-report. Same pattern already
+            // used by the DPD aggregates further down this file.
+            var maxDPD = report.PaymentHistory?.Max(p => (int?)p.DaysOverdue) ?? 0;
             factors.Add(new CibilRiskFactorDto
             {
                 Factor = "Payment Delinquency",
@@ -533,7 +565,15 @@ namespace LoanMS.Application.Services
             if (report.OverdueAmount > 0)
                 warnings.Add("Active overdue amount present. Immediate collection risk.");
 
-            var maxDPD = report.PaymentHistory?.Max(p => p.DaysOverdue) ?? 0;
+            // Max over int? (not int) so an EMPTY history yields null -> 0 instead of
+            // throwing. The `?.` alone was not enough: BureauReport.PaymentHistory is a
+            // [NotMapped] computed property that flattens the accounts' histories, so it
+            // returns an EMPTY list — never null — for a thin-file borrower with no
+            // credit accounts. Max() on an empty sequence throws
+            // InvalidOperationException ("Sequence contains no elements"), which surfaced
+            // as an unhandled 500 from GET /api/cibil/full-report. Same pattern already
+            // used by the DPD aggregates further down this file.
+            var maxDPD = report.PaymentHistory?.Max(p => (int?)p.DaysOverdue) ?? 0;
             if (maxDPD > 120)
                 warnings.Add("Severe delinquency history. Exercise extreme caution.");
 

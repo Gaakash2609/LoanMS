@@ -2058,13 +2058,13 @@
                   </div>
                 </div>
                 <div class="form-group"><label id="w-salary-label">Gross Monthly Income (₹) <span class="req">*</span></label>
-                  <input type="number" id="w-salary" placeholder="e.g. 50000"
+                  <input type="text" inputmode="decimal" data-numeric id="w-salary" placeholder="e.g. 50000"
                     oninput="laAutoDetectFromWizard();if(document.getElementById('cam-salary'))document.getElementById('cam-salary').value=this.value,camCalculate();">
 
                 </div>
                 <div class="form-group">
                   <label>Existing Monthly EMI Obligations (₹)</label>
-                  <input type="number" id="w-obligations" placeholder="0 if none" value="0"
+                  <input type="text" inputmode="decimal" data-numeric id="w-obligations" placeholder="0 if none" value="0"
                     oninput="(function(){var c=document.getElementById('cam-obligations');if(c)c.value=this.value;camCalculate&&camCalculate();}).call(this)">
                   
                 </div>
@@ -2132,15 +2132,15 @@
                   </div>
                   <div class="form-group">
                     <label>Business Vintage (Years) <span class="req">*</span></label>
-                    <input type="number" id="w-biz-vintage" placeholder="e.g. 5">
+                    <input type="text" inputmode="decimal" data-numeric id="w-biz-vintage" placeholder="e.g. 5">
                   </div>
                   <div class="form-group">
                     <label>Annual Turnover (₹) <span class="req">*</span></label>
-                    <input type="number" id="w-turnover" placeholder="e.g. 50,00,000">
+                    <input type="text" inputmode="decimal" data-numeric id="w-turnover" placeholder="e.g. 50,00,000">
                   </div>
                   <div class="form-group">
                     <label>Net Profit (₹/Year) <span class="req">*</span></label>
-                    <input type="number" id="w-net-profit" placeholder="e.g. 12,00,000">
+                    <input type="text" inputmode="decimal" data-numeric id="w-net-profit" placeholder="e.g. 12,00,000">
                   </div>
                   <div class="form-group">
                     <label>GST Number</label>
@@ -2188,7 +2188,7 @@
                     <option value="plot">Plot / Land</option>
                     <option value="industrial">Industrial</option>
                   </select></div>
-                  <div class="form-group"><label>Property Value (₹)</label><input type="number" id="w-prop-value" placeholder="Market value"></div>
+                  <div class="form-group"><label>Property Value (₹)</label><input type="text" inputmode="decimal" data-numeric id="w-prop-value" placeholder="Market value"></div>
                   <div class="form-group"><label>Builder / Society Name</label><input type="text" id="w-builder" placeholder="Builder or society"></div>
                   <div class="form-group"><label>Property City</label><input type="text" id="w-prop-city" placeholder="City where property is located"></div>
                   <div class="form-group"><label>Ownership Type <span class="req">*</span></label><select id="w-ownership">
@@ -2210,9 +2210,9 @@
                 <div class="form-grid">
                   <div class="form-group"><label>Vehicle Make <span class="req">*</span></label><input type="text" id="w-car-make" placeholder="e.g. Maruti, Hyundai"></div>
                   <div class="form-group"><label>Vehicle Model <span class="req">*</span></label><input type="text" id="w-car-model" placeholder="e.g. Swift, Creta"></div>
-                  <div class="form-group"><label>Manufacture Year <span class="req">*</span></label><input type="number" id="w-car-year" placeholder="e.g. 2023" min="2000" max="2026"></div>
-                  <div class="form-group"><label>Ex-Showroom Price (₹) <span class="req">*</span></label><input type="number" id="w-car-price" placeholder="e.g. 850000"></div>
-                  <div class="form-group" id="w-car-km-wrap"><label>KMs Driven <span class="req">*</span></label><input type="number" id="w-car-km" placeholder="e.g. 45000"></div>
+                  <div class="form-group"><label>Manufacture Year <span class="req">*</span></label><input type="text" inputmode="decimal" data-numeric id="w-car-year" placeholder="e.g. 2023" min="2000" max="2026"></div>
+                  <div class="form-group"><label>Ex-Showroom Price (₹) <span class="req">*</span></label><input type="text" inputmode="decimal" data-numeric id="w-car-price" placeholder="e.g. 850000"></div>
+                  <div class="form-group" id="w-car-km-wrap"><label>KMs Driven <span class="req">*</span></label><input type="text" inputmode="decimal" data-numeric id="w-car-km" placeholder="e.g. 45000"></div>
                   <div class="form-group"><label>Dealer Name <span class="req">*</span></label><input type="text" id="w-dealer" placeholder="Authorized dealer name"></div>
                 </div>
               </div>
@@ -2222,7 +2222,7 @@
                 <div class="form-grid">
                   <div class="form-group"><label>Institution Name *</label><input type="text" id="w-institution" placeholder="University / College name"></div>
                   <div class="form-group"><label>Course Name *</label><input type="text" id="w-course" placeholder="e.g. B.Tech, MBA"></div>
-                  <div class="form-group"><label>Course Duration (Years) <span class="req">*</span></label><input type="number" id="w-course-duration" placeholder="e.g. 4" min="1" max="10"></div>
+                  <div class="form-group"><label>Course Duration (Years) <span class="req">*</span></label><input type="text" inputmode="decimal" data-numeric id="w-course-duration" placeholder="e.g. 4" min="1" max="10"></div>
                   <div class="form-group"><label>Study Location <span class="req">*</span></label><select id="w-study-location">
                     <option value="">Select</option>
                     <option value="domestic">India (Domestic)</option>
@@ -2256,7 +2256,7 @@
 
               <!-- Hidden Loan Detail inputs (DOM-required for submission; not shown to user) -->
               <div style="display:none">
-                <input type="number" id="w-loanrate" value="0">
+                <input type="text" inputmode="decimal" data-numeric id="w-loanrate" value="0">
                 <select id="w-loantype" onchange="if(typeof wSalesPersonChange==='function')wSalesPersonChange()">
                   <option value="">Select</option>
                   <option value="personal_loan">Personal Loan</option>
@@ -2269,7 +2269,7 @@
                   <option value="education_loan">Education Loan</option>
                   <option value="insurance">Insurance</option>
                 </select>
-                <input type="number" id="w-loanamt">
+                <input type="text" inputmode="decimal" data-numeric id="w-loanamt">
                 <select id="w-purpose">
                   <option value="">Select</option>
                   <option value="personal_use">Personal Use</option>
@@ -2326,11 +2326,11 @@
                   </div>
                   <div class="form-group">
                     <label>Sum Assured / Coverage Amount (₹) *</label>
-                    <input type="number" id="w-sum-assured" placeholder="e.g. 5000000">
+                    <input type="text" inputmode="decimal" data-numeric id="w-sum-assured" placeholder="e.g. 5000000">
                   </div>
                   <div class="form-group">
                     <label>Policy Term (Years) <span class="req">*</span></label>
-                    <input type="number" id="w-policy-term" placeholder="e.g. 20" min="1" max="40">
+                    <input type="text" inputmode="decimal" data-numeric id="w-policy-term" placeholder="e.g. 20" min="1" max="40">
                   </div>
                   <div class="form-group">
                     <label>Premium Payment Frequency <span class="req">*</span></label>
@@ -2345,7 +2345,7 @@
                   </div>
                   <div class="form-group">
                     <label>Estimated Annual Premium (₹) <span class="req">*</span></label>
-                    <input type="number" id="w-ins-premium" placeholder="e.g. 25000">
+                    <input type="text" inputmode="decimal" data-numeric id="w-ins-premium" placeholder="e.g. 25000">
                   </div>
                   <div class="form-group">
                     <label>Preferred Insurer <span class="req">*</span></label>
@@ -2416,7 +2416,7 @@
                   </div>
                   <div class="form-group" id="w-existing-coverage-wrap" style="display:none">
                     <label>Existing Coverage Amount (₹) <span class="req">*</span></label>
-                    <input type="number" id="w-existing-coverage" placeholder="e.g. 1000000">
+                    <input type="text" inputmode="decimal" data-numeric id="w-existing-coverage" placeholder="e.g. 1000000">
                   </div>
                 </div>
 
@@ -2454,11 +2454,11 @@
                   </div>
                   <div class="form-group">
                     <label>Height (cm) <span class="req">*</span></label>
-                    <input type="number" id="w-height-cm" placeholder="e.g. 170" min="100" max="250">
+                    <input type="text" inputmode="decimal" data-numeric id="w-height-cm" placeholder="e.g. 170" min="100" max="250">
                   </div>
                   <div class="form-group">
                     <label>Weight (kg) <span class="req">*</span></label>
-                    <input type="number" id="w-weight-kg" placeholder="e.g. 70" min="30" max="300">
+                    <input type="text" inputmode="decimal" data-numeric id="w-weight-kg" placeholder="e.g. 70" min="30" max="300">
                   </div>
                 </div>
 
@@ -2467,8 +2467,8 @@
               <div id="wstep6-cam-panel">
                 <!-- Hidden sync inputs: still required by camCalculate() -->
                 <div style="display:none">
-                  <input type="number" id="cam-salary">
-                  <input type="number" id="cam-obligations" value="0">
+                  <input type="text" inputmode="decimal" data-numeric id="cam-salary">
+                  <input type="text" inputmode="decimal" data-numeric id="cam-obligations" value="0">
                   <input type="text"   id="cam-name">
                 </div>
 
@@ -2714,7 +2714,7 @@
                 <select id="la-elig-company" onchange="laLoadEligibility()">
                   <option value="">— Auto-detect from Employment —</option>
                 </select>
-                <input type="number" id="la-elig-salary" oninput="laLoadEligibility()">
+                <input type="text" inputmode="decimal" data-numeric id="la-elig-salary" oninput="laLoadEligibility()">
                 <div id="la-elig-alert"></div>
               </div>
 
@@ -3229,7 +3229,7 @@
                   <div class="form-group" style="margin:0">
                     <label>Minimum CIBIL Score</label>
                     <div style="position:relative">
-                      <input type="number" id="la-detail-cibil-score" min="300" max="900" placeholder="700"
+                      <input type="text" inputmode="decimal" data-numeric id="la-detail-cibil-score" min="300" max="900" placeholder="700"
                         style="width:100%;padding:10px 12px;border:1.5px solid var(--border2);border-radius:10px;font-size:16px;font-weight:700;font-family:var(--font-head);background:var(--surface);color:var(--success);outline:none"
                         oninput="this.style.color=+this.value>=720?'var(--success)':+this.value>=680?'var(--warn)':'var(--accent2)'">
                       <div style="font-size:10.5px;color:var(--text3);margin-top:4px">Range: 300–900 · 750+ = Excellent</div>
@@ -3260,37 +3260,37 @@
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;max-width:800px">
                   <div class="form-group" style="margin:0">
                     <label>Max Loan Amount (₹)</label>
-                    <input type="number" id="la-detail-maxloan" placeholder="5000000"
+                    <input type="text" inputmode="decimal" data-numeric id="la-detail-maxloan" placeholder="5000000"
                       style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none">
                   </div>
                   <div class="form-group" style="margin:0">
                     <label>Min Tenure (Months)</label>
-                    <input type="number" id="la-detail-mintenure" placeholder="12"
+                    <input type="text" inputmode="decimal" data-numeric id="la-detail-mintenure" placeholder="12"
                       style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none">
                   </div>
                   <div class="form-group" style="margin:0">
                     <label>Max Tenure (Months)</label>
-                    <input type="number" id="la-detail-maxtenure" placeholder="60"
+                    <input type="text" inputmode="decimal" data-numeric id="la-detail-maxtenure" placeholder="60"
                       style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none">
                   </div>
                   <div class="form-group" style="margin:0">
                     <label>FOIR Limit (%)</label>
-                    <input type="number" id="la-detail-foir" placeholder="50" min="0" max="100"
+                    <input type="text" inputmode="decimal" data-numeric id="la-detail-foir" placeholder="50" min="0" max="100"
                       style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none">
                   </div>
                   <div class="form-group" style="margin:0">
                     <label>Min Age (Years)</label>
-                    <input type="number" id="la-detail-minage" placeholder="21"
+                    <input type="text" inputmode="decimal" data-numeric id="la-detail-minage" placeholder="21"
                       style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none">
                   </div>
                   <div class="form-group" style="margin:0">
                     <label>Max Age (Years)</label>
-                    <input type="number" id="la-detail-maxage" placeholder="60"
+                    <input type="text" inputmode="decimal" data-numeric id="la-detail-maxage" placeholder="60"
                       style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none">
                   </div>
                   <div class="form-group" style="margin:0">
                     <label>Min Experience (Months)</label>
-                    <input type="number" id="la-detail-minexp" placeholder="6"
+                    <input type="text" inputmode="decimal" data-numeric id="la-detail-minexp" placeholder="6"
                       style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none">
                   </div>
                   <div class="form-group" style="margin:0;display:flex;align-items:center;padding-top:22px">
@@ -3968,7 +3968,7 @@
               <!-- Loan Amount -->
               <div class="calc-field">
                 <label>Loan Amount <span class="val-badge" id="calc-amt-badge">₹0</span></label>
-                <input type="number" id="calc-amt" placeholder="e.g. 500000" oninput="calcSyncInput('amt');calcEmi()">
+                <input type="text" inputmode="decimal" data-numeric id="calc-amt" placeholder="e.g. 500000" oninput="calcSyncInput('amt');calcEmi()">
                 <input type="range" id="calc-amt-range" min="50000" max="10000000" step="10000" value="500000" oninput="calcSyncRange('amt');calcEmi()">
                 <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px"><span>₹50K</span><span>₹1Cr</span></div>
               </div>
@@ -3976,7 +3976,7 @@
               <!-- Interest Rate -->
               <div class="calc-field">
                 <label>Annual Interest Rate <span class="val-badge" id="calc-rate-badge">0%</span></label>
-                <input type="number" id="calc-rate" placeholder="e.g. 12.5" step="0.1" oninput="calcSyncInput('rate');calcEmi()">
+                <input type="text" inputmode="decimal" data-numeric id="calc-rate" placeholder="e.g. 12.5" step="0.1" oninput="calcSyncInput('rate');calcEmi()">
                 <input type="range" id="calc-rate-range" min="5" max="30" step="0.1" value="12" oninput="calcSyncRange('rate');calcEmi()">
                 <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px"><span>5%</span><span>36%</span></div>
               </div>
@@ -3986,11 +3986,11 @@
                 <label>Loan Tenure <span class="val-badge" id="calc-tenure-badge">0 mo</span></label>
                 <div class="calc-row2">
                   <div>
-                    <input type="number" id="calc-tenure-years" placeholder="Years" min="1" max="30" oninput="calcEmiSyncYears()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);outline:none">
+                    <input type="text" inputmode="decimal" data-numeric id="calc-tenure-years" placeholder="Years" min="1" max="30" oninput="calcEmiSyncYears()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);outline:none">
                     <div style="font-size:10px;color:var(--text3);margin-top:4px;text-align:center">Years</div>
                   </div>
                   <div>
-                    <input type="number" id="calc-tenure" placeholder="Months" oninput="calcEmiSyncMonths()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);outline:none">
+                    <input type="text" inputmode="decimal" data-numeric id="calc-tenure" placeholder="Months" oninput="calcEmiSyncMonths()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);outline:none">
                     <div style="font-size:10px;color:var(--text3);margin-top:4px;text-align:center">Months</div>
                   </div>
                 </div>
@@ -4002,11 +4002,11 @@
               <div class="calc-row2" style="gap:12px">
                 <div class="calc-field" style="margin-bottom:0">
                   <label>Monthly Salary <span class="val-badge" id="calc-salary-badge" style="font-size:12px">—</span></label>
-                  <input type="number" id="calc-salary" placeholder="For FOIR check" oninput="calcEmi()">
+                  <input type="text" inputmode="decimal" data-numeric id="calc-salary" placeholder="For FOIR check" oninput="calcEmi()">
                 </div>
                 <div class="calc-field" style="margin-bottom:0">
                   <label>Other EMIs <span class="val-badge" id="calc-oblig-badge" style="font-size:12px">—</span></label>
-                  <input type="number" id="calc-obligations-inp" placeholder="Existing EMIs" oninput="calcEmi()">
+                  <input type="text" inputmode="decimal" data-numeric id="calc-obligations-inp" placeholder="Existing EMIs" oninput="calcEmi()">
                 </div>
               </div>
             </div>
@@ -4155,11 +4155,11 @@
           <div class="calc-compare-grid">
             <div class="calc-compare-card">
               <h3><span style="width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;display:inline-flex;align-items:center;justify-content:center">A</span> Loan A</h3>
-              <div class="calc-field"><label>Amount <span class="val-badge" id="cmpA-amt-badge">₹0</span></label><input type="number" id="cmpA-amt" placeholder="e.g. 500000" oninput="calcCompare()"></div>
-              <div class="calc-field"><label>Rate (% p.a.) <span class="val-badge" id="cmpA-rate-badge">0%</span></label><input type="number" id="cmpA-rate" placeholder="e.g. 12" step="0.1" oninput="calcCompare()"></div>
+              <div class="calc-field"><label>Amount <span class="val-badge" id="cmpA-amt-badge">₹0</span></label><input type="text" inputmode="decimal" data-numeric id="cmpA-amt" placeholder="e.g. 500000" oninput="calcCompare()"></div>
+              <div class="calc-field"><label>Rate (% p.a.) <span class="val-badge" id="cmpA-rate-badge">0%</span></label><input type="text" inputmode="decimal" data-numeric id="cmpA-rate" placeholder="e.g. 12" step="0.1" oninput="calcCompare()"></div>
               <div class="calc-row2" style="gap:12px">
-                <div class="calc-field" style="margin-bottom:0"><label>Years</label><input type="number" id="cmpA-years" placeholder="e.g. 5" oninput="calcCompare()"></div>
-                <div class="calc-field" style="margin-bottom:0"><label>Months</label><input type="number" id="cmpA-months" placeholder="e.g. 60" oninput="calcCompare()"></div>
+                <div class="calc-field" style="margin-bottom:0"><label>Years</label><input type="text" inputmode="decimal" data-numeric id="cmpA-years" placeholder="e.g. 5" oninput="calcCompare()"></div>
+                <div class="calc-field" style="margin-bottom:0"><label>Months</label><input type="text" inputmode="decimal" data-numeric id="cmpA-months" placeholder="e.g. 60" oninput="calcCompare()"></div>
               </div>
               <div id="cmpA-result" style="display:none;margin-top:18px;background:var(--surface2);border-radius:12px;padding:16px">
                 <div style="font-size:28px;font-weight:900;font-family:var(--font-head);color:var(--accent)" id="cmpA-emi">₹0</div>
@@ -4172,11 +4172,11 @@
             </div>
             <div class="calc-compare-card">
               <h3><span style="width:22px;height:22px;border-radius:50%;background:var(--accent2);color:#fff;font-size:11px;display:inline-flex;align-items:center;justify-content:center">B</span> Loan B</h3>
-              <div class="calc-field"><label>Amount <span class="val-badge" id="cmpB-amt-badge">₹0</span></label><input type="number" id="cmpB-amt" placeholder="e.g. 500000" oninput="calcCompare()"></div>
-              <div class="calc-field"><label>Rate (% p.a.) <span class="val-badge" id="cmpB-rate-badge">0%</span></label><input type="number" id="cmpB-rate" placeholder="e.g. 14" step="0.1" oninput="calcCompare()"></div>
+              <div class="calc-field"><label>Amount <span class="val-badge" id="cmpB-amt-badge">₹0</span></label><input type="text" inputmode="decimal" data-numeric id="cmpB-amt" placeholder="e.g. 500000" oninput="calcCompare()"></div>
+              <div class="calc-field"><label>Rate (% p.a.) <span class="val-badge" id="cmpB-rate-badge">0%</span></label><input type="text" inputmode="decimal" data-numeric id="cmpB-rate" placeholder="e.g. 14" step="0.1" oninput="calcCompare()"></div>
               <div class="calc-row2" style="gap:12px">
-                <div class="calc-field" style="margin-bottom:0"><label>Years</label><input type="number" id="cmpB-years" placeholder="e.g. 5" oninput="calcCompare()"></div>
-                <div class="calc-field" style="margin-bottom:0"><label>Months</label><input type="number" id="cmpB-months" placeholder="e.g. 60" oninput="calcCompare()"></div>
+                <div class="calc-field" style="margin-bottom:0"><label>Years</label><input type="text" inputmode="decimal" data-numeric id="cmpB-years" placeholder="e.g. 5" oninput="calcCompare()"></div>
+                <div class="calc-field" style="margin-bottom:0"><label>Months</label><input type="text" inputmode="decimal" data-numeric id="cmpB-months" placeholder="e.g. 60" oninput="calcCompare()"></div>
               </div>
               <div id="cmpB-result" style="display:none;margin-top:18px;background:var(--surface2);border-radius:12px;padding:16px">
                 <div style="font-size:28px;font-weight:900;font-family:var(--font-head);color:var(--accent2)" id="cmpB-emi">₹0</div>
@@ -4199,15 +4199,15 @@
           <div class="calc-layout">
             <div class="calc-input-card">
               <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:16px">Original Loan</div>
-              <div class="calc-field"><label>Loan Amount <span class="val-badge" id="pp-amt-badge">₹0</span></label><input type="number" id="pp-amt" placeholder="e.g. 1000000" oninput="calcPrepay()"></div>
-              <div class="calc-field"><label>Annual Rate <span class="val-badge" id="pp-rate-badge">0%</span></label><input type="number" id="pp-rate" placeholder="e.g. 11" step="0.1" oninput="calcPrepay()"></div>
-              <div class="calc-field"><label>Tenure (Months) <span class="val-badge" id="pp-tenure-badge">0 mo</span></label><input type="number" id="pp-tenure" placeholder="e.g. 240" oninput="calcPrepay()"></div>
+              <div class="calc-field"><label>Loan Amount <span class="val-badge" id="pp-amt-badge">₹0</span></label><input type="text" inputmode="decimal" data-numeric id="pp-amt" placeholder="e.g. 1000000" oninput="calcPrepay()"></div>
+              <div class="calc-field"><label>Annual Rate <span class="val-badge" id="pp-rate-badge">0%</span></label><input type="text" inputmode="decimal" data-numeric id="pp-rate" placeholder="e.g. 11" step="0.1" oninput="calcPrepay()"></div>
+              <div class="calc-field"><label>Tenure (Months) <span class="val-badge" id="pp-tenure-badge">0 mo</span></label><input type="text" inputmode="decimal" data-numeric id="pp-tenure" placeholder="e.g. 240" oninput="calcPrepay()"></div>
               <div style="border-top:1px solid var(--border);padding-top:18px;margin-top:6px">
                 <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:16px">Prepayment Details</div>
-                <div class="calc-field"><label>Extra Monthly Payment <span class="val-badge" id="pp-extra-badge">₹0</span></label><input type="number" id="pp-extra" placeholder="e.g. 5000" oninput="calcPrepay()"></div>
+                <div class="calc-field"><label>Extra Monthly Payment <span class="val-badge" id="pp-extra-badge">₹0</span></label><input type="text" inputmode="decimal" data-numeric id="pp-extra" placeholder="e.g. 5000" oninput="calcPrepay()"></div>
                 <div class="calc-field" style="margin-bottom:0">
                   <label>Starting from Month <span class="val-badge" id="pp-start-badge">—</span></label>
-                  <input type="number" id="pp-start" placeholder="e.g. 1" min="1" oninput="calcPrepay()">
+                  <input type="text" inputmode="decimal" data-numeric id="pp-start" placeholder="e.g. 1" min="1" oninput="calcPrepay()">
                 </div>
               </div>
             </div>
@@ -4263,7 +4263,7 @@
               <!-- Monthly EMI -->
               <div class="calc-field">
                 <label>Monthly EMI You Can Pay <span class="val-badge" id="rev-emi-badge">₹0</span></label>
-                <input type="number" id="rev-emi" placeholder="e.g. 15000" oninput="revSyncInput('emi');calcReverse()">
+                <input type="text" inputmode="decimal" data-numeric id="rev-emi" placeholder="e.g. 15000" oninput="revSyncInput('emi');calcReverse()">
                 <input type="range" id="rev-emi-range" min="1000" max="500000" step="500" value="15000" oninput="revSyncRange('emi');calcReverse()">
                 <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px"><span>₹1K</span><span>₹5L</span></div>
               </div>
@@ -4271,7 +4271,7 @@
               <!-- Interest Rate -->
               <div class="calc-field">
                 <label>Annual Interest Rate <span class="val-badge" id="rev-rate-badge">0%</span></label>
-                <input type="number" id="rev-rate" placeholder="e.g. 12.5" step="0.1" oninput="revSyncInput('rate');calcReverse()">
+                <input type="text" inputmode="decimal" data-numeric id="rev-rate" placeholder="e.g. 12.5" step="0.1" oninput="revSyncInput('rate');calcReverse()">
                 <input type="range" id="rev-rate-range" min="5" max="36" step="0.1" value="12" oninput="revSyncRange('rate');calcReverse()">
                 <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px"><span>5%</span><span>36%</span></div>
               </div>
@@ -4281,11 +4281,11 @@
                 <label>Loan Tenure <span class="val-badge" id="rev-tenure-badge">0 mo</span></label>
                 <div class="calc-row2">
                   <div>
-                    <input type="number" id="rev-tenure-years" placeholder="Years" min="1" max="30" oninput="revSyncYears()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);outline:none">
+                    <input type="text" inputmode="decimal" data-numeric id="rev-tenure-years" placeholder="Years" min="1" max="30" oninput="revSyncYears()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);outline:none">
                     <div style="font-size:10px;color:var(--text3);margin-top:4px;text-align:center">Years</div>
                   </div>
                   <div>
-                    <input type="number" id="rev-tenure" placeholder="Months" oninput="revSyncMonths()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);outline:none">
+                    <input type="text" inputmode="decimal" data-numeric id="rev-tenure" placeholder="Months" oninput="revSyncMonths()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);outline:none">
                     <div style="font-size:10px;color:var(--text3);margin-top:4px;text-align:center">Months</div>
                   </div>
                 </div>
@@ -4296,7 +4296,7 @@
               <!-- Optional salary for FOIR -->
               <div class="calc-field" style="margin-bottom:0">
                 <label>Monthly Salary <span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">(optional — for FOIR)</span></label>
-                <input type="number" id="rev-salary" placeholder="For FOIR eligibility check" oninput="calcReverse()">
+                <input type="text" inputmode="decimal" data-numeric id="rev-salary" placeholder="For FOIR eligibility check" oninput="calcReverse()">
               </div>
             </div>
 
@@ -5015,19 +5015,19 @@
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:12px">
               <div>
                 <label style="font-size:10.5px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Sal. Min (₹) *</label>
-                <input type="number" id="cam-new-smin" placeholder="e.g. 45000" oninput="camAutoFillLabel();camAutoDerive()" style="width:100%;padding:7px 10px;border:1.5px solid var(--accent);border-radius:8px;font-size:12.5px;background:var(--surface);color:var(--text)">
+                <input type="text" inputmode="decimal" data-numeric id="cam-new-smin" placeholder="e.g. 45000" oninput="camAutoFillLabel();camAutoDerive()" style="width:100%;padding:7px 10px;border:1.5px solid var(--accent);border-radius:8px;font-size:12.5px;background:var(--surface);color:var(--text)">
               </div>
               <div>
                 <label style="font-size:10.5px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Sal. Max (₹) *</label>
-                <input type="number" id="cam-new-smax" placeholder="e.g. 60000" oninput="camAutoFillLabel();camAutoDerive()" style="width:100%;padding:7px 10px;border:1.5px solid var(--accent);border-radius:8px;font-size:12.5px;background:var(--surface);color:var(--text)">
+                <input type="text" inputmode="decimal" data-numeric id="cam-new-smax" placeholder="e.g. 60000" oninput="camAutoFillLabel();camAutoDerive()" style="width:100%;padding:7px 10px;border:1.5px solid var(--accent);border-radius:8px;font-size:12.5px;background:var(--surface);color:var(--text)">
               </div>
               <div>
                 <label style="font-size:10.5px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Ten. Min (M) *</label>
-                <input type="number" id="cam-new-tmin" placeholder="e.g. 60" oninput="camAutoDerive()" style="width:100%;padding:7px 10px;border:1.5px solid var(--accent);border-radius:8px;font-size:12.5px;background:var(--surface);color:var(--text)">
+                <input type="text" inputmode="decimal" data-numeric id="cam-new-tmin" placeholder="e.g. 60" oninput="camAutoDerive()" style="width:100%;padding:7px 10px;border:1.5px solid var(--accent);border-radius:8px;font-size:12.5px;background:var(--surface);color:var(--text)">
               </div>
               <div>
                 <label style="font-size:10.5px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">FOIR % *</label>
-                <input type="number" id="cam-new-foir" placeholder="e.g. 75" oninput="camAutoDerive()" style="width:100%;padding:7px 10px;border:1.5px solid var(--accent);border-radius:8px;font-size:12.5px;background:var(--surface);color:var(--text)">
+                <input type="text" inputmode="decimal" data-numeric id="cam-new-foir" placeholder="e.g. 75" oninput="camAutoDerive()" style="width:100%;padding:7px 10px;border:1.5px solid var(--accent);border-radius:8px;font-size:12.5px;background:var(--surface);color:var(--text)">
               </div>
             </div>
 
@@ -5041,15 +5041,15 @@
                 </div>
                 <div>
                   <label style="font-size:10.5px;color:var(--text3);font-weight:600;display:block;margin-bottom:4px">Rate Min %</label>
-                  <input type="number" id="cam-new-rmin" placeholder="—" style="width:100%;padding:7px 10px;border:1px solid var(--border2);border-radius:8px;font-size:12.5px;background:var(--surface2);color:var(--text)">
+                  <input type="text" inputmode="decimal" data-numeric id="cam-new-rmin" placeholder="—" style="width:100%;padding:7px 10px;border:1px solid var(--border2);border-radius:8px;font-size:12.5px;background:var(--surface2);color:var(--text)">
                 </div>
                 <div>
                   <label style="font-size:10.5px;color:var(--text3);font-weight:600;display:block;margin-bottom:4px">Rate Max %</label>
-                  <input type="number" id="cam-new-rmax" placeholder="—" style="width:100%;padding:7px 10px;border:1px solid var(--border2);border-radius:8px;font-size:12.5px;background:var(--surface2);color:var(--text)">
+                  <input type="text" inputmode="decimal" data-numeric id="cam-new-rmax" placeholder="—" style="width:100%;padding:7px 10px;border:1px solid var(--border2);border-radius:8px;font-size:12.5px;background:var(--surface2);color:var(--text)">
                 </div>
                 <div>
                   <label style="font-size:10.5px;color:var(--text3);font-weight:600;display:block;margin-bottom:4px">Ten. Max (M)</label>
-                  <input type="number" id="cam-new-tmax" placeholder="—" style="width:100%;padding:7px 10px;border:1px solid var(--border2);border-radius:8px;font-size:12.5px;background:var(--surface2);color:var(--text)">
+                  <input type="text" inputmode="decimal" data-numeric id="cam-new-tmax" placeholder="—" style="width:100%;padding:7px 10px;border:1px solid var(--border2);border-radius:8px;font-size:12.5px;background:var(--surface2);color:var(--text)">
                 </div>
               </div>
               <div id="cam-derive-basis" style="margin-top:10px;font-size:11px;color:var(--text3);font-style:italic"></div>
@@ -5471,7 +5471,7 @@
             </div>
             <div>
               <label style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text3);margin-bottom:6px;display:block">NET MONTHLY SALARY (₹)</label>
-              <input type="number" id="ew-salary" placeholder="e.g. 45000" oninput="ewLoadBanks()" style="width:100%;padding:10px 14px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none;box-sizing:border-box">
+              <input type="text" inputmode="decimal" data-numeric id="ew-salary" placeholder="e.g. 45000" oninput="ewLoadBanks()" style="width:100%;padding:10px 14px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none;box-sizing:border-box">
             </div>
           </div>
 
@@ -5593,7 +5593,7 @@
             </div>
             <div style="position:relative">
               <label style="position:absolute;top:-8px;left:10px;background:var(--surface);padding:0 4px;font-size:11px;color:var(--text3);font-weight:600">Disbursement Amount *</label>
-              <input id="cl-disb-amount" type="number" style="width:100%;padding:14px 12px 10px;border:1px solid var(--border2);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)" placeholder="Amount in ₹">
+              <input id="cl-disb-amount" type="text" inputmode="decimal" data-numeric style="width:100%;padding:14px 12px 10px;border:1px solid var(--border2);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)" placeholder="Amount in ₹">
             </div>
             <div style="position:relative">
               <label style="position:absolute;top:-8px;left:10px;background:var(--surface);padding:0 4px;font-size:11px;color:var(--text3);font-weight:600">Disbursement Date</label>
@@ -5708,7 +5708,7 @@
             </div>
             <div>
               <label style="font-size:12px;font-weight:600;color:var(--text3);display:block;margin-bottom:6px">Payout Amount (₹)</label>
-              <input type="number" id="cs-payout-amt" style="width:100%;padding:10px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none" placeholder="Enter approved amount">
+              <input type="text" inputmode="decimal" data-numeric id="cs-payout-amt" style="width:100%;padding:10px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none" placeholder="Enter approved amount">
             </div>
           </div>
 
@@ -6587,11 +6587,11 @@
             </div>
             <div>
               <div class="af-field-label">Min Amount (₹)</div>
-              <input type="number" id="af-amount-min" class="af-select" style="width:100%" placeholder="e.g. 100,000">
+              <input type="text" inputmode="decimal" data-numeric id="af-amount-min" class="af-select" style="width:100%" placeholder="e.g. 100,000">
             </div>
             <div>
               <div class="af-field-label">Max Amount (₹)</div>
-              <input type="number" id="af-amount-max" class="af-select" style="width:100%" placeholder="e.g. 50,00,000">
+              <input type="text" inputmode="decimal" data-numeric id="af-amount-max" class="af-select" style="width:100%" placeholder="e.g. 50,00,000">
             </div>
             <div>
               <div class="af-field-label">Loan Purpose</div>
@@ -6659,19 +6659,19 @@
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;padding:0 24px 20px">
             <div>
               <div class="af-field-label">Min CIBIL</div>
-              <input type="number" id="af-cibil-min" class="af-select" style="width:100%" placeholder="300" min="300" max="900">
+              <input type="text" inputmode="decimal" data-numeric id="af-cibil-min" class="af-select" style="width:100%" placeholder="300" min="300" max="900">
             </div>
             <div>
               <div class="af-field-label">Max CIBIL</div>
-              <input type="number" id="af-cibil-max" class="af-select" style="width:100%" placeholder="900" min="300" max="900">
+              <input type="text" inputmode="decimal" data-numeric id="af-cibil-max" class="af-select" style="width:100%" placeholder="900" min="300" max="900">
             </div>
             <div>
               <div class="af-field-label">Min Salary (₹)</div>
-              <input type="number" id="af-salary-min" class="af-select" style="width:100%" placeholder="e.g. 25000">
+              <input type="text" inputmode="decimal" data-numeric id="af-salary-min" class="af-select" style="width:100%" placeholder="e.g. 25000">
             </div>
             <div>
               <div class="af-field-label">Max Salary (₹)</div>
-              <input type="number" id="af-salary-max" class="af-select" style="width:100%" placeholder="e.g. 200000">
+              <input type="text" inputmode="decimal" data-numeric id="af-salary-max" class="af-select" style="width:100%" placeholder="e.g. 200000">
             </div>
           </div>
           <!-- CIBIL range slider visual -->
@@ -6823,11 +6823,11 @@
               </div>
               <div>
                 <label style="font-size:11px;font-weight:700;color:var(--text3);display:block;margin-bottom:4px">Min Amount (₹)</label>
-                <input type="number" id="export-amt-min" class="form-control" style="font-size:12px" placeholder="e.g. 100000" oninput="_updateExportCounts()">
+                <input type="text" inputmode="decimal" data-numeric id="export-amt-min" class="form-control" style="font-size:12px" placeholder="e.g. 100000" oninput="_updateExportCounts()">
               </div>
               <div>
                 <label style="font-size:11px;font-weight:700;color:var(--text3);display:block;margin-bottom:4px">Max Amount (₹)</label>
-                <input type="number" id="export-amt-max" class="form-control" style="font-size:12px" placeholder="e.g. 5000000" oninput="_updateExportCounts()">
+                <input type="text" inputmode="decimal" data-numeric id="export-amt-max" class="form-control" style="font-size:12px" placeholder="e.g. 5000000" oninput="_updateExportCounts()">
               </div>
             </div>
           </div>
@@ -7357,11 +7357,11 @@
           </div>
           <div class="form-group"><label>Financer Name</label><input type="text" id="obl-financer"
               placeholder="Bank / NBFC name"></div>
-          <div class="form-group"><label>Sanction Amount (₹)</label><input type="number" id="obl-sanction"
+          <div class="form-group"><label>Sanction Amount (₹)</label><input type="text" inputmode="decimal" data-numeric id="obl-sanction"
               placeholder="e.g. 500000"></div>
-          <div class="form-group"><label>Loan EMI (₹/month)</label><input type="number" id="obl-emi"
+          <div class="form-group"><label>Loan EMI (₹/month)</label><input type="text" inputmode="decimal" data-numeric id="obl-emi"
               placeholder="e.g. 8000"></div>
-          <div class="form-group"><label>Outstanding Amount (₹)</label><input type="number" id="obl-outstanding"
+          <div class="form-group"><label>Outstanding Amount (₹)</label><input type="text" inputmode="decimal" data-numeric id="obl-outstanding"
               placeholder="e.g. 200000"></div>
           <div class="form-group"><label>Closure Date</label><input type="date" id="obl-closure"></div>
           <div class="form-group"><label>Loan Account No.</label><input type="text" id="obl-accno"
@@ -7588,13 +7588,13 @@
           <!-- OVERVIEW -->
           <div id="edit-tab-overview" class="edit-tab-panel active">
             <div class="form-grid">
-              <div class="form-group"><label>Loan Amount (₹) *</label><input type="number" id="ed-amount"
+              <div class="form-group"><label>Loan Amount (₹) *</label><input type="text" inputmode="decimal" data-numeric id="ed-amount"
                   placeholder="e.g. 500000"></div>
               <div class="form-group"><label>Bank / NBFC</label><input type="text" id="ed-bank"
                   placeholder="e.g. HDFC, InCred"></div>
-              <div class="form-group"><label>CIBIL Score</label><input type="number" id="ed-cibil"
+              <div class="form-group"><label>CIBIL Score</label><input type="text" inputmode="decimal" data-numeric id="ed-cibil"
                   placeholder="e.g. 750" min="300" max="900"></div>
-              <div class="form-group"><label>Loan Rate (%)</label><input type="number" id="ed-loanrate" step="0.1"
+              <div class="form-group"><label>Loan Rate (%)</label><input type="text" inputmode="decimal" data-numeric id="ed-loanrate" step="0.1"
                   placeholder="e.g. 12.5"></div>
               <div class="form-group"><label>Tenure (months)</label>
                 <select id="ed-tenure">
@@ -7763,7 +7763,7 @@
                   <option value="PROFESSIONAL">Professional</option>
                 </select>
               </div>
-              <div class="form-group"><label>Net Monthly Salary (₹)</label><input type="number" id="ed-salary"
+              <div class="form-group"><label>Net Monthly Salary (₹)</label><input type="text" inputmode="decimal" data-numeric id="ed-salary"
                   placeholder="e.g. 75000"></div>
               <div class="form-group"><label>Company Name</label><input type="text" id="ed-compname"
                   placeholder="Employer name"></div>
@@ -9473,6 +9473,7 @@ Please log in and change your password immediately.
   <!-- credential-seed.js: must run before efin-app.js -->
   <script src="/js/credential-seed.js"></script>
   <script src="/js/login-helpers.js"></script>
+  <script src="/js/numeric-input.js"></script>
   <script src="/js/efin-app.js?v=59"></script>
   <script src="/js/kyc.js?v=43"></script>
   <script src="/js/tasks.js"></script>

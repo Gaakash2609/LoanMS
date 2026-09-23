@@ -1,0 +1,10 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1440, "h": 1000, "title": "Applications", "is_interactive": true },
+    { "file": "Detail.dc.html", "x": 1560, "y": 0, "w": 1440, "h": 1360, "title": "Application Detail", "is_interactive": true }
+  ],
+  "annotations": [
+    { "id": "flow-note", "x": 1360, "y": -96, "w": 320, "text": "Flow: clicking “View” on any row in Applications opens that application here in Application Detail." }
+  ],
+  "launch": { "view": "canvas" }
+}

@@ -11,7 +11,16 @@ namespace LoanMS.API.Controllers;
 /// The browser posts images + a prompt to /api/kyc/vision; the server forwards
 /// them to the configured AI provider (Gemini/OpenAI/Claude). The API key lives
 /// only in server configuration (AI:ApiKey) — never in the browser.
+///
+/// Requires authentication. BaseController carries no [Authorize] and there is
+/// no global fallback policy (Program.cs:426 registers named policies only), so
+/// without this attribute the whole controller was anonymous — an open,
+/// unauthenticated relay to a metered vision provider accepting up to 60 MB per
+/// request. Every real caller already sends a Bearer token (React via the axios
+/// interceptor; legacy kyc.js sets the header explicitly), so requiring one
+/// breaks no existing flow.
 /// </summary>
+[Authorize]
 public class KycController : BaseController
 {
     // Validation limits
@@ -34,7 +43,6 @@ public class KycController : BaseController
     }
 
     // ── Status (read-only) ────────────────────────────────────────────────────
-    [AllowAnonymous]
     [HttpGet("vision/status")]
     public async Task<IActionResult> VisionStatus()
     {
@@ -47,7 +55,6 @@ public class KycController : BaseController
     }
 
     // ── Vision Proxy — Browser → /api/kyc/vision → configured provider ─────────
-    [AllowAnonymous]
     [HttpPost("vision")]
     [RequestSizeLimit(60_000_000)]
     public async Task<IActionResult> VisionProxy([FromBody] KycVisionRequestDto request, CancellationToken cancellationToken)

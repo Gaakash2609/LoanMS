@@ -1,0 +1,32 @@
+{
+  "release": "LoanMS-P13-MasterVisualParityLoop",
+  "date": "2026-08-26",
+  "baseline": "LoanMS-P12-Final",
+  "status": "released",
+  "architecture_locked": true,
+  "stack": {
+    "frontend": "React + TypeScript + Vite",
+    "backend": "ASP.NET Core .NET 10 Web API",
+    "database": "PostgreSQL",
+    "cloud": "AWS (ECS/ECR/ALB/RDS/S3) + background jobs"
+  },
+  "pages_completed": [
+    "Reports", "Perfios", "Lender Configuration", "Tickets",
+    "Calculator", "Notifications", "Audit"
+  ],
+  "approved_pages_preserved": [
+    "Dashboard", "New Application Wizard", "Loan Detail", "Customers"
+  ],
+  "changes": {
+    "backend": "none", "api": "none", "routing": "none",
+    "permissions": "none", "business_logic": "none",
+    "ui": "additive premium redesign (10 source files)"
+  },
+  "validation": { "tsc": "passed", "vite": "passed" },
+  "deliverables": [
+    "MASTER-CHANGELOG.md", "BUILD-MANIFEST.json", "UI-PARITY-REPORT.md",
+    "VALIDATION-REPORT.md", "RELEASE-CERTIFICATE.md", "RELEASE-MANIFEST.json"
+  ],
+  "source_only": true,
+  "excluded_from_zip": ["node_modules", "dist", "dist-node", "bin", "obj", ".vite"]
+}

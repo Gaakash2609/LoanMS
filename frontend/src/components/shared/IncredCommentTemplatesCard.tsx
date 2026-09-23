@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { settingsApi } from '@/api/settingsApi'
 import { useAuthStore } from '@/store/authStore'
 import { Pencil, Trash2, Check, X } from 'lucide-react'
+import { SkeletonText } from '@/components/ui/Skeleton'
 
 const SETTING_KEY = 'efin_incred_comment_templates'
 const SETTING_CATEGORY = 'Configuration'
@@ -106,7 +107,7 @@ export default function IncredCommentTemplatesCard() {
       {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
 
       {isLoading ? (
-        <p className="text-sm text-gray-400 py-4">Loading…</p>
+        <SkeletonText lines={3} className="py-2" />
       ) : filtered.length === 0 ? (
         <p className="text-sm text-gray-400 py-4">{templates.length === 0 ? 'No templates configured yet.' : 'No templates match your search.'}</p>
       ) : (

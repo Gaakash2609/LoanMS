@@ -75,6 +75,36 @@ public class TasksController : BaseController
         return Ok(ApiResponseDto<object>.Ok(new { task.Id }, "Task created."));
     }
 
+    [HttpPatch("{id:int}/reassign")]
+    public async Task<IActionResult> Reassign(int id, [FromBody] TaskReassignDto dto)
+    {
+        var task = await _db.Tasks.Include(t => t.AssignedTo).FirstOrDefaultAsync(t => t.Id == id);
+        if (task == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+
+        // Parity with legacy confirmTaskTransfer (efin-app.js:23099): only the
+        // current assignee, or a user with task-management permission, may
+        // transfer a task. Backend-enforced — never relies on frontend hiding.
+        var isManager = await _rolePerm.IsAllowedAsync(CurrentUserRole, "canManageTasks");
+        if (task.AssignedToUserId != CurrentUserId && !isManager)
+            return Forbid();
+
+        var newAssignee = await _db.Users.FirstOrDefaultAsync(u => u.Id == dto.AssignedToUserId);
+        if (newAssignee == null)
+            return BadRequest(ApiResponseDto<bool>.Fail("Assigned user does not exist."));
+
+        var fromUserId = task.AssignedToUserId;
+        var fromName   = task.AssignedTo?.FullName;
+        task.AssignedToUserId = dto.AssignedToUserId;
+        task.UpdatedAt = DateTime.UtcNow;
+        // Audit the reassignment (from → to); actor is always the authenticated
+        // user, never taken from the request body — same pattern as Create.
+        AssignmentLogHelper.Log(_db, "Task", task.Id, fromUserId, fromName,
+            dto.AssignedToUserId, newAssignee.FullName, CurrentUserId, CurrentUserEmail);
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponseDto<object>.Ok(new { task.Id, AssignedTo = newAssignee.FullName },
+            $"Task transferred to {newAssignee.FullName}."));
+    }
+
     [HttpPatch("{id:int}/complete")]
     public async Task<IActionResult> Complete(int id)
     {
@@ -106,5 +136,9 @@ public class TaskCreateDto {
     public string? Priority { get; set; }
     public DateTime? DueDate { get; set; }
     public int? LoanId { get; set; }
+    public int AssignedToUserId { get; set; }
+}
+
+public class TaskReassignDto {
     public int AssignedToUserId { get; set; }
 }

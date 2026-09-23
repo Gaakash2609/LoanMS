@@ -7381,22 +7381,22 @@
           <div class="form-group">
             <label>Loan Amount (₹)</label>
             <input class="field-val" id="dv-loanamt-${app.id}" style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:100%;font-size:13px;background:var(--surface2)"
-              type="number" value="${app.sanctionLoanAmt||''}" oninput="approvalFieldSave('${app.id}','sanctionLoanAmt',this.value,'number');dvAutoRecalc('${app.id}')">
+              type="text" inputmode="decimal" data-numeric value="${app.sanctionLoanAmt||''}" oninput="approvalFieldSave('${app.id}','sanctionLoanAmt',this.value,'number');dvAutoRecalc('${app.id}')">
           </div>
           <div class="form-group">
             <label>Tenure (Months)</label>
             <input class="field-val" style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:100%;font-size:13px;background:var(--surface2)"
-              type="number" value="${app.sanctionTenureMo||''}" oninput="approvalFieldSave('${app.id}','sanctionTenureMo',this.value,'number')">
+              type="text" inputmode="decimal" data-numeric value="${app.sanctionTenureMo||''}" oninput="approvalFieldSave('${app.id}','sanctionTenureMo',this.value,'number')">
           </div>
           <div class="form-group">
             <label>Rate of Interest — Annual (%)</label>
             <input class="field-val" id="dv-roi-${app.id}" style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:100%;font-size:13px;background:var(--surface2)"
-              type="number" step="0.01" value="${app.sanctionROI||''}" oninput="approvalFieldSave('${app.id}','sanctionROI',this.value,'number');dvAutoFlatRate('${app.id}')">
+              type="text" inputmode="decimal" data-numeric step="0.01" value="${app.sanctionROI||''}" oninput="approvalFieldSave('${app.id}','sanctionROI',this.value,'number');dvAutoFlatRate('${app.id}')">
           </div>
           <div class="form-group">
             <label>Flat Reducing Rate (%)</label>
             <input class="field-val" id="dv-flat-${app.id}" style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:100%;font-size:13px;background:var(--surface2)"
-              type="number" step="0.01" value="${app.sanctionFlatRate||''}"
+              type="text" inputmode="decimal" data-numeric step="0.01" value="${app.sanctionFlatRate||''}"
               oninput="this.dataset.manual='true';approvalFieldSave('${app.id}','sanctionFlatRate',this.value,'number')"
               data-manual="${app.sanctionFlatRate ? 'true' : 'false'}">
             <div id="dv-flat-hint-${app.id}" style="font-size:10px;color:var(--text3);margin-top:3px;font-style:italic">
@@ -7406,12 +7406,12 @@
           <div class="form-group">
             <label>Processing Fee (%)</label>
             <input class="field-val" id="dv-pfpct-${app.id}" style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:100%;font-size:13px;background:var(--surface2)"
-              type="number" step="0.01" value="${app.sanctionPFPct||''}" oninput="approvalFieldSave('${app.id}','sanctionPFPct',this.value,'number');dvAutoRecalc('${app.id}')">
+              type="text" inputmode="decimal" data-numeric step="0.01" value="${app.sanctionPFPct||''}" oninput="approvalFieldSave('${app.id}','sanctionPFPct',this.value,'number');dvAutoRecalc('${app.id}')">
           </div>
           <div class="form-group">
             <label>EMI (Calculated — Rounded) ₹</label>
             <input class="field-val" style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:100%;font-size:13px;background:var(--surface2)"
-              type="number" value="${app.sanctionEMI||''}" oninput="approvalFieldSave('${app.id}','sanctionEMI',this.value,'number')">
+              type="text" inputmode="decimal" data-numeric value="${app.sanctionEMI||''}" oninput="approvalFieldSave('${app.id}','sanctionEMI',this.value,'number')">
           </div>
           <div class="form-group">
             <label>EMI Date</label>
@@ -7432,7 +7432,7 @@
               </button>
             </div>
             <input class="field-val" id="dv-insurance-${app.id}" style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:100%;font-size:13px;background:var(--surface2)"
-              type="number" value="${app.sanctionInsurance||''}" oninput="approvalFieldSave('${app.id}','sanctionInsurance',this.value,'number');dvAutoRecalc('${app.id}')">
+              type="text" inputmode="decimal" data-numeric value="${app.sanctionInsurance||''}" oninput="approvalFieldSave('${app.id}','sanctionInsurance',this.value,'number');dvAutoRecalc('${app.id}')">
           </div>
           <div class="form-group">
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:5px">
@@ -7446,7 +7446,7 @@
               </button>
             </div>
             <input class="field-val" id="dv-bundled-${app.id}" style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:100%;font-size:13px;background:var(--surface2)"
-              type="number" value="${app.sanctionBundled||''}" oninput="approvalFieldSave('${app.id}','sanctionBundled',this.value,'number')">
+              type="text" inputmode="decimal" data-numeric value="${app.sanctionBundled||''}" oninput="approvalFieldSave('${app.id}','sanctionBundled',this.value,'number')">
           </div>
           <div class="form-group">
             <label>BT (Balance Transfer)</label>
@@ -7459,7 +7459,7 @@
           <div class="form-group">
             <label>GST Applicable (%)</label>
             <input class="field-val" id="dv-gst-${app.id}" style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:100%;font-size:13px;background:var(--surface2)"
-              type="number" value="${app.sanctionGST||18}" oninput="approvalFieldSave('${app.id}','sanctionGST',this.value,'number');dvAutoRecalc('${app.id}')">
+              type="text" inputmode="decimal" data-numeric value="${app.sanctionGST||18}" oninput="approvalFieldSave('${app.id}','sanctionGST',this.value,'number');dvAutoRecalc('${app.id}')">
           </div>
           <div class="form-group">
             <label>Stamp Duty</label>
@@ -10584,7 +10584,12 @@
 
     function holdApp(id) {
       const reason = prompt('Enter hold reason:');
-      if (reason) { changeStatus(id, 'hold'); showToast('Application placed on hold', 'warn'); }
+      if (reason) {
+        const app = APPLICATIONS.find(a => a.id === id);
+        if (app) app.hold_reason = reason; // so the /hold backend call (see api-bridge.js) gets the real reason
+        changeStatus(id, 'hold');
+        showToast('Application placed on hold', 'warn');
+      }
     }
     function rejectApp(id) {
       if (confirm('Reject this application? It can be re-opened within 45 days of the original creation date.')) {
@@ -10770,6 +10775,23 @@
           renderActivity();
           if (typeof persistSave === 'function') persistSave();
 
+          // ── Persist to backend — dedicated /reopen endpoint (mirrors loansApi.reopen in React) ──
+          if (app._apiId && typeof window.apiReq === 'function') {
+            window.apiReq('PATCH', '/loans/' + app._apiId + '/reopen', { reason: remark }).then(function(r) {
+              if (!r || r.success === false) {
+                const msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+                app._dbSyncFailed = true;
+                app._dbSyncMessage = msg;
+                console.warn('[Re-open] NOT saved to database:', msg);
+                showToast('\u26A0 Re-open NOT saved to database: ' + msg, 'warn');
+              } else {
+                app._dbSyncFailed = false;
+                app._dbSyncMessage = '';
+                if (typeof window._apiSyncLoans === 'function') window._apiSyncLoans();
+              }
+            });
+          }
+
           showToast(id + ' re-opened \u2014 resumed at ' + restoreLabel + (attachedFiles.length ? ' \xB7 ' + attachedFiles.length + ' doc(s) saved' : '') + ' \u2713', 'success');
         } catch (err) {
           console.error('reopenApp error:', err);
@@ -10949,6 +10971,23 @@
           renderPipeline();
           renderActivity();
           if (typeof persistSave === 'function') persistSave();
+
+          // ── Persist to backend — dedicated /unhold endpoint (mirrors loansApi.unhold in React) ──
+          if (app._apiId && typeof window.apiReq === 'function') {
+            window.apiReq('PATCH', '/loans/' + app._apiId + '/unhold', { reason: remark }).then(function(r) {
+              if (!r || r.success === false) {
+                const msg = (r && (r.message || (r.errors && r.errors.join(' ')))) || 'Could not reach the server.';
+                app._dbSyncFailed = true;
+                app._dbSyncMessage = msg;
+                console.warn('[Un-hold] NOT saved to database:', msg);
+                showToast('\u26A0 Un-hold NOT saved to database: ' + msg, 'warn');
+              } else {
+                app._dbSyncFailed = false;
+                app._dbSyncMessage = '';
+                if (typeof window._apiSyncLoans === 'function') window._apiSyncLoans();
+              }
+            });
+          }
 
           showToast(id + ' un-held \u2014 resumed at ' + restoreLabel + (attachedFiles.length ? ' \xB7 ' + attachedFiles.length + ' doc(s) saved' : '') + ' \u2713', 'success');
         } catch (err) {
@@ -12568,11 +12607,11 @@
       cont.innerHTML = Object.entries(RPT_TARGETS).sort().map(([m, t]) => `
         <div style="display:grid;grid-template-columns:auto 1fr 1fr 1fr auto;gap:10px;align-items:center;margin-bottom:8px">
           <span style="font-size:13px;font-weight:700;min-width:80px">${monthLabel(m)}</span>
-          <input type="number" value="${t.disbAmt}" onchange="updateTarget('${m}','disbAmt',this.value)"
+          <input type="text" inputmode="decimal" data-numeric value="${t.disbAmt}" onchange="updateTarget('${m}','disbAmt',this.value)"
             style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:8px;font-size:13px;background:var(--surface2);color:var(--text)">
-          <input type="number" value="${t.loginCount}" onchange="updateTarget('${m}','loginCount',this.value)"
+          <input type="text" inputmode="decimal" data-numeric value="${t.loginCount}" onchange="updateTarget('${m}','loginCount',this.value)"
             style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:8px;font-size:13px;background:var(--surface2);color:var(--text)">
-          <input type="number" value="${t.disbCount}" onchange="updateTarget('${m}','disbCount',this.value)"
+          <input type="text" inputmode="decimal" data-numeric value="${t.disbCount}" onchange="updateTarget('${m}','disbCount',this.value)"
             style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:8px;font-size:13px;background:var(--surface2);color:var(--text)">
           <button onclick="deleteTarget('${m}')" title="Remove" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:16px;padding:2px 6px">✕</button>
         </div>`).join('');
@@ -17791,26 +17830,26 @@ ${printContent}
         const r = b.rules || {};
         return `<tr>
           <td style="font-weight:600;white-space:nowrap">${b.name}</td>
-          <td><input type="number" value="${r.maxLoanAmt||5000000}" onblur="lcSaveBankRule(${b.id},'maxLoanAmt',+this.value)"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.maxLoanAmt||5000000}" onblur="lcSaveBankRule(${b.id},'maxLoanAmt',+this.value)"
             style="width:100px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)"></td>
           <td style="white-space:nowrap">
-            <input type="number" value="${r.minTenure||12}" onblur="lcSaveBankRule(${b.id},'minTenure',+this.value)"
+            <input type="text" inputmode="decimal" data-numeric value="${r.minTenure||12}" onblur="lcSaveBankRule(${b.id},'minTenure',+this.value)"
               style="width:50px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">
             <span style="color:var(--text3);margin:0 4px">–</span>
-            <input type="number" value="${r.maxTenure||60}" onblur="lcSaveBankRule(${b.id},'maxTenure',+this.value)"
+            <input type="text" inputmode="decimal" data-numeric value="${r.maxTenure||60}" onblur="lcSaveBankRule(${b.id},'maxTenure',+this.value)"
               style="width:50px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">
           </td>
-          <td style="white-space:nowrap"><input type="number" value="${r.foirLimit||50}" onblur="lcSaveBankRule(${b.id},'foirLimit',+this.value)"
+          <td style="white-space:nowrap"><input type="text" inputmode="decimal" data-numeric value="${r.foirLimit||50}" onblur="lcSaveBankRule(${b.id},'foirLimit',+this.value)"
             style="width:55px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"> %</td>
           <td style="text-align:center"><input type="checkbox" ${r.pfRequired?'checked':''} onchange="lcSaveBankRule(${b.id},'pfRequired',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
           <td style="white-space:nowrap">
-            <input type="number" value="${r.minAge||21}" onblur="lcSaveBankRule(${b.id},'minAge',+this.value)"
+            <input type="text" inputmode="decimal" data-numeric value="${r.minAge||21}" onblur="lcSaveBankRule(${b.id},'minAge',+this.value)"
               style="width:46px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">
             <span style="color:var(--text3);margin:0 4px">–</span>
-            <input type="number" value="${r.maxAge||60}" onblur="lcSaveBankRule(${b.id},'maxAge',+this.value)"
+            <input type="text" inputmode="decimal" data-numeric value="${r.maxAge||60}" onblur="lcSaveBankRule(${b.id},'maxAge',+this.value)"
               style="width:46px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">
           </td>
-          <td><input type="number" value="${r.minExpMonths||6}" onblur="lcSaveBankRule(${b.id},'minExpMonths',+this.value)"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.minExpMonths||6}" onblur="lcSaveBankRule(${b.id},'minExpMonths',+this.value)"
             style="width:58px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"></td>
           <td><button class="btn btn-ghost btn-sm" onclick="lcSaveBankRuleRow(${b.id})" style="font-size:11px">✓ Save</button></td>
         </tr>`;
@@ -17870,7 +17909,7 @@ ${printContent}
         return `<tr>
           <td style="font-weight:600">${b.name}</td>
           <td>
-            <input type="number" value="${score}" min="300" max="900"
+            <input type="text" inputmode="decimal" data-numeric value="${score}" min="300" max="900"
               style="width:80px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:13px;font-family:monospace;font-weight:700;background:var(--surface);color:${color}"
               oninput="this.style.color=+this.value>=720?'var(--success)':+this.value>=680?'var(--warn)':'var(--accent2)'"
               onblur="lcSaveBankRule(${b.id},'minCibil',+this.value)">
@@ -18685,7 +18724,7 @@ ${printContent}
               <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;padding:8px 14px;align-items:center">
                 <div style="display:flex;align-items:center;gap:6px">
                   <span style="font-size:11px;color:var(--text3)">Min ₹</span>
-                  <input type="number" value="${c.salary}"
+                  <input type="text" inputmode="decimal" data-numeric value="${c.salary}"
                     onblur="laUpdateCategory(${c.id},'salary',parseFloat(this.value)||0);laDetailRenderCategories()"
                     style="background:transparent;border:none;border-bottom:1px solid transparent;color:var(--danger);font-family:monospace;font-size:13px;font-weight:700;outline:none;width:90px"
                     onfocus="this.style.borderBottomColor='var(--accent)'"
@@ -18763,7 +18802,7 @@ ${printContent}
 
           <div class="form-group" style="margin-bottom:12px">
             <label style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Minimum Salary (₹) *</label>
-            <input type="number" id="dcat-salary" placeholder="e.g. 30000"
+            <input type="text" inputmode="decimal" data-numeric id="dcat-salary" placeholder="e.g. 30000"
               style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:8px;font-size:13px;font-family:monospace;background:var(--surface);color:var(--text);outline:none;box-sizing:border-box">
           </div>
 
@@ -19275,8 +19314,8 @@ ${printContent}
 
           <!-- Quick rules -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-            <div class="form-group" style="margin:0"><label>Min CIBIL Score</label><input type="number" id="ab-cibil" placeholder="700" min="300" max="900" style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none"></div>
-            <div class="form-group" style="margin:0"><label>Max Loan Amount (₹)</label><input type="number" id="ab-maxloan" placeholder="5000000" style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none"></div>
+            <div class="form-group" style="margin:0"><label>Min CIBIL Score</label><input type="text" inputmode="decimal" data-numeric id="ab-cibil" placeholder="700" min="300" max="900" style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none"></div>
+            <div class="form-group" style="margin:0"><label>Max Loan Amount (₹)</label><input type="text" inputmode="decimal" data-numeric id="ab-maxloan" placeholder="5000000" style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:9px;font-size:13px;background:var(--surface);color:var(--text);outline:none"></div>
           </div>
 
           <!-- Employment types -->
@@ -19725,7 +19764,7 @@ ${printContent}
             </div>
           </td>
           <td>
-            <input type="number" value="${c.salary}" onblur="laUpdateCategory(${c.id},'salary',parseFloat(this.value)||0)"
+            <input type="text" inputmode="decimal" data-numeric value="${c.salary}" onblur="laUpdateCategory(${c.id},'salary',parseFloat(this.value)||0)"
               style="background:transparent;border:none;border-bottom:1px solid transparent;color:var(--danger);font-family:monospace;font-size:13px;font-weight:600;outline:none;width:110px"
               onfocus="this.style.borderBottomColor='var(--accent)'" onblur="this.style.borderBottomColor='transparent';laUpdateCategory(${c.id},'salary',parseFloat(this.value)||0)">
           </td>
@@ -19778,7 +19817,7 @@ ${printContent}
 
           <div class="form-group" style="margin-bottom:12px">
             <label style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Minimum Salary (₹) *</label>
-            <input type="number" id="acat-salary" placeholder="e.g. 50000"
+            <input type="text" inputmode="decimal" data-numeric id="acat-salary" placeholder="e.g. 50000"
               style="width:100%;padding:10px 12px;border:1.5px solid var(--border2);border-radius:8px;font-size:13px;font-family:monospace;background:var(--surface);color:var(--text);outline:none;box-sizing:border-box">
           </div>
 
@@ -21024,7 +21063,7 @@ ${printContent}
           </td>
           <td style="padding:10px 12px">
             ${canEdit
-              ? `<input type="number" value="${line.approvedLoan||0}" placeholder="0" min="0"
+              ? `<input type="text" inputmode="decimal" data-numeric value="${line.approvedLoan||0}" placeholder="0" min="0"
                   onblur="updateBankLine('${app.id}',${idx},'approvedLoan',parseFloat(this.value)||0)"
                   style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:7px 10px;font-size:12.5px;color:var(--text);font-family:var(--font-body);outline:none;text-align:right"/>`
               : `<span style="font-size:12.5px">${line.approvedLoan ? '₹'+Number(line.approvedLoan).toLocaleString('en-IN') : '0'}</span>`}
@@ -22169,7 +22208,7 @@ ${printContent}
         return `<tr>
           <td style="font-weight:600">${b.name}</td>
           <td>
-            <input type="number" value="${score}" min="300" max="900"
+            <input type="text" inputmode="decimal" data-numeric value="${score}" min="300" max="900"
               style="width:80px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:13px;font-family:monospace;font-weight:700;background:var(--surface);color:${color}"
               oninput="this.style.color=+this.value>=720?'var(--success)':+this.value>=680?'var(--warn)':'var(--accent2)'"
               onblur="lcBlSaveRule(${b.id},'minCibil',+this.value)">
@@ -22273,27 +22312,27 @@ ${printContent}
         const r = _prEnsureRules(b,pk);
         return `<tr>
           <td style="font-weight:600;white-space:nowrap">${b.name}</td>
-          <td><input type="number" value="${r.maxLoanAmt||5000000}" onblur="lcBlSaveRule(${b.id},'maxLoanAmt',+this.value)"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.maxLoanAmt||5000000}" onblur="lcBlSaveRule(${b.id},'maxLoanAmt',+this.value)"
             style="width:100px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)"></td>
           <td style="white-space:nowrap">
-            <input type="number" value="${r.minTenure||12}" onblur="lcBlSaveRule(${b.id},'minTenure',+this.value)"
+            <input type="text" inputmode="decimal" data-numeric value="${r.minTenure||12}" onblur="lcBlSaveRule(${b.id},'minTenure',+this.value)"
               style="width:50px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">
             <span style="color:var(--text3);margin:0 4px">–</span>
-            <input type="number" value="${r.maxTenure||60}" onblur="lcBlSaveRule(${b.id},'maxTenure',+this.value)"
+            <input type="text" inputmode="decimal" data-numeric value="${r.maxTenure||60}" onblur="lcBlSaveRule(${b.id},'maxTenure',+this.value)"
               style="width:50px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">
           </td>
-          <td><input type="number" value="${r.foirLimit||55}" onblur="lcBlSaveRule(${b.id},'foirLimit',+this.value)" min="0" max="100"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.foirLimit||55}" onblur="lcBlSaveRule(${b.id},'foirLimit',+this.value)" min="0" max="100"
             style="width:55px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"> %</td>
           <td style="white-space:nowrap">
-            <input type="number" value="${r.minAge||25}" onblur="lcBlSaveRule(${b.id},'minAge',+this.value)"
+            <input type="text" inputmode="decimal" data-numeric value="${r.minAge||25}" onblur="lcBlSaveRule(${b.id},'minAge',+this.value)"
               style="width:46px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">
             <span style="color:var(--text3);margin:0 4px">–</span>
-            <input type="number" value="${r.maxAge||65}" onblur="lcBlSaveRule(${b.id},'maxAge',+this.value)"
+            <input type="text" inputmode="decimal" data-numeric value="${r.maxAge||65}" onblur="lcBlSaveRule(${b.id},'maxAge',+this.value)"
               style="width:46px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">
           </td>
-          <td><input type="number" value="${r.minVintage||24}" onblur="lcBlSaveRule(${b.id},'minVintage',+this.value)"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.minVintage||24}" onblur="lcBlSaveRule(${b.id},'minVintage',+this.value)"
             style="width:65px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"></td>
-          <td><input type="number" value="${r.minTurnover||200000}" onblur="lcBlSaveRule(${b.id},'minTurnover',+this.value)"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.minTurnover||200000}" onblur="lcBlSaveRule(${b.id},'minTurnover',+this.value)"
             style="width:100px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)"></td>
           <td><button class="btn btn-ghost btn-sm" onclick="lcBlSaveRuleRow(${b.id})" style="font-size:11px">✓ Save</button></td>
         </tr>`;
@@ -22391,7 +22430,7 @@ ${printContent}
           </div>
           <div class="form-group" style="margin-bottom:12px">
             <label style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Min Monthly Turnover (₹) *</label>
-            <input type="number" id="blcat-turnover" value="${editing?editing.minTurnover:''}" placeholder="e.g. 200000"
+            <input type="text" inputmode="decimal" data-numeric id="blcat-turnover" value="${editing?editing.minTurnover:''}" placeholder="e.g. 200000"
               style="width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:8px;font-size:13px;font-family:monospace;background:var(--surface);color:var(--text);outline:none;box-sizing:border-box">
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
@@ -22465,19 +22504,19 @@ ${printContent}
         const r = _prEnsureRules(b,pk);
         return `<tr>
           <td style="font-weight:600;white-space:nowrap">${b.name}</td>
-          <td><input type="number" value="${r.minAcctVintage||12}" onblur="lcBlSaveRule(${b.id},'minAcctVintage',+this.value)"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.minAcctVintage||12}" onblur="lcBlSaveRule(${b.id},'minAcctVintage',+this.value)"
             style="width:65px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"></td>
-          <td><input type="number" value="${r.minAvgBalance||50000}" onblur="lcBlSaveRule(${b.id},'minAvgBalance',+this.value)"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.minAvgBalance||50000}" onblur="lcBlSaveRule(${b.id},'minAvgBalance',+this.value)"
             style="width:90px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)"></td>
           <td>
-            <input type="number" value="${r.minCreditScore||650}" min="300" max="900"
+            <input type="text" inputmode="decimal" data-numeric value="${r.minCreditScore||650}" min="300" max="900"
               style="width:70px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:13px;font-family:monospace;font-weight:700;background:var(--surface);color:${(r.minCreditScore||650)>=720?'var(--success)':(r.minCreditScore||650)>=680?'var(--warn)':'var(--accent2)'}"
               oninput="this.style.color=+this.value>=720?'var(--success)':+this.value>=680?'var(--warn)':'var(--accent2)'"
               onblur="lcBlSaveRule(${b.id},'minCreditScore',+this.value)">
           </td>
-          <td><input type="number" value="${r.bankStmtMonths||12}" onblur="lcBlSaveRule(${b.id},'bankStmtMonths',+this.value)"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.bankStmtMonths||12}" onblur="lcBlSaveRule(${b.id},'bankStmtMonths',+this.value)"
             style="width:55px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"></td>
-          <td><input type="number" value="${r.bounceTolerance||2}" min="0" onblur="lcBlSaveRule(${b.id},'bounceTolerance',+this.value)"
+          <td><input type="text" inputmode="decimal" data-numeric value="${r.bounceTolerance||2}" min="0" onblur="lcBlSaveRule(${b.id},'bounceTolerance',+this.value)"
             style="width:55px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"></td>
           <td><button class="btn btn-ghost btn-sm" onclick="lcBlSaveRuleRow(${b.id})" style="font-size:11px">✓ Save</button></td>
         </tr>`;
@@ -23346,15 +23385,15 @@ ${printContent}
                 style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface2);color:var(--text)" placeholder="Bank / NBFC">` : `<span>${o.financer_name || '—'}</span>`}
             </td>
             <td style="text-align:right">
-              ${canEdit ? `<input type="number" value="${o.sanction_amt || ''}" onchange="oblField('${appId}',${o.id},'sanction_amt',+this.value)"
+              ${canEdit ? `<input type="text" inputmode="decimal" data-numeric value="${o.sanction_amt || ''}" onchange="oblField('${appId}',${o.id},'sanction_amt',+this.value)"
                 style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;text-align:right;background:var(--surface2);color:var(--text)" placeholder="0">` : `₹${Number(o.sanction_amt || 0).toLocaleString('en-IN')}`}
             </td>
             <td style="text-align:right">
-              ${canEdit ? `<input type="number" value="${o.loan_emi || ''}" onchange="oblField('${appId}',${o.id},'loan_emi',+this.value)"
+              ${canEdit ? `<input type="text" inputmode="decimal" data-numeric value="${o.loan_emi || ''}" onchange="oblField('${appId}',${o.id},'loan_emi',+this.value)"
                 style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;text-align:right;background:var(--surface2);color:${o.loan_emi ? 'var(--warn)' : 'var(--text)'};font-weight:${o.loan_emi ? '700' : '400'}" placeholder="0">` : `<strong style="color:${o.loan_emi ? 'var(--warn)' : 'var(--text3)'}">₹${Number(o.loan_emi || 0).toLocaleString('en-IN')}</strong>`}
             </td>
             <td style="text-align:right">
-              ${canEdit ? `<input type="number" value="${o.amount_out || ''}" onchange="oblField('${appId}',${o.id},'amount_out',+this.value)"
+              ${canEdit ? `<input type="text" inputmode="decimal" data-numeric value="${o.amount_out || ''}" onchange="oblField('${appId}',${o.id},'amount_out',+this.value)"
                 style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;text-align:right;background:var(--surface2);color:var(--text)" placeholder="0">` : `₹${Number(o.amount_out || 0).toLocaleString('en-IN')}`}
             </td>
             <td>
@@ -23832,7 +23871,7 @@ ${printContent}
         <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px">👥 Co-App & Risk Metrics</div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Co-applicant salary boosts eligibility</div>
         <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
-          <input type="number" id="coapp-salary-${appId}" value="${coAppSalary || ''}" placeholder="₹ Co-app monthly"
+          <input type="text" inputmode="decimal" data-numeric id="coapp-salary-${appId}" value="${coAppSalary || ''}" placeholder="₹ Co-app monthly"
             style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;outline:none;color:var(--text);background:var(--surface)"
             oninput="updateCoAppSalaryDebounced('${appId}',this.value)">
         </div>
@@ -31383,15 +31422,15 @@ function dsaCloseAppsModal() {
         <div class="la-grid">
           <div class="la-group">
             <label>Your Loan Amount (₹) *</label>
-            <input type="number" id="la-loan-amt" placeholder="e.g. 600000" oninput="laAutoCalc()">
+            <input type="text" inputmode="decimal" data-numeric id="la-loan-amt" placeholder="e.g. 600000" oninput="laAutoCalc()">
           </div>
           <div class="la-group">
             <label>Tenure (Years)</label>
-            <input type="number" id="la-tenure-yr" placeholder="e.g. 5" min="1" max="30" oninput="laSyncTenure('yr')">
+            <input type="text" inputmode="decimal" data-numeric id="la-tenure-yr" placeholder="e.g. 5" min="1" max="30" oninput="laSyncTenure('yr')">
           </div>
           <div class="la-group">
             <label>Tenure (Months)</label>
-            <input type="number" id="la-tenure-mo" placeholder="e.g. 60" min="1" max="360" oninput="laSyncTenure('mo')">
+            <input type="text" inputmode="decimal" data-numeric id="la-tenure-mo" placeholder="e.g. 60" min="1" max="360" oninput="laSyncTenure('mo')">
           </div>
         </div>
 
@@ -31400,11 +31439,11 @@ function dsaCloseAppsModal() {
         <div class="la-grid">
           <div class="la-group">
             <label>Rate of Interest — Annual (%)</label>
-            <input type="number" id="la-roi" placeholder="e.g. 12.50" step="0.01" oninput="laAutoCalc()">
+            <input type="text" inputmode="decimal" data-numeric id="la-roi" placeholder="e.g. 12.50" step="0.01" oninput="laAutoCalc()">
           </div>
           <div class="la-group">
             <label>Flat Reducing Rate (%)</label>
-            <input type="number" id="la-flat-rate" placeholder="Auto from ROI" step="0.01" oninput="document.getElementById('la-flat-rate').dataset.manualEdit='true';laAutoCalc()">
+            <input type="text" inputmode="decimal" data-numeric id="la-flat-rate" placeholder="Auto from ROI" step="0.01" oninput="document.getElementById('la-flat-rate').dataset.manualEdit='true';laAutoCalc()">
             <div id="la-flat-rate-hint"></div>
           </div>
           <div class="la-group">
@@ -31415,13 +31454,13 @@ function dsaCloseAppsModal() {
                 <span id="la-pf-toggle-txt">+ Add to Bundled: OFF</span>
               </button>
             </div>
-            <input type="number" id="la-pf-pct" placeholder="e.g. 1.50" step="0.01" oninput="laAutoCalc()">
+            <input type="text" inputmode="decimal" data-numeric id="la-pf-pct" placeholder="e.g. 1.50" step="0.01" oninput="laAutoCalc()">
           </div>
         </div>
         <div class="la-grid-2" style="margin-top:12px">
           <div class="la-group">
             <label>GST Applicable (%)</label>
-            <input type="number" id="la-gst" value="18" step="0.01" placeholder="18">
+            <input type="text" inputmode="decimal" data-numeric id="la-gst" value="18" step="0.01" placeholder="18">
           </div>
           <div class="la-group">
             <label>Stamp Duty</label>
@@ -31434,7 +31473,7 @@ function dsaCloseAppsModal() {
         <div class="la-grid">
           <div class="la-group">
             <label>EMI (Calculated — Rounded) ₹</label>
-            <input type="number" id="la-emi" placeholder="Auto-calculated" oninput="">
+            <input type="text" inputmode="decimal" data-numeric id="la-emi" placeholder="Auto-calculated" oninput="">
           </div>
           <div class="la-group">
             <label>EMI Date (Every Month)</label>
@@ -31450,13 +31489,13 @@ function dsaCloseAppsModal() {
                 <span id="la-ins-toggle-txt">+ Insurance: OFF</span>
               </button>
             </div>
-            <input type="number" id="la-insurance" placeholder="e.g. 10699" oninput="laAutoCalc()">
+            <input type="text" inputmode="decimal" data-numeric id="la-insurance" placeholder="e.g. 10699" oninput="laAutoCalc()">
           </div>
         </div>
         <div class="la-grid-2" style="margin-top:12px">
           <div class="la-group">
             <label>Bundled Loan Amount (₹)</label>
-            <input type="number" id="la-bundled" placeholder="Auto-calculated">
+            <input type="text" inputmode="decimal" data-numeric id="la-bundled" placeholder="Auto-calculated">
           </div>
           <div class="la-group">
             <label>BT (Balance Transfer)</label>
@@ -32147,35 +32186,35 @@ function confirmSkipDeviation(appId) {
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div class="esm-group">
           <label>Loan Amount (₹) *</label>
-          <input type="number" class="esm-input" id="appdev-loan-amt" placeholder="e.g. 600000" oninput="appdevAutoCalc()">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-loan-amt" placeholder="e.g. 600000" oninput="appdevAutoCalc()">
         </div>
         <div class="esm-group">
           <label>Tenure (Years)</label>
-          <input type="number" class="esm-input" id="appdev-tenure-yr" placeholder="e.g. 5" oninput="appdevSyncTenure('yr')">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-tenure-yr" placeholder="e.g. 5" oninput="appdevSyncTenure('yr')">
         </div>
         <div class="esm-group">
           <label>Tenure (Months)</label>
-          <input type="number" class="esm-input" id="appdev-tenure-mo" placeholder="e.g. 60" oninput="appdevSyncTenure('mo')">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-tenure-mo" placeholder="e.g. 60" oninput="appdevSyncTenure('mo')">
         </div>
         <div class="esm-group">
           <label>ROI — Annual (%)</label>
-          <input type="number" class="esm-input" id="appdev-roi" placeholder="e.g. 12.50" step="0.01" oninput="appdevAutoCalc()">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-roi" placeholder="e.g. 12.50" step="0.01" oninput="appdevAutoCalc()">
         </div>
         <div class="esm-group">
           <label>Processing Fee (%)</label>
-          <input type="number" class="esm-input" id="appdev-pf-pct" placeholder="e.g. 1.50" step="0.01" oninput="appdevAutoCalc()">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-pf-pct" placeholder="e.g. 1.50" step="0.01" oninput="appdevAutoCalc()">
         </div>
         <div class="esm-group">
           <label>Insurance (₹)</label>
-          <input type="number" class="esm-input" id="appdev-insurance" placeholder="e.g. 9997" oninput="appdevAutoCalc()">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-insurance" placeholder="e.g. 9997" oninput="appdevAutoCalc()">
         </div>
         <div class="esm-group">
           <label>EMI (₹)</label>
-          <input type="number" class="esm-input" id="appdev-emi" placeholder="Auto-calculated">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-emi" placeholder="Auto-calculated">
         </div>
         <div class="esm-group">
           <label>Bundled Amount (₹)</label>
-          <input type="number" class="esm-input" id="appdev-bundled" placeholder="Auto-calculated">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-bundled" placeholder="Auto-calculated">
         </div>
         <div class="esm-group">
           <label>EMI Date</label>
@@ -32185,7 +32224,7 @@ function confirmSkipDeviation(appId) {
         </div>
         <div class="esm-group">
           <label>GST (%)</label>
-          <input type="number" class="esm-input" id="appdev-gst" value="18" step="0.01">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-gst" value="18" step="0.01">
         </div>
         <div class="esm-group">
           <label>BT (Balance Transfer)</label>
@@ -32196,7 +32235,7 @@ function confirmSkipDeviation(appId) {
         </div>
         <div class="esm-group">
           <label>Flat Reducing Rate (%)</label>
-          <input type="number" class="esm-input" id="appdev-flat-rate" placeholder="e.g. 7.00" step="0.01">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="appdev-flat-rate" placeholder="e.g. 7.00" step="0.01">
         </div>
       </div>
       <div class="esm-group" style="margin-top:6px">
@@ -32370,7 +32409,7 @@ function confirmApprovedDeviation() {
       <div class="esm-row">
         <div class="esm-group">
           <label>Disbursement Amount (₹) *</label>
-          <input type="number" class="esm-input" id="disb-amount" placeholder="e.g. 800000" oninput="disbUpdatePreview()">
+          <input type="text" inputmode="decimal" data-numeric class="esm-input" id="disb-amount" placeholder="e.g. 800000" oninput="disbUpdatePreview()">
         </div>
         <div class="esm-group">
           <label>Disbursement Date *</label>
@@ -32973,7 +33012,7 @@ function icAddRow(date, amount, month, entryType) {
   tr.innerHTML = `
     <td><input type="text" class="ic-date" placeholder="31-03-2026" value="${date || ''}"
       oninput="icAutoMonth(this)"></td>
-    <td><input type="number" class="ic-amt amt" placeholder="${amtPlaceholder}" value="${amount || ''}"
+    <td><input type="text" inputmode="decimal" data-numeric class="ic-amt amt" placeholder="${amtPlaceholder}" value="${amount || ''}"
       oninput="icCalcAvg()"></td>
     <td><select class="ic-mon" oninput="icCalcAvg()">
       <option value="">— Month —</option>
@@ -33839,7 +33878,7 @@ function ecsAddRow(date, amount) {
   const tr    = document.createElement('tr');
   tr.innerHTML = `
     <td><input type="text" class="ecs-date" placeholder="DD-MM-YYYY" value="${date || ''}"></td>
-    <td><input type="number" class="ecs-amt" placeholder="0.00" step="0.01" value="${amount !== undefined ? amount : ''}" oninput="ecsCalcStats()"></td>
+    <td><input type="text" inputmode="decimal" data-numeric class="ecs-amt" placeholder="0.00" step="0.01" value="${amount !== undefined ? amount : ''}" oninput="ecsCalcStats()"></td>
     <td style="text-align:center"><button class="ecs-del-btn" onclick="this.closest('tr').remove();ecsCalcStats()" title="Remove">🗑</button></td>`;
   tbody.appendChild(tr);
   ecsCalcStats();
@@ -34081,15 +34120,15 @@ function confirmEcsReturn() {
       <div>
         <div class="dc-sec">💰 Sanction Details</div>
         <div class="dc-grid">
-          <div class="dc-group"><label>Loan Amount (₹)</label><input type="number" class="dc-input" id="dc-loan-amt" oninput="dcUpdatePreview()"></div>
-          <div class="dc-group"><label>Tenure (Years)</label><input type="number" class="dc-input" id="dc-tenure-yr" oninput="dcUpdatePreview()"></div>
-          <div class="dc-group"><label>Tenure (Months)</label><input type="number" class="dc-input" id="dc-tenure-mo" oninput="dcUpdatePreview()"></div>
-          <div class="dc-group"><label>EMI (₹)</label><input type="number" class="dc-input" id="dc-emi" oninput="dcUpdatePreview()"></div>
-          <div class="dc-group"><label>Flat Reducing Rate (%)</label><input type="number" class="dc-input" id="dc-flat-rate" step="0.01" oninput="dcUpdatePreview()"></div>
-          <div class="dc-group"><label>Processing Fee (%)</label><input type="number" class="dc-input" id="dc-pf-pct" step="0.01" oninput="dcUpdatePreview()"></div>
-          <div class="dc-group"><label>Rate of Interest — Annual (%)</label><input type="number" class="dc-input" id="dc-roi" step="0.01" oninput="dcUpdatePreview()"></div>
-          <div class="dc-group"><label>Bundled Loan Amount (₹)</label><input type="number" class="dc-input" id="dc-bundled" oninput="dcUpdatePreview()"></div>
-          <div class="dc-group"><label>Insurance (₹)</label><input type="number" class="dc-input" id="dc-insurance" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>Loan Amount (₹)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-loan-amt" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>Tenure (Years)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-tenure-yr" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>Tenure (Months)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-tenure-mo" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>EMI (₹)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-emi" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>Flat Reducing Rate (%)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-flat-rate" step="0.01" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>Processing Fee (%)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-pf-pct" step="0.01" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>Rate of Interest — Annual (%)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-roi" step="0.01" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>Bundled Loan Amount (₹)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-bundled" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>Insurance (₹)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-insurance" oninput="dcUpdatePreview()"></div>
           <div class="dc-group"><label>BT (Balance Transfer)</label>
             <select class="dc-input" id="dc-bt" onchange="dcUpdatePreview()">
               <option value="NO">NO</option><option value="YES">YES</option>
@@ -34100,7 +34139,7 @@ function confirmEcsReturn() {
               ${[1,2,3,4,5,7,10,15,20,25].map(d=>`<option value="${d}">${d===1?'1st':d===2?'2nd':d===3?'3rd':d+'th'} of every Month</option>`).join('')}
             </select>
           </div>
-          <div class="dc-group"><label>GST (%)</label><input type="number" class="dc-input" id="dc-gst" value="18" oninput="dcUpdatePreview()"></div>
+          <div class="dc-group"><label>GST (%)</label><input type="text" inputmode="decimal" data-numeric class="dc-input" id="dc-gst" value="18" oninput="dcUpdatePreview()"></div>
           <div class="dc-group"><label>Stamp Duty</label><input type="text" class="dc-input" id="dc-stamp" value="As per government applicable" oninput="dcUpdatePreview()"></div>
         </div>
       </div>
@@ -36927,13 +36966,13 @@ function stgMirrorCam() {
           ${CAM_MATRIX.map((r,i) => `
             <tr style="background:${i%2===0?'var(--surface)':'var(--surface2)'}">
               <td style="padding:9px 14px;font-weight:600;color:var(--accent)">${r.label||fmtNum(r.salMin)+'–'+fmtNum(r.salMax)}</td>
-              <td style="padding:9px 14px"><input type="number" value="${fmtNum(r.salMin)}" onchange="stgCamEdit(${i},'salMin',this.value)" style="width:90px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
-              <td style="padding:9px 14px"><input type="number" value="${fmtNum(r.salMax)}" onchange="stgCamEdit(${i},'salMax',this.value)" style="width:90px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
-              <td style="padding:9px 14px"><input type="number" value="${fmtNum(r.rateMin)}" onchange="stgCamEdit(${i},'rateMin',this.value)" style="width:70px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
-              <td style="padding:9px 14px"><input type="number" value="${fmtNum(r.rateMax)}" onchange="stgCamEdit(${i},'rateMax',this.value)" style="width:70px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
-              <td style="padding:9px 14px"><input type="number" value="${fmtNum(r.tenMin)}" onchange="stgCamEdit(${i},'tenMin',this.value)" style="width:70px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
-              <td style="padding:9px 14px"><input type="number" value="${fmtNum(r.tenMax)}" onchange="stgCamEdit(${i},'tenMax',this.value)" style="width:70px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
-              <td style="padding:9px 14px;text-align:right"><input type="number" value="${fmtNum(r.foir)}" onchange="stgCamEdit(${i},'foir',this.value)" style="width:60px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text);text-align:right"></td>
+              <td style="padding:9px 14px"><input type="text" inputmode="decimal" data-numeric value="${fmtNum(r.salMin)}" onchange="stgCamEdit(${i},'salMin',this.value)" style="width:90px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
+              <td style="padding:9px 14px"><input type="text" inputmode="decimal" data-numeric value="${fmtNum(r.salMax)}" onchange="stgCamEdit(${i},'salMax',this.value)" style="width:90px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
+              <td style="padding:9px 14px"><input type="text" inputmode="decimal" data-numeric value="${fmtNum(r.rateMin)}" onchange="stgCamEdit(${i},'rateMin',this.value)" style="width:70px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
+              <td style="padding:9px 14px"><input type="text" inputmode="decimal" data-numeric value="${fmtNum(r.rateMax)}" onchange="stgCamEdit(${i},'rateMax',this.value)" style="width:70px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
+              <td style="padding:9px 14px"><input type="text" inputmode="decimal" data-numeric value="${fmtNum(r.tenMin)}" onchange="stgCamEdit(${i},'tenMin',this.value)" style="width:70px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
+              <td style="padding:9px 14px"><input type="text" inputmode="decimal" data-numeric value="${fmtNum(r.tenMax)}" onchange="stgCamEdit(${i},'tenMax',this.value)" style="width:70px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text)"></td>
+              <td style="padding:9px 14px;text-align:right"><input type="text" inputmode="decimal" data-numeric value="${fmtNum(r.foir)}" onchange="stgCamEdit(${i},'foir',this.value)" style="width:60px;padding:4px 7px;border:1px solid var(--border2);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text);text-align:right"></td>
               <td style="padding:9px 14px;text-align:center"><button onclick="stgCamDeleteRow(${i})" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:15px;padding:2px 6px" title="Remove row">✕</button></td>
             </tr>`).join('')}
         </tbody>
@@ -41748,7 +41787,7 @@ window.notifyManagement = notifyManagement;
       const empty = !lbl;
       html += `<div class="pse-slip-row">
         <div class="pse-month-tag${empty ? ' empty' : ''}" id="pse-mtag${i}">${empty ? '—' : lbl}</div>
-        <input type="number" placeholder="Net Pay" id="pse-net${i}" style="font-size:14px;font-weight:600" oninput="
+        <input type="text" inputmode="decimal" data-numeric placeholder="Net Pay" id="pse-net${i}" style="font-size:14px;font-weight:600" oninput="
           this.style.borderColor='';
           const v=parseFloat(this.value);
           const sb=document.getElementById('pse-sb${i}');
@@ -41756,8 +41795,8 @@ window.notifyManagement = notifyManagement;
           if(sub&&v>0){sub.innerHTML='<span style=\\'color:var(--success);font-weight:700\\'>✓ Net Pay: ₹'+v.toLocaleString('en-IN')+'</span>';}
           else if(sub){sub.textContent='PDF · Image · Excel · CSV';}
         "/>
-        <input type="number" id="pse-gross${i}"  style="display:none" tabindex="-1" aria-hidden="true" oninput="pseAutoCalc(${i})"/>
-        <input type="number" id="pse-deduct${i}" style="display:none" tabindex="-1" aria-hidden="true" oninput="pseAutoCalc(${i})"/>
+        <input type="text" inputmode="decimal" data-numeric id="pse-gross${i}"  style="display:none" tabindex="-1" aria-hidden="true" oninput="pseAutoCalc(${i})"/>
+        <input type="text" inputmode="decimal" data-numeric id="pse-deduct${i}" style="display:none" tabindex="-1" aria-hidden="true" oninput="pseAutoCalc(${i})"/>
       </div>`;
     }
     document.getElementById('pse-slip-rows').innerHTML = html;
@@ -44035,7 +44074,7 @@ function buildAdvancedFilterPanel() {
         
         <div>
           <label style="font-size:10px;color:var(--text3);font-weight:700;display:block;margin-bottom:4px">Amount ₹</label>
-          <input type="number" id="mgmt-filter-amount-min" placeholder="Min" onchange="applyAdvancedFilters()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:11px">
+          <input type="text" inputmode="decimal" data-numeric id="mgmt-filter-amount-min" placeholder="Min" onchange="applyAdvancedFilters()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:11px">
         </div>
         
         <div>

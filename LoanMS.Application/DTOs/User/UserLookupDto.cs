@@ -12,4 +12,10 @@ public class UserLookupDto
     public int Id { get; set; }
     public string FullName { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
+    // Location FK — needed so the wizard's Sales Person dropdown can filter to
+    // users at the selected branch (Vanilla parity: wLocationChange filters
+    // sales persons by location, efin-app.js:6937-6955). Non-sensitive: it is
+    // just the branch id, same value already exposed via LocationName on the
+    // Locations list. Null for users with no branch assigned.
+    public int? LocationId { get; set; }
 }

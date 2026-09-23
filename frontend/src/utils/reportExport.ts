@@ -57,7 +57,9 @@ export function buildReportCsv(data: ReportData, scopeLabel: string, loans: Loan
   return '\uFEFF' + `Scope: ${scopeLabel} | Generated: ${new Date().toLocaleString('en-IN')}\n\n` + sections.join('\n\n')
 }
 
-function htmlTable(header: string[], rows: (string | number)[][]) {
+// Exported so the Loans-list Excel export can reuse this exact markup instead
+// of growing a second, drifting copy of it (see utils/loanExport.ts).
+export function htmlTable(header: string[], rows: (string | number)[][]) {
   return `<table>
     <thead><tr>${header.map(h => `<th>${h}</th>`).join('')}</tr></thead>
     <tbody>${rows.map((r, i) => `<tr style="background:${i % 2 === 0 ? '#f8faff' : '#fff'}">${r.map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody>
@@ -77,10 +79,25 @@ export function buildReportExcelHtml(data: ReportData, scopeLabel: string, loans
     <h3 style="font-family:Arial;color:#1a4fa3">Monthly Disbursements</h3>
     ${htmlTable(['Month', 'Count', 'Amount'], data.monthlyDisbursements.map(m => [m.month, m.count, m.amount]))}
     ${loans.length ? `<h3 style="font-family:Arial;color:#1a4fa3">Applications</h3>${htmlTable(LOAN_ROW_HEADER, loanRows(loans))}` : ''}`
+  return wrapExcelHtml('LoanMS Report', body)
+}
+
+/**
+ * Legacy's Excel technique, factored out of buildReportExcelHtml so the
+ * Loans-list export can reuse it: an HTML table wrapped in the Office
+ * namespace declarations and saved with a .xls extension + Office MIME type,
+ * which Excel opens natively. No spreadsheet library is involved — this is
+ * exactly what legacy's exportXLSX/exportReportExcel do.
+ *
+ * `sheetName` becomes the worksheet tab name. The markup below is unchanged
+ * from what buildReportExcelHtml emitted inline before, so its output is
+ * byte-for-byte identical.
+ */
+export function wrapExcelHtml(sheetName: string, body: string): string {
   return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
     <head><meta charset="UTF-8">
     <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
-    <x:Name>LoanMS Report</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+    <x:Name>${sheetName}</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
     </x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
     <style>td,th{border:1px solid #c8d8f8;padding:6px 10px;font-size:12px;font-family:Arial}th{background:#1a4fa3;color:#fff;font-weight:bold}</style>
     </head><body>${body}</body></html>`

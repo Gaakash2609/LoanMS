@@ -9,9 +9,9 @@ namespace LoanMS.API.Controllers;
 
 /// <summary>
 /// Payout Rules Engine — defines % of loan amount paid to sales/DSA per loan type.
-/// All endpoints require Admin or Manager. No anonymous access.
+/// All endpoints require Admin. No anonymous access (Manager has Sales-level Payout rights — no rules access).
 /// </summary>
-[Authorize(Roles = "Admin,Manager")]
+[Authorize(Roles = "Admin")]
 public class PayoutRulesController : BaseController
 {
     private readonly AppDbContext _db;
@@ -113,7 +113,7 @@ public class PayoutRulesController : BaseController
             LoanId       = 0,
             LoanAmount   = amount,
             LoanType     = loanType,
-            PayoutRate   = rule.Percentage,   // visible to Admin/Manager only
+            PayoutRate   = rule.Percentage,   // visible to Admin only
             PayoutAmount = payout,
             Formula      = $"Calculated from configured rule for {loanType}"
         }));

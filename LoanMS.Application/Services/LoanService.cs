@@ -11,13 +11,28 @@ public class LoanService : ILoanService
     private readonly ICacheService _cache;
     private readonly IEmailService _emailService;
     private readonly IEmailTemplateProvider _emailTemplates;
+    // Phase 7 (locked rule): authoritative trusted-income resolver. Optional so
+    // existing constructions/tests still compile; DI injects the real service.
+    private readonly IIncomeVerificationService? _incomeVerification;
 
-    public LoanService(IUnitOfWork uow, ICacheService cache, IEmailService emailService, IEmailTemplateProvider emailTemplates)
+    public LoanService(IUnitOfWork uow, ICacheService cache, IEmailService emailService,
+        IEmailTemplateProvider emailTemplates, IIncomeVerificationService? incomeVerification = null)
     {
         _uow   = uow;
         _cache = cache;
         _emailService = emailService;
         _emailTemplates = emailTemplates;
+        _incomeVerification = incomeVerification;
+    }
+
+    // Salaried = NOT self-employed. Mirrors frontend foir.ts isSelfEmployed
+    // (/SELF|SENP|BUSIN|PROF/) so the salaried/self-employed split is identical
+    // on both sides. Self-employed income is untouched (keeps Perfios-ABB FOIR).
+    private static bool IsSalaried(string? employmentType)
+    {
+        var t = (employmentType ?? string.Empty).ToUpperInvariant();
+        var selfEmp = t.Contains("SELF") || t.Contains("SENP") || t.Contains("BUSIN") || t.Contains("PROF");
+        return !selfEmp;
     }
 
     // Roles that may see internal routing data (Remarks field contains lender/channel/source).
@@ -96,9 +111,22 @@ public class LoanService : ILoanService
 
         await _uow.Loans.AddAsync(loan);
 
+        // BUGFIX (confirmed at runtime — POST /api/loans returned 500
+        // "SQLite Error 19: FOREIGN KEY constraint failed"): this used to set
+        // LoanId = loan.Id, but AddAsync only starts tracking the entity
+        // (GenericRepository.cs:28-32 — no SaveChanges), so loan.Id was still
+        // 0 at this point. The history row was therefore inserted with
+        // LoanId = 0, which no Loans row can satisfy.
+        //
+        // Setting the Loan navigation property instead lets EF Core fill
+        // LoanId in from the generated identity during SaveChangesAsync
+        // below. Deliberately preferred over inserting an extra
+        // SaveChangesAsync() after AddAsync(loan): both rows still go in one
+        // SaveChanges — i.e. one transaction — so a failure can never leave a
+        // loan persisted without its creation-history row.
         await _uow.LoanStatusHistories.AddAsync(new LoanStatusHistory
         {
-            LoanId           = loan.Id,
+            Loan             = loan,
             FromStatus       = LoanStatus.Draft,
             ToStatus         = LoanStatus.Draft,
             Comment          = "Loan application created.",
@@ -175,6 +203,54 @@ public class LoanService : ILoanService
         if (!allowed.Contains(request.NewStatus))
             return ApiResponseDto<LoanDto>.Fail($"Cannot move from {loan.Status} to {request.NewStatus}.");
 
+        // ── Underwriting-entry gate (Vanilla doUnderwriting/_hasCompleteBankDetails,
+        // efin-app.js) — a loan cannot move into Under Review until at least one
+        // Bank Details line (Bank Name + Application Number + Approved Loan) is
+        // filled in. NOTE: Vanilla's second prerequisite, "_hasObligationsCalculated"
+        // (an app.foirState.foir value must exist), is NOT enforced here — in this
+        // architecture FOIR is always a live client-side computation on the Loan
+        // Detail page (FoirEligibilityPanel), not a discrete stored action, so
+        // there is nothing to gate on; flagging this rather than inventing a
+        // stand-in flag for it.
+        if (request.NewStatus == LoanStatus.UnderReview)
+        {
+            var withLines = await _uow.Loans.GetWithDetailsAsync(id);
+            var hasCompleteBankLine = withLines?.BankLines != null && withLines.BankLines.Any(b =>
+                !string.IsNullOrWhiteSpace(b.BankName) &&
+                !string.IsNullOrWhiteSpace(b.ApplicationNumber) &&
+                b.ApprovedLoan.HasValue && b.ApprovedLoan.Value > 0);
+            if (!hasCompleteBankLine)
+                return ApiResponseDto<LoanDto>.Fail(
+                    "Cannot move to Under Review — add at least one complete Bank Details line "
+                    + "(Bank Name, Application Number, Approved Loan) first.");
+        }
+
+        // ── Disburse pre-check gate (Vanilla buildTimelineActionButtons: the
+        // Disburse button itself only renders when nach_done && customer_agreement_done,
+        // on top of status) — enforced server-side here so the generic /status route
+        // and the dedicated /disburse route (which both funnel through this method)
+        // can't disburse without both being marked done first. ──
+        if (request.NewStatus == LoanStatus.Disbursed && !(loan.NachDone && loan.CustomerAgreementDone))
+            return ApiResponseDto<LoanDto>.Fail(
+                "Cannot disburse — mark both Nach and Customer Agreement as done first.");
+
+        // ── Verified-disbursement gate (real-money safety) ──────────────────────
+        // For a loan routed through the InCred lender, LoanMS must NOT reach the
+        // Disbursed state on an operator's say-so alone: a verified InCred
+        // disbursement-success callback must already be on record. Pending /
+        // Failed / Unknown / no-callback InCred loans are blocked here, so LoanMS
+        // never reports money as disbursed merely because it sent the request.
+        // Loans NOT routed through InCred are the internal manual-disbursement
+        // mode and are unaffected — that disbursement is an authorized internal
+        // action, already role-gated (canDisburse) and audited via status history.
+        // (Idempotency: once Disbursed, the transition matrix only allows Closed,
+        // so a duplicate disburse is already blocked above.)
+        if (request.NewStatus == LoanStatus.Disbursed && IsIncredLoan(loan) && !IsIncredDisbursementVerified(loan))
+            return ApiResponseDto<LoanDto>.Fail(
+                "Cannot mark this InCred loan Disbursed: no verified InCred disbursement success is on record "
+                + $"(last event='{loan.IncredLastWebhookEvent ?? "none"}', status='{loan.IncredLastWebhookStatus ?? "none"}'). "
+                + "A verified InCred DISBURSED/SUCCESS callback is required before this loan can be marked Disbursed.");
+
         var fromStatus = loan.Status;
         loan.Status    = request.NewStatus;
         loan.UpdatedAt = DateTime.UtcNow;
@@ -197,6 +273,16 @@ public class LoanService : ILoanService
         else if (request.NewStatus == LoanStatus.Closed)
         {
             loan.ClosedAt = DateTime.UtcNow;
+        }
+        else if (request.NewStatus == LoanStatus.Rejected)
+        {
+            // Snapshot the stage the loan was in right before rejection, and
+            // when — matches Vanilla rejectApp/confirmReject (efin-app.js:10589,
+            // 22925), which stamp app.preRejectedStatus/app.rejectedAt on every
+            // reject. ReopenAsync below reads these to restore the exact prior
+            // stage and to enforce the 45-day reopen window.
+            loan.PreRejectedStatus = fromStatus;
+            loan.RejectedAt        = DateTime.UtcNow;
         }
 
         await _uow.Loans.UpdateAsync(loan);
@@ -232,6 +318,343 @@ public class LoanService : ILoanService
         }
 
         return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), $"Loan status updated to {request.NewStatus}.");
+    }
+
+    /// <summary>
+    /// Phase 2 RBAC — G-08. Admin stage override. Unlike UpdateStatusAsync this
+    /// intentionally does NOT consult GetAllowedTransitions — an Admin may force
+    /// any status — but it is the ONLY transition path that skips the state
+    /// machine, it still records full LoanStatusHistory (old→new + the mandatory
+    /// reason), and the caller must have gated it to Admin. HasAccessAsync is
+    /// still checked (Admin sees everything, so this is a belt-and-braces guard,
+    /// and blocks the endpoint being wired to a non-Admin by mistake later).
+    /// </summary>
+    public async Task<ApiResponseDto<LoanDto>> OverrideStatusAsync(int id, LoanStatus newStatus, string reason, int changedByUserId, string changedByUserRole)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return ApiResponseDto<LoanDto>.Fail("An override reason is required.");
+        if (!string.Equals(changedByUserRole, "Admin", StringComparison.OrdinalIgnoreCase))
+            return ApiResponseDto<LoanDto>.Fail("Stage override is restricted to Admin.");
+        if (!await _uow.Loans.HasAccessAsync(id, changedByUserId, changedByUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var fromStatus = loan.Status;
+        if (fromStatus == newStatus)
+            return ApiResponseDto<LoanDto>.Fail($"Loan is already {newStatus}.");
+
+        loan.Status              = newStatus;
+        loan.UpdatedAt           = DateTime.UtcNow;
+        loan.SlaBreachNotifiedAt = null;
+
+        // Keep the same terminal-state bookkeeping the normal path applies.
+        if (newStatus == LoanStatus.Approved)
+        {
+            loan.ApprovedAt ??= DateTime.UtcNow;
+            loan.ApprovedAmount ??= loan.RequestedAmount;
+        }
+        else if (newStatus == LoanStatus.Disbursed) loan.DisbursedAt ??= DateTime.UtcNow;
+        else if (newStatus == LoanStatus.Closed)     loan.ClosedAt ??= DateTime.UtcNow;
+        else if (newStatus == LoanStatus.Rejected)
+        {
+            // Same snapshot UpdateStatusAsync takes on a normal Reject, so an
+            // admin-overridden-to-Rejected loan is still eligible for the
+            // normal 45-day Reopen flow instead of being stuck.
+            loan.PreRejectedStatus = fromStatus;
+            loan.RejectedAt        = DateTime.UtcNow;
+        }
+
+        await _uow.Loans.UpdateAsync(loan);
+        await _uow.LoanStatusHistories.AddAsync(new LoanStatusHistory
+        {
+            LoanId          = loan.Id,
+            FromStatus      = fromStatus,
+            ToStatus        = newStatus,
+            Comment         = $"[ADMIN OVERRIDE] {reason}",
+            ChangedByUserId = changedByUserId
+        });
+        await _uow.SaveChangesAsync();
+
+        var updated = await _uow.Loans.GetWithDetailsAsync(id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"),
+            $"Loan status overridden from {fromStatus} to {newStatus}.");
+    }
+
+    /// <summary>
+    /// Re-open a Rejected loan — Vanilla parity for reopenApp (efin-app.js:10600).
+    /// Admin-only (Vanilla's guardFinalLock only lets Admin modify a
+    /// final-locked/Rejected app; the button is shown to other roles there too,
+    /// but guardFinalLock blocks the actual mutation for anyone but Admin —
+    /// button-presence parity is explicitly out of scope here, only the
+    /// enforced permission is). Two Vanilla rules enforced exactly:
+    ///   1. Hard 45-day window from the loan's original creation date
+    ///      (RejectedAt is NOT the anchor — CreatedAt is, same as Vanilla's
+    ///      `createdAt` there), after which reopen is blocked outright.
+    ///   2. Restores to PreRejectedStatus (the stage snapshotted at reject
+    ///      time), not an admin-picked status — Vanilla falls back to 'login'
+    ///      if that snapshot is missing (e.g. legacy data); LoanMS's nearest
+    ///      equivalent stage is Submitted, used here for the same fallback.
+    /// Does not attempt file-attachment parity (Vanilla's reopen modal allows
+    /// optional file uploads) — attachments can be added via the existing
+    /// loan-documents endpoint after reopening; flagged separately, not
+    /// silently dropped.
+    /// </summary>
+    public async Task<ApiResponseDto<LoanDto>> ReopenAsync(int id, string reason, int changedByUserId, string changedByUserRole)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return ApiResponseDto<LoanDto>.Fail("A remark is required to re-open this application.");
+        if (!string.Equals(changedByUserRole, "Admin", StringComparison.OrdinalIgnoreCase))
+            return ApiResponseDto<LoanDto>.Fail("Re-open is restricted to Admin.");
+        if (!await _uow.Loans.HasAccessAsync(id, changedByUserId, changedByUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        if (loan.Status != LoanStatus.Rejected)
+            return ApiResponseDto<LoanDto>.Fail("Only a Rejected application can be re-opened.");
+
+        var daysElapsed = (DateTime.UtcNow - loan.CreatedAt).TotalDays;
+        if (daysElapsed > 45)
+            return ApiResponseDto<LoanDto>.Fail("Re-open window has expired (45 days from creation date).");
+
+        var restoreStatus = loan.PreRejectedStatus ?? LoanStatus.Submitted;
+
+        var fromStatus = loan.Status;
+        loan.Status              = restoreStatus;
+        loan.UpdatedAt           = DateTime.UtcNow;
+        loan.SlaBreachNotifiedAt = null;
+        loan.PreRejectedStatus   = null;
+        loan.RejectedAt          = null;
+
+        await _uow.Loans.UpdateAsync(loan);
+        await _uow.LoanStatusHistories.AddAsync(new LoanStatusHistory
+        {
+            LoanId          = loan.Id,
+            FromStatus      = fromStatus,
+            ToStatus        = restoreStatus,
+            Comment         = $"[RE-OPENED] {reason}",
+            ChangedByUserId = changedByUserId
+        });
+        await _uow.SaveChangesAsync();
+
+        var updated = await _uow.Loans.GetWithDetailsAsync(id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"),
+            $"Application re-opened, resumed at {restoreStatus}.");
+    }
+
+    // States from which a loan may be put on hold. Draft (not yet submitted),
+    // and the terminal/locked states (Rejected/Disbursed/Closed) cannot —
+    // matching legacy's EDIT_BLOCKED/FINAL_LOCK stages, which lock rejected/
+    // disbursed/cancelled. Hold is for pausing an in-flight application.
+    private static readonly HashSet<LoanStatus> _holdableStates = new()
+    {
+        LoanStatus.Submitted, LoanStatus.UnderReview, LoanStatus.Approved, LoanStatus.Acceptance
+    };
+
+    public async Task<ApiResponseDto<LoanDto>> HoldAsync(int id, string reason, int changedByUserId, string changedByUserRole)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return ApiResponseDto<LoanDto>.Fail("A hold reason is required.");
+
+        // Same visibility/location scoping every other transition uses.
+        if (!await _uow.Loans.HasAccessAsync(id, changedByUserId, changedByUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        if (loan.Status == LoanStatus.OnHold)
+            return ApiResponseDto<LoanDto>.Fail("This loan is already on hold.");
+        if (!_holdableStates.Contains(loan.Status))
+            return ApiResponseDto<LoanDto>.Fail($"A loan in {loan.Status} cannot be put on hold.");
+
+        var fromStatus = loan.Status;
+        loan.Status = LoanStatus.OnHold;
+        loan.UpdatedAt = DateTime.UtcNow;
+        loan.SlaBreachNotifiedAt = null;
+        await _uow.Loans.UpdateAsync(loan);
+
+        // History records the exact status held before the hold — that's what
+        // Un-hold reads back to restore, so no new column is needed.
+        await _uow.LoanStatusHistories.AddAsync(new LoanStatusHistory
+        {
+            LoanId = loan.Id, FromStatus = fromStatus, ToStatus = LoanStatus.OnHold,
+            Comment = reason, ChangedByUserId = changedByUserId
+        });
+        await _uow.SaveChangesAsync();
+
+        var updated = await _uow.Loans.GetWithDetailsAsync(id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), "Loan placed on hold.");
+    }
+
+    public async Task<ApiResponseDto<LoanDto>> UnholdAsync(int id, string? comment, int changedByUserId, string changedByUserRole)
+    {
+        if (!await _uow.Loans.HasAccessAsync(id, changedByUserId, changedByUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        if (loan.Status != LoanStatus.OnHold)
+            return ApiResponseDto<LoanDto>.Fail("This loan is not on hold.");
+
+        // Restore whatever status the loan held immediately before the hold —
+        // the FromStatus of the most recent history row whose ToStatus is
+        // OnHold. Falls back to Submitted if (defensively) none is found.
+        var history = await _uow.LoanStatusHistories.GetByLoanIdAsync(id);
+        var lastHold = history
+            .Where(h => h.ToStatus == LoanStatus.OnHold)
+            .OrderByDescending(h => h.CreatedAt)
+            .FirstOrDefault();
+        var restoreTo = lastHold?.FromStatus ?? LoanStatus.Submitted;
+
+        loan.Status = restoreTo;
+        loan.UpdatedAt = DateTime.UtcNow;
+        loan.SlaBreachNotifiedAt = null;
+        await _uow.Loans.UpdateAsync(loan);
+
+        await _uow.LoanStatusHistories.AddAsync(new LoanStatusHistory
+        {
+            LoanId = loan.Id, FromStatus = LoanStatus.OnHold, ToStatus = restoreTo,
+            Comment = string.IsNullOrWhiteSpace(comment) ? "Hold released." : comment,
+            ChangedByUserId = changedByUserId
+        });
+        await _uow.SaveChangesAsync();
+
+        var updated = await _uow.Loans.GetWithDetailsAsync(id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), $"Loan resumed at {restoreTo}.");
+    }
+
+    public async Task<ApiResponseDto<List<LoanDeviationDto>>> GetDeviationsAsync(int id, int currentUserId, string currentUserRole)
+    {
+        if (!await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
+            return ApiResponseDto<List<LoanDeviationDto>>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetWithDetailsAsync(id);
+        if (loan == null) return ApiResponseDto<List<LoanDeviationDto>>.Fail("Loan not found.");
+
+        // Approved amount is the sanctioned figure once set; before approval
+        // the requested amount is what's being underwritten. EMI/ROI/tenure
+        // come off the loan; salary/CIBIL/employment off its customer.
+        var amount = loan.ApprovedAmount ?? loan.RequestedAmount;
+
+        // Locked Phase-7 rule: for SALARIED applicants the FOIR-deviation calc uses
+        // the bank-VERIFIED income when the IncomeVerification qualifies
+        // (AutoVerified / ManualReviewCompleted-Approved), else declared. Read from
+        // the persisted backend result, never a client flag. Self-employed income
+        // is untouched (its FOIR keeps the existing Perfios-ABB path elsewhere).
+        var declaredIncome = loan.Customer?.MonthlyIncome ?? 0m;
+        var incomeForCalc = declaredIncome;
+        if (_incomeVerification != null && IsSalaried(loan.Customer?.EmploymentType))
+        {
+            var verified = await _incomeVerification.GetTrustedVerifiedIncomeAsync(loan.Id);
+            if (verified is > 0m) incomeForCalc = verified.Value;
+        }
+
+        var flags = DeviationEvaluator.Evaluate(
+            loan.LoanType, amount, loan.TenureMonths, loan.InterestRate,
+            loan.MonthlyEmi ?? 0m,
+            incomeForCalc,
+            loan.Customer?.CibilScore ?? 0,
+            loan.Customer?.EmploymentType);
+
+        return ApiResponseDto<List<LoanDeviationDto>>.Ok(flags);
+    }
+
+    // ── Deviation workflow (Raise → Decision → Approve/Reject, plus Skip) ─────
+    // Ported from legacy's confirmDeviation/confirmSkipDeviation. Kept off the
+    // generic state machine (GetAllowedTransitions) so only these dedicated,
+    // canDeviation-gated methods can move a loan into/out of Decision — the
+    // same containment OnHold uses. No new Loan columns: the deviation
+    // type/reason live in the status-history comment, and the raiser (for
+    // self-approval prevention) is read back from that history row.
+
+    private async Task<(Loan? loan, ApiResponseDto<LoanDto>? error)> LoadForTransition(int id, int userId, string role)
+    {
+        if (!await _uow.Loans.HasAccessAsync(id, userId, role))
+            return (null, ApiResponseDto<LoanDto>.Fail("Loan not found."));
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return (null, ApiResponseDto<LoanDto>.Fail("Loan not found."));
+        return (loan, null);
+    }
+
+    private async Task<ApiResponseDto<LoanDto>> ApplyDeviationTransition(
+        Loan loan, LoanStatus to, string comment, int userId)
+    {
+        var from = loan.Status;
+        loan.Status = to;
+        loan.UpdatedAt = DateTime.UtcNow;
+        loan.SlaBreachNotifiedAt = null;
+        if (to == LoanStatus.Approved)
+        {
+            loan.ApprovedAt ??= DateTime.UtcNow;
+            loan.ApprovedAmount ??= loan.RequestedAmount;
+            loan.MonthlyEmi ??= CalculateEmi(loan.ApprovedAmount.Value, loan.InterestRate, loan.TenureMonths);
+        }
+        await _uow.Loans.UpdateAsync(loan);
+        await _uow.LoanStatusHistories.AddAsync(new LoanStatusHistory
+        {
+            LoanId = loan.Id, FromStatus = from, ToStatus = to, Comment = comment, ChangedByUserId = userId
+        });
+        await _uow.SaveChangesAsync();
+        var updated = await _uow.Loans.GetWithDetailsAsync(loan.Id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), $"Loan moved to {to}.");
+    }
+
+    public async Task<ApiResponseDto<LoanDto>> RaiseDeviationAsync(int id, string deviationType, string reason, int changedByUserId, string changedByUserRole)
+    {
+        if (string.IsNullOrWhiteSpace(deviationType)) return ApiResponseDto<LoanDto>.Fail("A deviation type is required.");
+        if (string.IsNullOrWhiteSpace(reason)) return ApiResponseDto<LoanDto>.Fail("A deviation reason is required.");
+
+        var (loan, error) = await LoadForTransition(id, changedByUserId, changedByUserRole);
+        if (error != null) return error;
+        if (loan!.Status != LoanStatus.UnderReview)
+            return ApiResponseDto<LoanDto>.Fail($"A deviation can only be raised on an Under Review loan (this loan is {loan.Status}).");
+
+        return await ApplyDeviationTransition(loan, LoanStatus.Decision,
+            $"Deviation Type: {deviationType} | Reason: {reason}", changedByUserId);
+    }
+
+    public async Task<ApiResponseDto<LoanDto>> DecideDeviationAsync(int id, bool approve, string? comment, int changedByUserId, string changedByUserRole)
+    {
+        var (loan, error) = await LoadForTransition(id, changedByUserId, changedByUserRole);
+        if (error != null) return error;
+        if (loan!.Status != LoanStatus.Decision)
+            return ApiResponseDto<LoanDto>.Fail($"Only a loan awaiting a deviation decision can be decided (this loan is {loan.Status}).");
+
+        // Self-approval prevention: whoever raised the deviation (the
+        // ChangedByUserId of the most recent →Decision history row) cannot
+        // approve it themselves, unless they are Admin. Rejecting your own
+        // raised deviation is allowed (it's declining, not self-clearing).
+        if (approve && !string.Equals(changedByUserRole, "Admin", StringComparison.OrdinalIgnoreCase))
+        {
+            var history = await _uow.LoanStatusHistories.GetByLoanIdAsync(id);
+            var raise = history.Where(h => h.ToStatus == LoanStatus.Decision)
+                               .OrderByDescending(h => h.CreatedAt).FirstOrDefault();
+            if (raise != null && raise.ChangedByUserId == changedByUserId)
+                return ApiResponseDto<LoanDto>.Fail("You cannot approve a deviation you raised — it must be decided by a Team Leader or Admin.");
+        }
+
+        var to = approve ? LoanStatus.Approved : LoanStatus.Rejected;
+        var note = approve
+            ? (string.IsNullOrWhiteSpace(comment) ? "Deviation approved." : $"Deviation approved. {comment}")
+            : (string.IsNullOrWhiteSpace(comment) ? "Deviation rejected." : $"Deviation rejected. {comment}");
+        return await ApplyDeviationTransition(loan, to, note, changedByUserId);
+    }
+
+    public async Task<ApiResponseDto<LoanDto>> SkipDeviationAsync(int id, string? comment, int changedByUserId, string changedByUserRole)
+    {
+        var (loan, error) = await LoadForTransition(id, changedByUserId, changedByUserRole);
+        if (error != null) return error;
+        if (loan!.Status != LoanStatus.UnderReview)
+            return ApiResponseDto<LoanDto>.Fail($"A deviation can only be skipped on an Under Review loan (this loan is {loan.Status}).");
+
+        return await ApplyDeviationTransition(loan, LoanStatus.Approved,
+            string.IsNullOrWhiteSpace(comment) ? "Deviation skipped — proceeding." : $"Deviation skipped. {comment}",
+            changedByUserId);
     }
 
     /// <summary>
@@ -379,6 +802,85 @@ public class LoanService : ILoanService
     }
 
     /// <summary>
+    /// Per-loan Lender RM override (Lender Email Workflow) — mirrors Vanilla's
+    /// _lewSaveRmOverride (lender-email-workflow.js:748). Sets the RM contact
+    /// for this application only and records a timeline/status-history entry,
+    /// exactly like Vanilla's "EFIN-Lender RM Updated" tracking entry.
+    /// </summary>
+    public async Task<ApiResponseDto<LoanDto>> UpdateLenderRmAsync(int id, UpdateLenderRmRequestDto request, int currentUserId, string currentUserRole)
+    {
+        if (!await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        if (string.IsNullOrWhiteSpace(request.RmName) || string.IsNullOrWhiteSpace(request.RmEmail))
+            return ApiResponseDto<LoanDto>.Fail("RM Name and Email are required.");
+
+        var prevName = loan.LenderRmName;
+        var prevEmail = loan.LenderRmEmail;
+        loan.LenderRmName   = request.RmName.Trim();
+        loan.LenderRmEmail  = request.RmEmail.Trim();
+        loan.LenderRmMobile = string.IsNullOrWhiteSpace(request.RmMobile) ? null : request.RmMobile.Trim();
+
+        await _uow.Loans.UpdateAsync(loan);
+
+        // Audit trail — a same-status history entry with the change note, so it
+        // surfaces in the Timeline (Status History) like Vanilla's tracking row.
+        await _uow.LoanStatusHistories.AddAsync(new LoanStatusHistory
+        {
+            LoanId          = loan.Id,
+            FromStatus      = loan.Status,
+            ToStatus        = loan.Status,
+            Comment         = prevEmail == null
+                ? $"Lender RM assigned: {loan.LenderRmName} ({loan.LenderRmEmail})"
+                : $"Lender RM updated: {loan.LenderRmName} ({loan.LenderRmEmail}). Previous: {prevName} ({prevEmail})",
+            ChangedByUserId = currentUserId
+        });
+        await _uow.SaveChangesAsync();
+
+        var updated = await _uow.Loans.GetWithDetailsAsync(id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), $"Lender RM updated: {loan.LenderRmName}.");
+    }
+
+    // Overview parity fields — partial update of InCred RM / Analytic Bank and
+    // the five underwriting verification flags (Vanilla efin-app.js:2479 /
+    // 3699-3702). Every field is optional so a single check modal can flip its
+    // own flag without disturbing the others.
+    public async Task<ApiResponseDto<LoanDto>> UpdateOverviewAsync(int id, UpdateLoanOverviewRequestDto request, int currentUserId, string currentUserRole)
+    {
+        if (!await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
+            return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        var loan = await _uow.Loans.GetByIdAsync(id);
+        if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        if (request.IncredRmName != null)
+            loan.IncredRmName = string.IsNullOrWhiteSpace(request.IncredRmName) ? null : request.IncredRmName.Trim();
+        if (request.AnalyticBank != null)
+            loan.AnalyticBank = string.IsNullOrWhiteSpace(request.AnalyticBank) ? null : request.AnalyticBank.Trim();
+        if (request.DocumentChecked.HasValue) loan.DocumentChecked = request.DocumentChecked.Value;
+        // SECURITY (Phase 5, vuln S1): IncomeChecked is NO LONGER client-settable
+        // here. It is now DERIVED solely from an authoritative IncomeVerification
+        // run (IncomeVerificationService), so a browser can never mark income
+        // "verified" by PATCHing this flag. The request field is intentionally
+        // ignored; income completion flows through /income-verification/run.
+        // (The column itself is kept for DB/back-compat, per §11.)
+        if (request.BankChecked.HasValue)     loan.BankChecked     = request.BankChecked.Value;
+        if (request.EcsReturn.HasValue)       loan.EcsReturn       = request.EcsReturn.Value;
+        if (request.FiReportChecked.HasValue) loan.FiReportChecked = request.FiReportChecked.Value;
+        if (request.NachDone.HasValue)             loan.NachDone             = request.NachDone.Value;
+        if (request.CustomerAgreementDone.HasValue) loan.CustomerAgreementDone = request.CustomerAgreementDone.Value;
+
+        await _uow.Loans.UpdateAsync(loan);
+        await _uow.SaveChangesAsync();
+
+        var updated = await _uow.Loans.GetWithDetailsAsync(id);
+        return ApiResponseDto<LoanDto>.Ok(MapToDto(updated!, "Admin"), "Overview updated.");
+    }
+
+    /// <summary>
     /// Whole-table replace for a loan's Bank Lines (Application Number /
     /// Approved Loan / Remarks per bank the application was sent to) —
     /// previously frontend-only. Same visibility gate as every other
@@ -418,7 +920,7 @@ public class LoanService : ILoanService
 
         var newRefs = (request ?? new List<UpdateLoanReferenceItemDto>())
             .Where(r => !string.IsNullOrWhiteSpace(r.Name))
-            .Select(r => new LoanReference { Name = r.Name!, Mobile = r.Mobile ?? string.Empty, Relation = r.Relation ?? string.Empty, RefNumber = r.RefNumber })
+            .Select(r => new LoanReference { Name = r.Name!, Mobile = r.Mobile ?? string.Empty, Relation = r.Relation ?? string.Empty, Address = r.Address, RefNumber = r.RefNumber })
             .ToList();
 
         await _uow.Loans.ReplaceReferencesAsync(id, newRefs);
@@ -511,10 +1013,37 @@ public class LoanService : ILoanService
         LoanStatus.Draft       => new() { LoanStatus.Submitted, LoanStatus.Rejected },
         LoanStatus.Submitted   => new() { LoanStatus.UnderReview, LoanStatus.Rejected },
         LoanStatus.UnderReview => new() { LoanStatus.Approved, LoanStatus.Rejected },
-        LoanStatus.Approved    => new() { LoanStatus.Disbursed, LoanStatus.Rejected },
+        // Direct Approved → Disbursed stays allowed (loans that skip a recorded
+        // deal-confirmation step); Approved → Acceptance is the new parity path
+        // for loans that go through Send Deal Confirmation first.
+        LoanStatus.Approved    => new() { LoanStatus.Acceptance, LoanStatus.Disbursed, LoanStatus.Rejected },
+        LoanStatus.Acceptance  => new() { LoanStatus.Disbursed, LoanStatus.Rejected },
         LoanStatus.Disbursed   => new() { LoanStatus.Closed },
         _                      => new()
     };
+
+    // A loan is "routed through InCred" once it carries the InCred origination
+    // marker (ApplicationSource=incred) or an InCred application id. Only these
+    // loans are subject to the verified-disbursement gate.
+    internal static bool IsIncredLoan(Loan loan) =>
+        !string.IsNullOrWhiteSpace(loan.IncredApplicationId) ||
+        string.Equals(loan.ApplicationSource, "incred", StringComparison.OrdinalIgnoreCase);
+
+    // "Verified InCred disbursement success" = the last recorded InCred callback
+    // reports a disbursement event with a success status. Matching is token-based
+    // and case-insensitive rather than tied to one exact provider string, so it
+    // is robust across DISBURSED / DISBURSEMENT / DISBURSAL wording without
+    // inventing a specific provider signature contract. Pending / Failed /
+    // Unknown / empty (no callback) all return false → blocked.
+    internal static bool IsIncredDisbursementVerified(Loan loan)
+    {
+        var evt    = (loan.IncredLastWebhookEvent  ?? string.Empty).Trim().ToUpperInvariant();
+        var status = (loan.IncredLastWebhookStatus ?? string.Empty).Trim().ToUpperInvariant();
+        var eventIsDisbursement = evt.Contains("DISBURS");
+        var statusIsSuccess     = status.Contains("SUCCESS") || status == "COMPLETED"
+                               || status == "DISBURSED" || status == "DONE";
+        return eventIsDisbursement && statusIsSuccess;
+    }
 
     internal static LoanDto MapToDto(Loan l, string callerRole = "Sales", HashSet<string>? deniedTabs = null)
     {
@@ -566,15 +1095,29 @@ public class LoanService : ILoanService
                 DateOfBirth        = hidePersonal   ? null : l.Customer.DateOfBirth,
                 Gender             = hidePersonal   ? null : l.Customer.Gender,
                 FatherName         = hidePersonal   ? null : l.Customer.FatherName,
+                MotherName         = hidePersonal   ? null : l.Customer.MotherName,
+                AlternatePhone     = hidePersonal   ? null : l.Customer.AlternatePhone,
                 Address            = hideAddress    ? null : l.Customer.Address,
                 City               = hideAddress    ? null : l.Customer.City,
                 State              = hideAddress    ? null : l.Customer.State,
                 PinCode            = hideAddress    ? null : l.Customer.PinCode,
                 ResidenceType      = hideAddress    ? null : l.Customer.ResidenceType,
+                HouseNo                = hideAddress ? null : l.Customer.HouseNo,
+                PermanentHouseNo       = hideAddress ? null : l.Customer.PermanentHouseNo,
+                PermanentAddress       = hideAddress ? null : l.Customer.PermanentAddress,
+                PermanentCity          = hideAddress ? null : l.Customer.PermanentCity,
+                PermanentState         = hideAddress ? null : l.Customer.PermanentState,
+                PermanentPinCode       = hideAddress ? null : l.Customer.PermanentPinCode,
+                PermanentResidenceType = hideAddress ? null : l.Customer.PermanentResidenceType,
                 MonthlyIncome      = hideEmployment ? null : l.Customer.MonthlyIncome,
                 MonthlyObligations = hideEmployment ? null : l.Customer.MonthlyObligations,
                 EmploymentType     = hideEmployment ? null : l.Customer.EmploymentType,
                 CompanyName        = hideEmployment ? null : l.Customer.CompanyName,
+                Designation        = hideEmployment ? null : l.Customer.Designation,
+                CompanyType        = hideEmployment ? null : l.Customer.CompanyType,
+                OfficialEmail      = hideEmployment ? null : l.Customer.OfficialEmail,
+                OfficeAddress      = hideEmployment ? null : l.Customer.OfficeAddress,
+                OfficePinCode      = hideEmployment ? null : l.Customer.OfficePinCode,
             },
             CreatedBy = new UserDto
             {
@@ -618,9 +1161,11 @@ public class LoanService : ILoanService
             References = (deniedTabs != null && deniedTabs.Contains("canViewReferences"))
                 ? new()
                 : l.References?.Select(r => new LoanReferenceDto
-                    { Id = r.Id, Name = r.Name, Mobile = r.Mobile, Relation = r.Relation, RefNumber = r.RefNumber }).ToList() ?? new(),
+                    { Id = r.Id, Name = r.Name, Mobile = r.Mobile, Relation = r.Relation, Address = r.Address, RefNumber = r.RefNumber }).ToList() ?? new(),
             SanctionDetail = l.SanctionDetail == null ? null : new LoanSanctionDetailDto
             {
+                SanctionLoanAmt = l.SanctionDetail.SanctionLoanAmt, SanctionTenureMonths = l.SanctionDetail.SanctionTenureMonths,
+                SanctionRoi = l.SanctionDetail.SanctionRoi, SanctionEmi = l.SanctionDetail.SanctionEmi,
                 StampDuty = l.SanctionDetail.StampDuty, Gst = l.SanctionDetail.Gst,
                 Insurance = l.SanctionDetail.Insurance, PfPercent = l.SanctionDetail.PfPercent,
                 InsuranceInBundled = l.SanctionDetail.InsuranceInBundled, PfInBundled = l.SanctionDetail.PfInBundled,
@@ -628,6 +1173,23 @@ public class LoanService : ILoanService
                 FlatRate = l.SanctionDetail.FlatRate, EmiDate = l.SanctionDetail.EmiDate
             },
             ProductDataJson = l.ProductDataJson,
+            // Lender RM override — internal routing/contact data, gated to
+            // internal roles like Remarks (lender/channel data is internal-only).
+            LenderRmName   = isInternal ? l.LenderRmName   : null,
+            LenderRmEmail  = isInternal ? l.LenderRmEmail  : null,
+            LenderRmMobile = isInternal ? l.LenderRmMobile : null,
+            // Overview parity fields — InCred RM / Analytic Bank are internal
+            // routing data (gated like Remarks/LenderRm); the verification
+            // flags are the underwriting Doc/Income/Bank/ECS/FI badges.
+            IncredRmName    = isInternal ? l.IncredRmName : null,
+            AnalyticBank    = isInternal ? l.AnalyticBank : null,
+            DocumentChecked = l.DocumentChecked,
+            IncomeChecked   = l.IncomeChecked,
+            BankChecked     = l.BankChecked,
+            EcsReturn       = l.EcsReturn,
+            FiReportChecked = l.FiReportChecked,
+            NachDone              = l.NachDone,
+            CustomerAgreementDone = l.CustomerAgreementDone,
             StatusHistory = l.StatusHistory?.Select(h => new LoanStatusHistoryDto
             {
                 Id         = h.Id,

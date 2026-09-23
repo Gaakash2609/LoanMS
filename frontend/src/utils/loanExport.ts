@@ -1,5 +1,6 @@
 import type { LoanListItem } from '@/types'
 import { formatDate } from './format'
+import { htmlTable, wrapExcelHtml } from './reportExport'
 
 // Subset of legacy's EXPORT_COLS whose underlying data actually exists on
 // React's LoanListItem (the data the Loans list already loads). Most of
@@ -55,6 +56,89 @@ export function buildLoansCsv(loans: LoanListItem[], columns: ExportColumn[]): s
   const header = active.map(c => csvEscape(c.label)).join(',')
   const rows = loans.map(l => active.map(c => csvEscape(c.get(l))).join(','))
   return [header, ...rows].join('\n')
+}
+
+// ── Excel (.xls) export ──────────────────────────────────────────────────
+// Restores legacy doExport's XLSX branch (exportXLSX), which was the modal's
+// DEFAULT format. Uses the same Office-HTML technique the Reports export
+// already uses — wrapExcelHtml/htmlTable are imported from reportExport.ts
+// rather than re-implemented here, so there is exactly one copy of that
+// markup. No spreadsheet library is added.
+//
+// Cell values are HTML-escaped first: unlike the Reports export (whose cells
+// are server-side enum names and numbers), these rows carry free-text
+// customer names that can legitimately contain & or <.
+function htmlEscape(v: string) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+export function buildLoansExcelHtml(loans: LoanListItem[], columns: ExportColumn[]): string {
+  const active = columns.filter(c => c.checked)
+  const header = active.map(c => htmlEscape(c.label))
+  const rows = loans.map(l => active.map(c => htmlEscape(c.get(l))))
+  const body = `
+    <h2 style="font-family:Arial;color:#1a4fa3">LoanMS — Applications Export</h2>
+    <p style="font-family:Arial;font-size:12px;color:#666">Rows: ${loans.length} | Generated: ${new Date().toLocaleString('en-IN')}</p>
+    ${htmlTable(header, rows)}`
+  return wrapExcelHtml('Applications', body)
+}
+
+// ── PDF export ───────────────────────────────────────────────────────────
+// Restores legacy doExport's PDF branch (efin-app.js:36180 → exportPDF at
+// :36202). Legacy's technique, unchanged: a print-styled HTML document opened
+// in a new window that calls window.print() itself, letting the browser's own
+// "Save as PDF" produce the file — no PDF library. That is the same mechanism
+// reportExport.ts already uses for the Reports PDF, so openReportPdfPreview()
+// is reused for the window-opening and popup-blocked handling rather than
+// duplicated here.
+//
+// Legacy's two layout rules are preserved verbatim:
+//   • A4 landscape, brand-blue header band, zebra rows (efin-app.js:36217-36231)
+//   • at most 12 columns, with a red note pointing at XLSX/CSV for the rest
+//     (:36209 and :36243) — a wide column set is unreadable on one A4 page.
+const PDF_MAX_COLS = 12
+
+export function buildLoansPdfHtml(loans: LoanListItem[], columns: ExportColumn[]): string {
+  const active = columns.filter(c => c.checked)
+  const shown = active.slice(0, PDF_MAX_COLS)
+  const truncated = active.length > PDF_MAX_COLS
+
+  const header = shown.map(c => htmlEscape(c.label))
+  // Legacy renders an em-dash for blank cells (efin-app.js:36213).
+  const rows = loans.map(l => shown.map(c => htmlEscape(c.get(l)) || '—'))
+  const stamp = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Applications Export — ${stamp}</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #111; }
+  .hdr { display:flex; justify-content:space-between; align-items:flex-end; padding-bottom:8px; border-bottom:2px solid #1a4fa3; margin-bottom:10px; }
+  .hdr-title { font-size:15pt; font-weight:800; color:#1a4fa3; }
+  .hdr-meta { font-size:8pt; color:#555; text-align:right; line-height:1.5; }
+  table { width:100%; border-collapse:collapse; font-size:8pt; }
+  thead tr { background:#1a4fa3; color:#fff; }
+  thead th { padding:5px 6px; text-align:left; font-weight:700; white-space:nowrap; }
+  tbody tr:nth-child(even) { background:#f0f4ff; }
+  tbody td { padding:4px 6px; border-bottom:1px solid #dde3f0; vertical-align:top; }
+  .truncate-note { color:#c0392b; font-size:8pt; margin-bottom:6px; }
+  .footer { margin-top:10px; font-size:7.5pt; color:#888; text-align:right; }
+</style></head><body>
+<div class="hdr">
+  <div>
+    <div class="hdr-title">Applications Export</div>
+    <div style="font-size:9pt;color:#444;margin-top:2px">${loans.length} record${loans.length === 1 ? '' : 's'} · Generated ${stamp}</div>
+  </div>
+  <div class="hdr-meta">${new Date().toLocaleTimeString('en-IN')}</div>
+</div>
+${truncated ? `<div class="truncate-note">⚠ PDF shows the first ${PDF_MAX_COLS} columns. Use Excel or CSV for all ${active.length} columns.</div>` : ''}
+<table><thead><tr>${header.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+<tbody>${rows.map(r => `<tr>${r.map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>
+<div class="footer">Mudrahub Loan Management System — Confidential</div>
+<script>window.onload=function(){window.print();}</script>
+</body></html>`
 }
 
 export function downloadCsv(csv: string, filename: string) {

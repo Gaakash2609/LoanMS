@@ -39,4 +39,32 @@ export const ticketsApi = {
   update: (id: number, data: Partial<Ticket>) =>
     api.put<ApiResponse<Ticket>>(`/api/tickets/${id}`, data),
   close: (id: number) => api.patch<ApiResponse<Ticket>>(`/api/tickets/${id}/close`),
+
+  // ── Routes that already existed but had no React caller ────────────────
+  // Reopen is its own PATCH so it can clear ClosedAt and write an Activity
+  // record; Close deliberately stays separate too (Admin/Manager only).
+  reopen: (id: number) => api.patch<ApiResponse<boolean>>(`/api/tickets/${id}/reopen`),
+
+  // "Resolve" has no dedicated endpoint by design — the controller routes it
+  // through PUT /{id} as a plain status change (allowed values there are
+  // Open / In Progress / Resolved; Closed and reopening-from-Closed are
+  // rejected and must use the Close/Reopen actions).
+  setStatus: (id: number, status: 'Open' | 'In Progress' | 'Resolved') =>
+    api.put<ApiResponse<boolean>>(`/api/tickets/${id}`, { status }),
+
+  getComments: (id: number) =>
+    api.get<ApiResponse<TicketComment[]>>(`/api/tickets/${id}/comments`),
+  addComment: (id: number, content: string) =>
+    api.post<ApiResponse<{ id: number }>>(`/api/tickets/${id}/comments`, { content }),
+}
+
+// Matches GetComments' projection. `type` is "Comment" for user notes and
+// "Activity" for system-written entries (status changes, reassignment,
+// close/reopen) — rendered differently in the thread.
+export interface TicketComment {
+  id: number
+  content: string
+  type: 'Comment' | 'Activity' | string
+  user: string
+  createdAt: string
 }

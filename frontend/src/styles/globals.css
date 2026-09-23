@@ -2,20 +2,3028 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens copied verbatim from the legacy stylesheet
+   (LoanMS.API/wwwroot/css/app.css :root) so the React app renders with the
+   same palette, radii, shadows and typography as the legacy frontend
+   instead of Tailwind's generic gray defaults. */
+:root {
+  --bg: #f0f4ff;
+  --surface: #ffffff;
+  --surface2: #f0f4ff;
+  --surface3: #e6ecf8;
+  --border: #dde3f0;
+  --border2: #c4cfe6;
+  /* MudraHub brand pass (2026-09-20): the global accent is the TRUE logo blue
+     (#085897 "Mudra" blue, sampled from assets/logo-004.png), not the legacy
+     EFIN blue #1a4fa3 this used to carry. This unifies every var(--accent)
+     surface (buttons, links, active nav, focus rings, filter chips, KPI
+     accents…) with the logo and with the Applications page, which already used
+     this family via --brand-blue*. Flat-colour alignment only — no new
+     gradients. --accent2 stays the legacy red #d42b2b (see the note below). */
+  --accent: #085897;
+  --accent-dark: #064377;
+  --accent-light: #1a72b8;
+  --accent-glow: rgba(8, 88, 151, .2);
+  --accent-subtle: rgba(8, 88, 151, .08);
+  /* Restored to legacy app.css :root verbatim (--accent2: #d42b2b). A prior
+     "MudraHub brand" pass had swapped this whole family to the logo's orange
+     (#f5921e), which is what made the sidebar active state, nav icons, notif
+     dot, .efin-btn secondary/ghost hovers, and every var(--accent2) consumer
+     across the shell and primitives read as an orange redesign instead of
+     the real vanilla red. Legacy itself never uses orange here — orange is
+     only ever --warn / --accent3 in app.css. */
+  --accent2: #d42b2b;
+  --accent2-dark: #a81e1e;
+  --accent2-light: #e94040;
+  --warn: #e67e00;
+  --accent3: #ff6b35;
+  --danger: #c0392b;
+  --success: #1a7340;
+  --text: #0c1733;
+  --text2: #3a4d6e;
+  --text3: #7a8aaa;
+  --font-head: 'Outfit', sans-serif;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
+  --r: 16px;
+  --r-sm: 10px;
+  --r-xs: 6px;
+  --shadow: 0 4px 24px rgba(8, 88, 151, .1);
+  --shadow-md: 0 8px 40px rgba(8, 88, 151, .14);
+  --shadow-lg: 0 20px 60px rgba(8, 88, 151, .18);
+  --sidebar-w: 260px;
+  --sidebar-collapsed-w: 64px;
+
+  /* Tokens that existed in legacy app.css :root but had never been carried
+     over. Every other shared token already matched byte-for-byte; these were
+     simply missing, which is why anything depending on them (topbar height,
+     the shared easing, and the whole stacking order) had been re-invented ad
+     hoc with Tailwind values instead. */
+  --topbar-h: 68px;
+  --transition: 0.24s cubic-bezier(.4, 0, .2, 1);
+  --accent2-subtle: rgba(212, 43, 43, .07);
+  --accent2-glow: rgba(212, 43, 43, .18);
+  --shadow-accent: 0 4px 24px rgba(8, 88, 151, .28);
+
+  /* Legacy's stacking order. Keeping the real numbers matters: a dropdown
+     (300) must clear the topbar (100), and the modal (9998) must clear both. */
+  --z-page-sticky: 10;
+  --z-topbar: 100;
+  --z-sidebar-overlay: 199;
+  --z-sidebar: 200;
+  --z-dropdown: 300;
+  --z-modal: 9998;
+}
+
+/* Legacy widens the rail as the viewport grows — the full ladder is
+   app.css:4793 (1400px → 280px), :4816 (1920px → 300px) and :4831
+   (2560px → 320px). The base 260px already matched; every step above it
+   was missing, so on a 1920px monitor the React rail stayed 40px narrower
+   than legacy's.
+
+   The ≤1100px legacy rule (app.css:6959) that also says 280px is a
+   DIFFERENT thing — it is the off-canvas drawer's own width, not this
+   token (there --sidebar-w goes to 0 because the rail stops reserving
+   layout space). That width is applied on the drawer element itself in
+   AppLayout.tsx. */
+@media (min-width: 1400px) {
+  :root { --sidebar-w: 280px; }
+}
+@media (min-width: 1920px) {
+  :root { --sidebar-w: 300px; }
+}
+@media (min-width: 2560px) {
+  :root { --sidebar-w: 320px; }
+}
+
 @layer base {
   body {
-    @apply font-sans text-gray-900 antialiased;
+    @apply font-sans antialiased;
+    background: var(--bg);
+    color: var(--text);
+    /* Same two ambient radial washes as the legacy body. */
+    background-image:
+      radial-gradient(ellipse 80% 50% at 20% -10%, rgba(8, 88, 151, .06) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 110%, rgba(212, 43, 43, .04) 0%, transparent 50%);
+    background-attachment: fixed;
   }
   * {
     @apply box-border;
   }
+  h1, h2, h3, h4 {
+    font-family: var(--font-head);
+  }
 }
 
 @layer utilities {
-  .bg-efin-blue      { background-color: #0a589a; }
-  .bg-efin-blue-dark { background-color: #1e3a5f; }
-  .text-efin-blue    { color: #0a589a; }
-  .ring-efin-blue    { --tw-ring-color: #0a589a; }
-  .focus\:ring-efin-blue:focus { --tw-ring-color: #0a589a; }
-  .hover\:bg-efin-blue-dark:hover { background-color: #1e3a5f; }
+  /* MudraHub brand blue (#085897) — was the legacy EFIN #1a4fa3. Kept in sync
+     with the --accent family and tailwind.config's efin.blue so every accent
+     path renders the one logo blue. */
+  .bg-efin-blue      { background-color: #085897; }
+  .bg-efin-blue-dark { background-color: #064377; }
+  .text-efin-blue    { color: #085897; }
+  .ring-efin-blue    { --tw-ring-color: #085897; }
+  .focus\:ring-efin-blue:focus { --tw-ring-color: #085897; }
+  .hover\:bg-efin-blue-dark:hover { background-color: #064377; }
+
+  /* Surface/border helpers mapped to the legacy tokens, so cards and
+     panels match app.css's .card rather than Tailwind's gray-200 border. */
+  .bg-surface   { background-color: var(--surface); }
+  .bg-surface2  { background-color: var(--surface2); }
+  .border-token { border-color: var(--border); }
+  .rounded-token { border-radius: var(--r); }
+  .shadow-token { box-shadow: var(--shadow); }
+}
+
+/* Legacy `pulse-dot` (index.html's System Online indicator) — the green dot
+   breathes instead of sitting static. Copied from app.css verbatim. */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%      { opacity: .55; transform: scale(.85); }
+}
+
+@layer utilities {
+  /* Legacy .stat-card hover: lifts 3px and gains the token shadow. */
+  .stat-card-lift { transition: transform .22s, box-shadow .22s; }
+  .stat-card-lift:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+}
+
+/* ── Premium dashboard layer (additive — nothing above is modified) ──────
+   New visual language for the Dashboard redesign: richer KPI cards, a
+   staggered entrance, a timeline treatment for activity feeds, and a
+   slightly more "financial software" table skin. Everything here is a new
+   class, so no existing page is affected by adding it. */
+@layer components {
+  /* KPI card: gradient icon badge + top accent bar + lift-on-hover. */
+  /* Matches Vanilla "Design System v2" .stat-card (app.css:4978): 1.5px
+     border, a resting shadow, and a top accent bar that is hidden by
+     default and only revealed on hover (opacity 0 → 1), exactly as Vanilla
+     does — not a permanently-lit bar. */
+  .kpi-card {
+    position: relative;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    padding: 22px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(8,88,151,.06);
+    transition: transform .25s cubic-bezier(.34,1.3,.64,1), box-shadow .22s, border-color .22s;
+  }
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+    background: var(--kpi-accent, var(--accent));
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  .kpi-card:hover::before { opacity: 1; }
+  .kpi-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 16px 40px -12px var(--kpi-shadow, rgba(8,88,151,.28));
+    border-color: var(--border2);
+  }
+  .kpi-card::after {
+    content: '';
+    position: absolute;
+    top: -30px; right: -30px;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: var(--kpi-accent, var(--accent));
+    opacity: .07;
+    pointer-events: none;
+  }
+  .kpi-icon {
+    width: 44px; height: 44px;
+    border-radius: 13px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 19px;
+    background: var(--kpi-tint, var(--accent-subtle));
+    margin-bottom: 14px;
+  }
+  .kpi-trend {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 11.5px; font-weight: 700;
+  }
+  /* Pill-shaped stat-change chip — legacy .stat-change (app.css ~5085). */
+  /* Dashboard stat sub-line — legacy .stat-change (app.css:2671): plain
+     12px --text3 text, not a coloured pill. */
+  .kpi-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px;
+    color: var(--text3);
+  }
+
+  /* Payout "Primary Summary" KPI panel — legacy groups the 3 KPIs in ONE
+     gradient-bordered panel (index.html:5104), not three separate tinted
+     cards. */
+  .payout-kpi-panel {
+    background: linear-gradient(135deg, rgba(8,88,151,.08) 0%, rgba(8,88,151,.03) 100%);
+    border: 1.5px solid rgba(8,88,151,.2);
+    border-radius: 16px; padding: 22px 24px; margin-bottom: 0;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 24px;
+  }
+  .payout-kpi-label { font-size: 13px; color: var(--text2); margin-bottom: 8px; font-weight: 600; }
+  .payout-kpi-value { font-weight: 800; font-size: 28px; font-family: var(--font-head); line-height: 1; }
+  .payout-kpi-sub { font-size: 12px; color: var(--text3); margin-top: 6px; }
+
+  /* Settings email-provider radio cards — legacy .stg-provider-card /
+     .stg-badge (app.css:186/194). */
+  .stg-provider-card {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 16px 18px; border: 2px solid var(--border2);
+    border-radius: 13px; cursor: pointer; transition: all .2s;
+    background: var(--surface2);
+  }
+  .stg-provider-card.selected {
+    border-color: var(--accent);
+    background: rgba(8,88,151,.04);
+    box-shadow: 0 0 0 3px rgba(8,88,151,.08);
+  }
+  .stg-badge { font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 99px; letter-spacing: .6px; flex-shrink: 0; }
+  .stg-badge-auto { background: rgba(26,115,64,.1); color: var(--success); }
+  .stg-provider-chip { font-size: 10.5px; background: rgba(8,88,151,.07); color: var(--accent); padding: 2px 8px; border-radius: 8px; font-weight: 600; }
+  .stg-provider-chip-warn { background: rgba(230,126,0,.08); color: var(--warn); }
+
+  /* ── Pipeline stage bars — legacy .pipeline-stage / .stage-bar ────────── */
+  .stage-row {
+    display: flex; align-items: center; gap: 14px;
+    cursor: pointer;
+    padding: 3px 0;
+  }
+  .stage-row-label {
+    font-size: 12px; font-weight: 600;
+    color: var(--text2);
+    width: 118px; flex-shrink: 0;
+  }
+  .stage-row-track { flex: 1; min-width: 0; }
+  .stage-row-bar {
+    height: 28px;
+    border-radius: 7px;
+    display: flex; align-items: center;
+    padding: 0 10px;
+    font-size: 12px; font-weight: 700;
+    transition: filter .2s, width .4s cubic-bezier(.4,0,.2,1);
+    white-space: nowrap;
+  }
+  .stage-row:hover .stage-row-bar { filter: brightness(1.15); }
+  .stage-row-count {
+    font-size: 12px; font-weight: 800;
+    color: var(--text2);
+    width: 28px; text-align: right; flex-shrink: 0;
+  }
+
+  /* ── Monthly bar chart — legacy .chart-bar-col / .chart-bar-inner ────── */
+  .chart-bar-col {
+    display: flex; flex-direction: column; align-items: center;
+    flex: 1; min-width: 0;
+  }
+  .chart-bar-track {
+    position: relative; width: 100%;
+    display: flex; align-items: flex-end; justify-content: center;
+    gap: 3px; height: 140px;
+  }
+  .chart-bar-inner {
+    flex: 1; max-width: 18px;
+    border-radius: 4px 4px 0 0;
+    border: 1.5px solid transparent;
+    transition: height .5s cubic-bezier(.4,0,.2,1);
+  }
+  .chart-bar-month-label {
+    font-size: 11px; font-weight: 600;
+    color: var(--text3);
+    margin-top: 8px;
+  }
+
+  /* ── Loan-type mix progress bars — legacy .progress-wrap / .progress-bar ── */
+  .progress-wrap {
+    height: 8px; border-radius: 20px;
+    background: var(--surface2);
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%; border-radius: 20px;
+    transition: width .5s cubic-bezier(.4,0,.2,1);
+  }
+
+  /* ── Recent Activity feed — verbatim port of Vanilla .activity-item /
+     .act-dot / .act-text / .act-time (app.css:2787-2843). Replaces the
+     React-only "timeline-rail" treatment on the Dashboard. ────────────── */
+  .activity-list { display: flex; flex-direction: column; }
+  .activity-item {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    transition: background .15s;
+  }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-item:hover { background: var(--surface2); }
+  .activity-item-link:hover { background: var(--accent-subtle); }
+  .activity-item-link:hover .act-text strong { color: var(--accent); }
+  .act-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .act-content { flex: 1; min-width: 0; }
+  .act-text { font-size: 13px; color: var(--text2); line-height: 1.5; }
+  .act-text strong { color: var(--text); font-weight: 600; }
+  .act-time { font-size: 11px; color: var(--text3); margin-top: 3px; }
+
+  /* ── Status filter chips — verbatim port of Vanilla "Design System v2"
+     .filter-chip (app.css:5402). Replaces the React-only segmented
+     ".seg-filter/.seg-chip" control. ────────────────────────────────── */
+  .filter-chip {
+    padding: 7px 16px;
+    border-radius: 22px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1.5px solid var(--border);
+    color: var(--text3);
+    background: var(--surface);
+    cursor: pointer;
+    transition: all .18s;
+  }
+  .filter-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-subtle);
+  }
+  .filter-chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(8,88,151,.28);
+  }
+
+  /* ── Vanilla data table — scoped port of Vanilla "Design System v2"
+     `table` rules (app.css:5150) + .table-wrap. Scoped to .v-table so it
+     only styles tables that opt in (e.g. Tickets), never the DataTable/
+     settings tables that carry their own utility classes. ─────────────── */
+  .v-table-wrap { overflow-x: auto; width: 100%; }
+  .v-table { border-collapse: separate; border-spacing: 0; width: 100%; }
+  .v-table th {
+    font-family: var(--font-body);
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 1.2px;
+    font-weight: 700; color: var(--text3);
+    padding: 12px 16px; text-align: left;
+    background: var(--surface2);
+    border-bottom: 1.5px solid var(--border);
+    white-space: nowrap;
+  }
+  .v-table th:first-child { border-radius: 10px 0 0 0; }
+  .v-table th:last-child { border-radius: 0 10px 0 0; }
+  .v-table td {
+    padding: 13px 16px; font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle; color: var(--text2);
+  }
+  .v-table tbody tr { transition: background .15s; }
+  .v-table tbody tr:hover td { background: rgba(8,88,151,.035); }
+  .v-table tbody tr:last-child td { border-bottom: none; }
+
+  /* ── Loan-detail field grid — verbatim port of Vanilla's fieldGrid()
+     (efin-app.js:3784) + "Design System v2" .form-group/.field-val/
+     .check-badge (app.css:7695/7712/7919). Used by the Overview and other
+     detail tabs. Scoped grid class to avoid touching any other .form-grid. */
+  .detail-fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (min-width: 900px) { .detail-fgrid { grid-template-columns: 1fr 1fr 1fr; } }
+  .detail-fg { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .detail-fg > label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1.1px;
+    color: #7a91c0; font-weight: 800;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .field-val {
+    font-size: 13.5px; font-weight: 500; color: var(--text);
+    background: #f5f8ff; border: 1.5px solid #dde8fb; border-radius: 10px;
+    padding: 10px 14px; min-height: 40px;
+    display: flex; align-items: center; line-height: 1.4;
+    transition: all .15s; word-break: break-word;
+  }
+  .field-val:hover { border-color: #7aaef8; background: #fff; box-shadow: 0 0 0 3px rgba(8,88,151,.06); }
+  .field-val.empty { color: #b0bcd8; font-style: italic; background: #f8faff; }
+  /* Verbatim port of Vanilla's .check-badge / .check-done / .check-pending
+     (app.css:4618-4636): squared 4px pill, done = red tint on --accent2,
+     pending = amber on --warn. Vanilla uses the identical class in both the
+     Overview and the Timeline "Checks:" row, so this matches it 1:1 in both. */
+  .check-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .check-done { background: rgba(212,43,43,.12); color: var(--accent2); }
+  .check-pending { background: rgba(255,179,71,.15); color: var(--warn); }
+
+  /* ── Wizard step indicator — legacy .wizard-step/.step-num (app.css
+     ~3148-3283). Nine hand-picked color pairs (one per step), a connector
+     line that fills green when a step is done, and a glowing gradient
+     circle for the active step — replacing the flat gray/blue-only
+     indicator the wizard previously used. ────────────────────────────── */
+  /* Top stepper — matched 1:1 to Vanilla's .wizard-steps/.wizard-step/.step-num/
+     .step-label (app.css:3148-3276): 52px icon circles, 26px/28px connector,
+     10px gap, 76px min-width, inset highlight, 22px svg + hover-scale. */
+  .wiz-steps { display: flex; align-items: flex-start; gap: 0; margin-bottom: 36px; overflow-x: auto; padding: 8px 2px; scrollbar-width: none; }
+  .wiz-steps::-webkit-scrollbar { display: none; }
+  .wiz-step { display: flex; flex-direction: column; align-items: center; gap: 10px; flex: 1; min-width: 76px; position: relative; cursor: default; }
+  .wiz-step:not(:last-child)::after {
+    content: ''; position: absolute; top: 26px; left: calc(50% + 28px); right: calc(-50% + 28px);
+    height: 2.5px; background: #e2e8f0; z-index: 0; border-radius: 99px; transition: background .45s ease;
+  }
+  .wiz-step.done:not(:last-child)::after { background: linear-gradient(90deg, #22c55e, #16a34a); }
+  .wiz-step-num {
+    width: 52px; height: 52px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; z-index: 1;
+    border: 2.5px solid var(--wiz-border, #e2e8f0);
+    background: var(--wiz-bg, #f1f5f9);
+    color: var(--wiz-fg, #94a3b8);
+    box-shadow: 0 2px 8px rgba(0,0,0,.06), inset 0 1px 2px rgba(255,255,255,.9);
+    transition: all .35s cubic-bezier(.4,0,.2,1);
+  }
+  .wiz-step-num svg { width: 22px; height: 22px; flex-shrink: 0; transition: transform .3s cubic-bezier(.4,0,.2,1); }
+  .wiz-step:hover:not(.done) .wiz-step-num svg { transform: scale(1.12); }
+  .wiz-step.active .wiz-step-num {
+    background: var(--wiz-grad); border-color: var(--wiz-border); color: #fff;
+    box-shadow: 0 0 0 4px var(--wiz-glow), 0 6px 20px var(--wiz-glow-lg);
+  }
+  .wiz-step.done .wiz-step-num {
+    background: linear-gradient(135deg,#4ade80,#15803d); border-color: #15803d; color: #fff;
+    box-shadow: 0 0 0 3px rgba(21,128,61,.18), 0 4px 14px rgba(22,163,74,.3);
+  }
+  .wiz-step.done .wiz-step-num svg { stroke-width: 2.5; }
+  .wiz-step-label { font-size: 10.5px; font-weight: 500; color: #94a3b8; text-align: center; white-space: nowrap; max-width: 76px; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; letter-spacing: .1px; transition: color .3s, font-weight .3s; }
+  .wiz-step.active .wiz-step-label { font-weight: 800; font-size: 11px; color: var(--wiz-border); }
+  /* Responsive stepper shrink — legacy app.css breakpoints (7170 / 7412 / 7506)
+     so labels like "Personal Details" fit at narrower widths instead of
+     truncating. Matches legacy's !important so the active label shrinks too. */
+  @media (max-width: 1100px) {
+    .wiz-step-label { font-size: 8px !important; }
+    .wiz-step { min-width: 64px; }
+  }
+  @media (max-width: 600px) {
+    .wiz-step { min-width: 52px; }
+    .wiz-step-num { width: 36px; height: 36px; }
+    .wiz-step-num svg { width: 16px; height: 16px; }
+    .wiz-step-label { font-size: 7px !important; max-width: 52px; white-space: normal; line-height: 1.2; word-break: break-word; }
+  }
+  @media (max-width: 390px) {
+    .wiz-step-label { font-size: 6.5px !important; max-width: 44px; }
+  }
+
+  /* ── Wizard section head — legacy #page-new-application .section-head
+     (app.css:3882): 10px/1.2px uppercase, --accent text, no number prefix.
+     The left bar is legacy's blue→red gradient tick (rendered ::before,
+     4×14 rounded 2px), not a solid blue bar. ──────────────────────────── */
+  .wiz-section-head {
+    font-family: var(--font-head);
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px; margin: 24px 0 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .wiz-section-head:first-child { margin-top: 0; }
+  .wiz-section-head::before {
+    content: ''; display: inline-block; width: 4px; height: 14px;
+    background: linear-gradient(var(--accent), var(--accent2)); border-radius: 2px;
+  }
+
+  /* ── Locked (future) wizard steps — legacy efin-improvements.css:549:
+     _efinUpdateStepLockState() greys the circle (keeping the per-step pastel
+     border ring) and drops a small 🔒 badge at the bottom-right. Applied to
+     every step after the current one that isn't already done. ──────────── */
+  .wiz-step.locked .wiz-step-num {
+    background: #e5e7eb; color: #9ca3af; box-shadow: none; cursor: not-allowed;
+  }
+  .wiz-step.locked .wiz-step-num::after {
+    content: '🔒'; position: absolute; font-size: 8px; bottom: -2px; right: -2px;
+  }
+
+  /* ── Wizard footer progress — legacy .wiz-progress-wrap (app.css:3815):
+     mood line over an animated gradient bar, centered between Back/Next. The
+     "Step X of Y" counter exists in legacy but is display:none, so it is not
+     reproduced. ───────────────────────────────────────────────────────── */
+  .wiz-progress-wrap { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: 1; max-width: 220px; margin: 0 auto; }
+  .wiz-progress-mood { font-size: 11px; font-weight: 600; color: var(--accent); letter-spacing: .1px; }
+  .wiz-progress-bar-wrap { width: 100%; background: var(--surface3); border-radius: 99px; height: 6px; overflow: hidden; position: relative; }
+  .wiz-progress-bar-fill {
+    height: 100%; border-radius: 99px;
+    background: linear-gradient(90deg, #a78bfa, #085897, #059669);
+    background-size: 200% 100%;
+    transition: width .5s cubic-bezier(.4,0,.2,1);
+    box-shadow: 0 0 8px rgba(8,88,151,.3);
+    animation: wiz-bar-shimmer 2.5s linear infinite;
+  }
+  @keyframes wiz-bar-shimmer { 0% { background-position: 0% 0%; } 100% { background-position: 200% 0%; } }
+  .wiz-required-note {
+    font-size: 11.5px; color: var(--text3); margin-bottom: 18px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .wiz-required-note .wiz-req-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent2); flex-shrink: 0; }
+
+  /* Validation shake — a brief horizontal nudge on a field group that just
+     failed validation, so the eye is drawn to what needs fixing. Applied
+     once (keyed) when the wizard reveals errors on a failed Next/Submit. */
+  @keyframes field-shake {
+    0%, 100% { transform: translateX(0); }
+    20%      { transform: translateX(-5px); }
+    40%      { transform: translateX(4px); }
+    60%      { transform: translateX(-3px); }
+    80%      { transform: translateX(2px); }
+  }
+  .field-shake { animation: field-shake .38s cubic-bezier(.36,.07,.19,.97); }
+  @media (prefers-reduced-motion: reduce) { .field-shake { animation: none; } }
+
+  /* Staggered fade-up entrance for grids of cards. */
+  @keyframes fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .stagger-item { animation: fade-up .42s cubic-bezier(.4,0,.2,1) both; }
+  .stagger-item:nth-child(1) { animation-delay: .00s; }
+  .stagger-item:nth-child(2) { animation-delay: .05s; }
+  .stagger-item:nth-child(3) { animation-delay: .10s; }
+  .stagger-item:nth-child(4) { animation-delay: .15s; }
+  .stagger-item:nth-child(5) { animation-delay: .20s; }
+  .stagger-item:nth-child(6) { animation-delay: .25s; }
+
+  /* ── Loan Product Selector — premium card grid ─────────────────────────
+     Ports legacy's .lp-card (app.css:8037-8109): hover lift + glow, a
+     selected state with an accent ring and check badge, icon micro-tilt on
+     hover. Legacy used inline emoji as the icon; this uses lucide-react
+     icons instead, matching every other icon in the app, so `.lp-card-icon`
+     here sizes an icon container rather than emoji text. */
+  .lp-card {
+    position: relative;
+    background: var(--surface2);
+    border: 2px solid var(--border);
+    border-radius: var(--r-lg, 18px);
+    padding: 22px 14px 18px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .22s cubic-bezier(.2,0,.1,1);
+    overflow: hidden;
+  }
+  .lp-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, var(--accent-subtle), transparent 60%);
+    opacity: 0;
+    transition: opacity .22s;
+  }
+  .lp-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(8,88,151,.15);
+    background: var(--surface);
+  }
+  .lp-card:hover::before { opacity: 1; }
+  .lp-card.selected {
+    border-color: var(--accent);
+    background: var(--surface);
+    box-shadow: 0 0 0 4px rgba(8,88,151,.12), 0 12px 32px rgba(8,88,151,.18);
+  }
+  .lp-card.selected::before { opacity: 1; }
+  .lp-card-icon {
+    width: 44px; height: 44px;
+    margin: 0 auto 12px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 12px;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    transition: transform .22s;
+    position: relative;
+  }
+  .lp-card:hover .lp-card-icon { transform: scale(1.1) rotate(-4deg); }
+  .lp-card.selected .lp-card-icon { transform: scale(1.08); }
+  .lp-card-name {
+    font-family: var(--font-head);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.3;
+    position: relative;
+  }
+  .lp-card-desc {
+    font-size: 11px;
+    color: var(--text3);
+    margin-top: 4px;
+    line-height: 1.4;
+    position: relative;
+  }
+  .lp-check {
+    position: absolute;
+    top: 10px; right: 10px;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    transform: scale(.5);
+    transition: all .2s;
+  }
+  .lp-card.selected .lp-check { opacity: 1; transform: scale(1); }
+
+  /* Vertical timeline for activity/recent-events lists. */
+  .timeline-rail { position: relative; }
+  .timeline-rail::before {
+    content: '';
+    position: absolute;
+    left: 26px; top: 4px; bottom: 4px;
+    width: 1.5px;
+    background: linear-gradient(to bottom, var(--border), transparent);
+  }
+  .timeline-dot {
+    position: relative; z-index: 1;
+    width: 9px; height: 9px; border-radius: 999px;
+    box-shadow: 0 0 0 4px var(--surface);
+  }
+
+  /* Premium table skin used by the redesigned Dashboard/Loans tables —
+     opt-in via `.table-premium` so existing `.efin-table` usages elsewhere
+     in the app are untouched. */
+  .table-premium thead th {
+    background: linear-gradient(180deg, var(--surface2), var(--surface));
+    position: sticky; top: 0;
+  }
+  .table-premium tbody tr { transition: background .15s; }
+  .table-premium tbody tr:hover { background: var(--surface2); }
+
+  /* Soft focus/press ring reused by the redesigned quick-action tiles. */
+  .tap-ring:active { transform: scale(.98); }
+}
+
+/* ── Loan Detail — premium redesign (additive, page-3 of the New
+   Application flow). Nothing above is modified; every class below is new
+   and scoped to LoanDetailPage / LoanDocumentsCard / LoanApplicantTabs /
+   the embedded Timeline tab, so no other page is affected. Same token
+   vocabulary as the Dashboard redesign above (--accent/--success/--warn/
+   --danger/--accent3, --kpi-*), not a second palette. ────────────────── */
+@layer components {
+  /* -- Loan header hero card: gradient wash + big loan number + status. */
+  .loan-hero {
+    position: relative;
+    border-radius: 20px;
+    background: linear-gradient(120deg, var(--surface) 0%, var(--accent-subtle) 140%);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .loan-hero::before {
+    content: '';
+    position: absolute; inset: 0 0 auto 0; height: 4px;
+    background: linear-gradient(90deg, var(--accent), var(--accent3));
+  }
+  .loan-hero-icon {
+    width: 52px; height: 52px; border-radius: 15px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
+    box-shadow: var(--shadow-accent);
+  }
+  .loan-hero-stat {
+    padding: 10px 16px;
+    border-radius: 13px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    min-width: 0;
+  }
+
+  /* -- Mini KPI tile: compact version of .kpi-card for the Loan Details /
+     Status Summary grid (4-6 numeric facts, not the big dashboard tiles). */
+  .kpi-mini {
+    position: relative;
+    border-radius: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 14px 16px;
+    overflow: hidden;
+    transition: transform .2s cubic-bezier(.4,0,.2,1), box-shadow .2s, border-color .2s;
+  }
+  .kpi-mini::before {
+    content: '';
+    position: absolute; inset: 0 auto 0 0; width: 3px;
+    background: var(--kpi-accent, var(--accent));
+    opacity: .85;
+  }
+  .kpi-mini:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 26px -14px var(--kpi-shadow, rgba(8,88,151,.3));
+    border-color: var(--border2);
+  }
+  .kpi-mini-icon {
+    width: 30px; height: 30px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--kpi-tint, var(--accent-subtle));
+    color: var(--kpi-accent, var(--accent));
+    margin-bottom: 8px;
+  }
+
+  /* -- Small icon badge used on section-card headers (Applicant Info,
+     Customer, Assignment...) so each section reads at a glance. */
+  .section-icon-badge {
+    width: 30px; height: 30px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  /* -- Document card grid (Documents tab). */
+  .doc-card {
+    position: relative;
+    border-radius: 15px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    overflow: hidden;
+    transition: transform .2s cubic-bezier(.4,0,.2,1), box-shadow .2s, border-color .2s;
+  }
+  .doc-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 32px -16px rgba(8,88,151,.28);
+    border-color: var(--border2);
+  }
+  .doc-card-preview {
+    height: 76px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(160deg, var(--surface2), var(--surface));
+    border-bottom: 1px solid var(--border);
+  }
+  .doc-card-icon {
+    width: 42px; height: 42px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    color: var(--accent);
+    box-shadow: 0 4px 10px rgba(8,88,151,.12);
+  }
+
+  /* -- CTA buttons: success variant (Approve / Disburse-style positive
+     actions), additive alongside the existing primary/secondary/danger/
+     ghost set so no existing call site changes appearance. */
+  .efin-btn--success {
+    background: linear-gradient(135deg, #22a06b 0%, #1a7340 50%, #145c33 100%);
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(26, 115, 64, .35), 0 1px 0 rgba(255, 255, 255, .2) inset;
+  }
+  .efin-btn--success:not(:disabled):hover {
+    background: #17663a;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(26, 115, 64, .4);
+  }
+
+  /* ── Loan-detail Timeline table — 1:1 port of legacy renderTrackingSection's
+     .tracking-table / .stage-badge / .trk-type-* / comment + sub-note cells
+     (efin-app.js:3142, app.css:4481-4636). Replaces the earlier vertical-card
+     timeline so the embedded Timeline tab matches Vanilla's table exactly.
+     Legacy inline hex/rgba swapped for the app's own tokens (theme-aware);
+     the distinctive stage / comment-type tints are kept verbatim. */
+  .tracking-table { width: 100%; border-collapse: collapse; }
+  .tracking-table thead th {
+    text-align: left;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .6px;
+    font-weight: 800; color: var(--text3);
+    padding: 10px 12px; border-bottom: 1.5px solid var(--border);
+    white-space: nowrap; background: var(--surface2);
+  }
+  .tracking-table tbody td {
+    font-size: 12px; vertical-align: top;
+    padding: 11px 12px; border-bottom: 1px solid var(--border);
+    color: var(--text2);
+  }
+  .tracking-table tbody tr:last-child td { border-bottom: none; }
+  .tracking-table tbody tr:hover td { background: var(--accent-subtle); }
+
+  .stage-badge {
+    display: inline-block;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
+    white-space: nowrap;
+  }
+  .stage-PAR_DEP { background: rgba(8, 88, 151, .12); color: var(--accent); }
+  .stage-CPA_Dep, .stage-CPA_DOCS { background: rgba(212, 43, 43, .12); color: var(--accent2); }
+  .stage-Admin { background: rgba(161, 89, 255, .15); color: #a159ff; }
+  .stage-Login { background: rgba(255, 107, 53, .15); color: var(--accent3); }
+  .stage-Team, .stage-Assign { background: rgba(255, 179, 71, .15); color: var(--warn); }
+  .stage-System, .stage-System-Comment, .stage-System-Comments, .stage-system { background: rgba(138, 150, 180, .15); color: #8a96b4; }
+  .stage-Sales { background: rgba(0, 200, 255, .15); color: #085897; }
+  .stage-default { background: rgba(8, 88, 151, .08); color: var(--accent); }
+
+  /* Comment-type badges inside the timeline (legacy .trk-type-*) */
+  .trk-type-tag {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9.5px; font-weight: 700; padding: 1px 7px;
+    border-radius: 20px; margin-bottom: 4px; letter-spacing: .3px;
+  }
+  .trk-type-general { background: rgba(8, 88, 151, .1);  color: #085897; }
+  .trk-type-query   { background: rgba(212, 43, 43, .1);  color: #c0392b; }
+  .trk-type-pending { background: rgba(245, 158, 11, .12); color: #92400e; }
+  .trk-type-task    { background: rgba(26, 115, 64, .1);  color: #1a7340; }
+
+  /* Tracking-entry STATUS badge — verbatim to Vanilla's `.badge` + the exact
+     `.badge-*` rules the tracking status uses (app.css:5343/5366 · 2999-3016):
+     Complete/COMPLETE red, Pending amber, SKIP grey, anything else the plain
+     base badge. Deliberately NOT the app's design-system Badge variants. */
+  .trk-status { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10.5px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; color: var(--text2); }
+  .trk-status-complete { background: rgba(212, 43, 43, .1);  color: var(--accent2); border: 1px solid rgba(212, 43, 43, .2); }
+  .trk-status-pending  { background: rgba(255, 179, 71, .15); color: var(--warn); }
+  .trk-status-skip     { background: rgba(138, 150, 180, .15); color: #8a96b4; }
+
+  /* Pending-docs bullet list rendered inside a Pending-Docs comment */
+  .trk-doc-list { margin: 5px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+  .trk-doc-list li {
+    font-size: 11.5px; color: var(--text2);
+    padding: 3px 8px; background: rgba(245, 158, 11, .07);
+    border-left: 2px solid #f59e0b; border-radius: 0 5px 5px 0;
+  }
+
+  .tracking-comment { font-size: 12.5px; color: var(--text); max-width: 260px; line-height: 1.7; white-space: pre-line; }
+  .tracking-subnote { font-size: 11.5px; color: var(--text3); max-width: 220px; line-height: 1.6; white-space: pre-line; font-style: italic; }
+}
+
+/* ── Form control parity ───────────────────────────────────────────────────
+   Ported from the legacy stylesheet's .login-input / .login-btn (app.css),
+   using the values those rules actually COMPUTE to in the browser rather than
+   the first of their several duplicate declarations — the later ones win the
+   cascade, and the earlier (dark-theme) copies are dead.
+
+   The React primitives had drifted to Tailwind's generic palette and scale:
+   inputs came out 38px tall with an 8px radius, a white fill and a #e5e7eb
+   border; buttons were flat #1a4fa3 at weight 500. Legacy is noticeably more
+   substantial — 46px inputs, 12px radius, a tinted --surface2 fill on a
+   --border hairline, and a gradient button at weight 800 carrying a blue glow.
+   That difference is most of why the React screens read as flatter.
+
+   Defined as component classes rather than per-page Tailwind so Input/Button
+   stay the single source of truth for every screen that uses them. */
+@layer components {
+  /* -- Card (legacy app.css:2701 `.card` / :2716 `.card-head` / :2725
+     `.card-title`, with a distinct <=900px variant at :5112/:5128) ------
+     Card.tsx composed raw Tailwind utilities instead of a component class,
+     which is how a shadow ended up on every card at every width: it applied
+     `shadow-token` (var(--shadow), a real visible shadow) unconditionally,
+     but legacy's DESKTOP card has no shadow at all -- only the <=900px
+     variant adds one. What had been ported was the <=900px numbers (1.5px
+     border, 18px radius, the .025/60% head gradient) applied globally,
+     the same "mobile variant ported as the base rule" pattern the topbar
+     had. Desktop cards should read as flat, hairline-bordered panels. */
+  .efin-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    /* Clips CardHeader's flat top corners to the card's own rounded corners
+       -- without this, a header that bleeds to the card edges (see
+       CardHeader's -mx/-mt) would square off the top of a rounded card. */
+    overflow: hidden;
+    min-width: 0;
+    box-sizing: border-box;
+    transition: border-color .2s;
+  }
+  .efin-card:hover { border-color: var(--border2); }
+
+  @media (max-width: 900px) {
+    .efin-card {
+      border-width: 1.5px;
+      border-radius: 18px;
+      box-shadow: 0 2px 12px rgba(8, 88, 151, .05);
+      transition: all .22s;
+    }
+    .efin-card:hover {
+      border-color: rgba(8, 88, 151, .18);
+      box-shadow: 0 6px 28px rgba(8, 88, 151, .09);
+    }
+  }
+
+  .efin-card-head {
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, rgba(8, 88, 151, .02), transparent);
+  }
+  .efin-card-title {
+    font-family: var(--font-head);
+    font-size: 14.5px;
+    font-weight: 700;
+    letter-spacing: -.2px;
+  }
+  @media (max-width: 900px) {
+    .efin-card-head {
+      padding: 18px 24px;
+      border-bottom-width: 1.5px;
+      background: linear-gradient(90deg, rgba(8, 88, 151, .025) 0%, transparent 60%);
+    }
+    .efin-card-title { font-size: 15px; font-weight: 800; }
+  }
+
+  .efin-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    color: var(--text);
+    outline: none;
+    transition: border-color .18s, box-shadow .18s, background .18s;
+  }
+  .efin-input::placeholder { color: var(--text3); }
+  .efin-input:hover:not(:disabled):not(:focus) { border-color: var(--border2); }
+  .efin-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .efin-input:disabled { opacity: .6; cursor: not-allowed; }
+  /* Error state keeps the legacy geometry, swapping only the signal colour. */
+  .efin-input--error { border-color: var(--danger); background: rgba(192, 57, 43, .04); }
+  .efin-input--error:focus {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px rgba(192, 57, 43, .18);
+  }
+
+  /* Native <select> needs the same skin plus its own chevron, since
+     appearance:none removes the platform arrow. */
+  .efin-select {
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%237a8aaa' d='M1.4 0 6 4.6 10.6 0 12 1.4 6 7.4 0 1.4z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    padding-right: 38px;
+  }
+
+  .efin-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* Legacy `.btn` (app.css:2021): gap 6px, --r-sm (10px), weight 600,
+       .1px tracking, `transition: all .18s`. React had drifted to 8px gap,
+       12px radius, weight 800 and .3px tracking -- the weight in particular
+       made every button read appreciably heavier than legacy's. */
+    gap: 6px;
+    border: none;
+    border-radius: var(--r-sm);
+    font-family: var(--font-body);
+    font-weight: 600;
+    letter-spacing: .1px;
+    cursor: pointer;
+    /* Legacy buttons use line-height:normal. Tailwind's preflight makes
+       buttons inherit the body's 1.5, which added ~4px of height at every
+       size (15px label rendered a 23px line box instead of 19px). */
+    line-height: normal;
+    transition: all .18s;
+  }
+  .efin-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .efin-btn:not(:disabled):active { transform: translateY(0); }
+
+  .efin-btn--primary {
+    background: linear-gradient(135deg, #2563c7 0%, #1b4fa0 50%, #143d82 100%);
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(8, 88, 151, .4), 0 1px 0 rgba(255, 255, 255, .2) inset;
+  }
+  .efin-btn--primary:not(:disabled):hover {
+    background: #1a5bc7;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(8, 88, 151, .4);
+  }
+
+  .efin-btn--danger {
+    background: linear-gradient(135deg, #e94040 0%, #d42b2b 50%, #a81e1e 100%);
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(212, 43, 43, .35), 0 1px 0 rgba(255, 255, 255, .2) inset;
+  }
+  .efin-btn--danger:not(:disabled):hover {
+    background: #c62828;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(212, 43, 43, .4);
+  }
+
+  .efin-btn--secondary {
+    background: var(--surface);
+    color: var(--text2);
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 2px rgba(8, 88, 151, .06);
+  }
+  .efin-btn--secondary:not(:disabled):hover {
+    background: var(--surface2);
+    border-color: var(--border2);
+    transform: translateY(-1px);
+  }
+
+  .efin-btn--ghost { background: transparent; color: var(--text2); }
+  .efin-btn--ghost:not(:disabled):hover { background: var(--accent-subtle); color: var(--accent); }
+
+  /* Sizes mirror the legacy 13px/14px/15px ladder — .login-btn is the md rung. */
+  /* Sizes mapped onto legacy's actual scale rather than invented values:
+       --sm = legacy `.btn-sm`      (5px 12px / 11.5px)
+       --md = legacy `.btn` base    (9px 18px / 13px)   <- the default
+       --lg = legacy's >=2560 bump  (11px 22px / 14px)
+     React had been running 14px 20px / 15px as its default, appreciably
+     larger than legacy renders. */
+  .efin-btn--sm { padding: 5px 12px;  font-size: 11.5px; }
+  .efin-btn--md { padding: 9px 18px;  font-size: 13px; }
+  .efin-btn--lg { padding: 11px 22px; font-size: 14px; }
+
+  /* Legacy grows the tap target back out on small screens and on any coarse
+     pointer (app.css:7389 and the (hover:none) block), so shrinking to the
+     real desktop metrics above costs nothing on touch. */
+  @media (max-width: 600px) {
+    .efin-btn--md { padding: 10px 16px; font-size: 13px; min-height: 44px; }
+    .efin-btn--sm { padding: 7px 12px;  font-size: 11.5px; min-height: 36px; }
+  }
+  @media (max-width: 390px) {
+    .efin-btn--sm { padding: 6px 10px; font-size: 10.5px; }
+  }
+  @media (hover: none) and (pointer: coarse) {
+    .efin-btn--md { min-height: 44px; }
+    .efin-btn--sm { min-height: 38px; }
+  }
+
+  /* Ported from legacy .topbar. The React header was a flat 56px bar with a
+     1px --border hairline and no shadow, so it read as part of the page rather
+     than as a surface floating above it. Legacy is 64px, very slightly
+     translucent, edged with a 2px #f0f4fc rule and lifted by a blue-tinted
+     ambient shadow — the same shadow family as --shadow, just softer. */
+  /* ── Stat cards (legacy `.stat-card` / `.stat-value` / `.stat-label`) ──
+     The desktop metrics already matched exactly (34px/800/Outfit/lh-1/mb-10
+     and 10.5px/600/1.2px tracking/--text3/mb-12). What was missing is that
+     legacy COMPACTS them on small screens -- app.css:7258 (<=600px) and
+     :7492 (<=390px). React kept 34px figures on a 375px phone, which is
+     roughly 40% larger than legacy renders there.
+
+     The icon tile and card padding shrink in the same step, so all four move
+     together rather than the number alone. */
+  /* These own the size at EVERY width rather than only overriding on small
+     screens. Tailwind emits utilities after the components layer, so a
+     `text-[34px]` left on the element would win over the media query below
+     and the compaction would silently never apply. */
+  .efin-stat-value {
+    font-family: var(--font-head);
+    font-size: 34px;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 10px;
+  }
+  .efin-stat-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-bottom: 14px;
+  }
+  .efin-stat-label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text3);
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  @media (max-width: 600px) {
+    .efin-stat-card  { padding: 14px 12px; border-radius: 14px; }
+    .efin-stat-value { font-size: 26px; margin-bottom: 4px; }
+    .efin-stat-label { font-size: 9.5px; margin-bottom: 6px; }
+    .efin-stat-icon  { width: 34px; height: 34px; font-size: 15px; margin-bottom: 8px; }
+  }
+  @media (max-width: 390px) {
+    .efin-stat-value { font-size: 24px; }
+  }
+
+  /* ── Topbar (legacy app.css:1891 `.topbar`) ───────────────────────────
+     What was here before was legacy's <=900px MOBILE variant -- .95 alpha,
+     2px #f0f4fc bottom border, drop shadow -- applied at every width. The
+     desktop rule is a different thing entirely: 92% white over a 16px
+     backdrop blur, a hairline 1px --border rule, no shadow, and 32px of
+     horizontal padding rather than 16px.
+
+     Height is min-height, not height. Legacy never fixes the height; it
+     falls out of 14px padding around a 38px control, which is what
+     --topbar-h: 68px records. Pinning it to 64px clipped nothing today but
+     would the moment a control grew. */
+  .efin-topbar {
+    min-height: var(--topbar-h);
+    padding: 14px 32px;
+    gap: 16px;
+    background: rgba(255, 255, 255, .92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    z-index: var(--z-topbar);
+  }
+
+  /* Legacy widens the gutter in step with the sidebar on large displays
+     (app.css :4809 / :4820 / :4836). */
+  @media (min-width: 1600px) { .efin-topbar { padding: 14px 44px; } }
+  @media (min-width: 1920px) { .efin-topbar { padding: 16px 56px; } }
+  @media (min-width: 2560px) { .efin-topbar { padding: 20px 80px; } }
+
+  /* <=1100px legacy tightens padding and gap (app.css, !important there
+     because it has to beat the <=900px block below it). */
+  @media (max-width: 1100px) {
+    .efin-topbar { padding: 10px 14px; gap: 10px; }
+  }
+
+  /* <=900px is where the frosted mobile treatment actually belongs. */
+  @media (max-width: 900px) {
+    .efin-topbar {
+      background: rgba(255, 255, 255, .95);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 2px solid #f0f4fc;
+      box-shadow: 0 2px 16px rgba(27, 79, 160, .06);
+    }
+  }
+
+  /* ── Topbar icon button (legacy `.topbar-icon-btn`, app.css:1987) ──────
+     38px square, 9px radius, a --border2 hairline over --surface2. React had
+     a borderless 36px transparent button that only showed on hover. Legacy
+     bumps it to 40px <=600px and 44px on coarse pointers, both preserved. */
+  .efin-topbar-icon-btn {
+    width: 38px;
+    height: 38px;
+    flex-shrink: 0;
+    border-radius: 9px;
+    border: 1px solid var(--border2);
+    background: var(--surface2);
+    color: var(--text2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .efin-topbar-icon-btn:hover {
+    background: var(--surface3);
+    color: var(--text);
+    border-color: var(--primary);
+  }
+  @media (max-width: 600px) {
+    .efin-topbar-icon-btn { width: 40px; height: 40px; }
+  }
+  @media (hover: none) and (pointer: coarse) {
+    .efin-topbar-icon-btn { width: 44px; height: 44px; }
+  }
+
+  /* ── Topbar notification dot (legacy `.topbar-notif-dot`, app.css:2009) ──
+     7x7 --danger dot with a --surface ring and a red glow. React had an 8px
+     plain `bg-efin-red` (a raw Tailwind red, not the `--danger` token) with
+     no ring or glow. */
+  .efin-topbar-notif-dot {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--danger);
+    border: 1.5px solid var(--surface);
+    box-shadow: 0 0 6px rgba(255, 69, 96, .6);
+  }
+
+  /* ── Monospace ID chip (legacy `.app-id`, app.css:2908) ─────────────────
+     Accent-tinted pill legacy uses for every monospace entity/application
+     ID. AuditLogPage's entity-name chip and AssignmentAuditTab's
+     application-ID chip were both on plain neutral `bg-gray-100`, not this
+     accent treatment. */
+  .efin-mono-id {
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    background: rgba(8, 88, 151, .08);
+    border: 1px solid rgba(8, 88, 151, .18);
+    border-radius: 5px;
+    padding: 2px 7px;
+    display: inline-block;
+    letter-spacing: .3px;
+  }
+
+  /* ── Applications row action buttons (legacy app-table-body Open/Delete,
+     efin-app.js:2055–2057) ─────────────────────────────────────────────
+     Vanilla renders every row's Actions cell as a bordered "👁 Open" pill
+     (hover → accent) plus, for Admin, a red-tinted "🗑 Delete" pill. React
+     previously rendered a bare "View" text link. */
+  .app-row-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1.5px solid var(--border2);
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    transition: all .18s;
+    text-decoration: none;
+  }
+  .app-row-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .app-row-btn-danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(192, 57, 43, .08);
+    border: 1px solid rgba(192, 57, 43, .25);
+    color: var(--danger);
+    cursor: pointer;
+    transition: background .18s;
+  }
+  .app-row-btn-danger:hover { background: rgba(192, 57, 43, .14); }
+
+  /* ── Topbar search (legacy `.topbar-search`) ──────────────────────────
+     --surface2 fill, 1px --border (React had --border2, a shade too dark),
+     9px radius, and 36px of left padding to clear the icon. */
+  .efin-topbar-search {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 8px 14px 8px 36px;
+    color: var(--text);
+    width: 100%;
+    transition: border-color .15s, background .15s;
+  }
+  .efin-topbar-search::placeholder { color: var(--text3); }
+  .efin-topbar-search:focus {
+    outline: none;
+    background: var(--surface);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(8, 88, 151, .12);
+  }
+
+  /* ── Tables ──────────────────────────────────────────────────────────────
+     Legacy `table th` / `table td` (app.css). The React DataTable used
+     Tailwind defaults — a transparent header, 12px medium gray labels, and
+     gray-50/100 rules — which lost the legacy header band entirely. Legacy
+     headers are a tinted --surface2 strip of 10.5px uppercase micro-caps at
+     weight 700 with wide tracking, over a 1.5px --border rule; rows are 13px
+     --text2 on 1px --border, and hover is a faint accent wash rather than
+     gray. Applied via a wrapper class so one rule covers every table. */
+  .efin-table { width: 100%; border-collapse: collapse; }
+  .efin-table th {
+    font-family: var(--font-body);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    font-weight: 700;
+    color: var(--text3);
+    padding: 12px 16px;
+    background: var(--surface2);
+    border-bottom: 1.5px solid var(--border);
+    white-space: nowrap;
+    text-align: left;
+  }
+  .efin-table td {
+    padding: 13px 16px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    color: var(--text2);
+  }
+  /* Legacy hover is on the cells, not the row, so it survives sticky columns. */
+  .efin-table tbody tr:hover td { background: rgba(8, 88, 151, .035); }
+  .efin-table tbody tr:last-child td { border-bottom: none; }
+
+  /* ── Sidebar nav item (legacy app.css:1624 `.nav-item` / :1638 `.nav-icon`) ─
+     The sidebar highlight uses the brand secondary accent (--accent2), not
+     blue. That accent is now the MudraHub logo's "Hub" ORANGE (formerly red
+     #d42b2b); see the token block at the top of this file. React had every
+     nav state -- hover, active, the icon recolor -- on `text-efin-blue` /
+     `--accent-subtle`, which is a plausible-looking brand color but not
+     the one this app actually uses here. There are also two visual signals
+     React had none of: a 3px accent left-bar on the active item, and a soft
+     accent pill behind the active icon when the rail is collapsed.
+
+     Icons: legacy runs them at 18px, 55% opacity by default, scaling to
+     1.1x/100% opacity and recoloring to red on hover or active -- React's
+     lucide icons stayed a flat, static gray/blue throughout. */
+  .efin-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    position: relative;
+    overflow: hidden;
+    min-height: 44px;
+    margin: 1px 0;
+    border-radius: 0;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: #3d4a5e;
+    transition: background .15s, color .15s;
+  }
+  /* Sidebar nav rail scroller — this list can overflow on short viewports
+     (many sections + Manager/Admin-only items). The default OS scrollbar
+     (thick gray thumb + up/down arrow buttons) was overwhelming the 64px
+     collapsed icon rail, visually competing with the icons themselves.
+     This swaps it for a slim, borderless thumb with no arrow buttons —
+     still fully scrollable (wheel/touch/drag), just far less intrusive. */
+  .sidebar-nav-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #d8dee7 transparent;
+  }
+  .sidebar-nav-scroll::-webkit-scrollbar { width: 5px; }
+  .sidebar-nav-scroll::-webkit-scrollbar-track { background: transparent; }
+  .sidebar-nav-scroll::-webkit-scrollbar-thumb {
+    background: #d8dee7;
+    border-radius: 999px;
+  }
+  .sidebar-nav-scroll::-webkit-scrollbar-thumb:hover { background: #b9c2cf; }
+  .sidebar-nav-scroll::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+
+  .efin-nav-item:hover {
+    background: #fff7ed;
+    color: var(--accent2);
+  }
+  .efin-nav-item--active {
+    background: #fff3e2;
+    color: var(--accent2);
+    font-weight: 700;
+  }
+  /* Active left bar. */
+  .efin-nav-item--active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 15%; bottom: 15%;
+    width: 3px;
+    background: var(--accent2);
+    border-radius: 0 3px 3px 0;
+  }
+  /* Legacy drives the rounded/inset state and the collapsed-icon-pill off
+     `.sidebar:hover` in pure CSS; this React rail already tracks the same
+     "expanded" moment as a JS boolean (used for the width transition a few
+     lines up in AppLayout.tsx), so it's applied as a class here instead of
+     trying to re-derive a hover selector this component doesn't have. */
+  .efin-nav-item--expanded {
+    border-radius: 8px;
+    margin: 1px 8px;
+  }
+  .efin-nav-icon {
+    width: 64px;
+    min-width: 64px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+    opacity: .55;
+    transition: transform .18s cubic-bezier(.4, 0, .2, 1), opacity .18s;
+  }
+  .efin-nav-item--expanded .efin-nav-icon { width: 44px; min-width: 44px; }
+  .efin-nav-item:hover .efin-nav-icon,
+  .efin-nav-item--active .efin-nav-icon { opacity: 1; }
+  .efin-nav-item:hover .efin-nav-icon { transform: scale(1.1); }
+  .efin-nav-item:hover .efin-nav-icon svg,
+  .efin-nav-item--active .efin-nav-icon svg { stroke: var(--accent2); }
+  /* Collapsed-only soft pill behind the active icon; legacy removes it the
+     moment the rail expands and real text is visible next to the icon. */
+  .efin-nav-item--active:not(.efin-nav-item--expanded) .efin-nav-icon::after {
+    content: '';
+    position: absolute;
+    width: 36px;
+    height: 32px;
+    background: rgba(212, 43, 43, .1);
+    border-radius: 8px;
+    z-index: -1;
+  }
+
+  /* ── Modal ───────────────────────────────────────────────────────────────
+     Legacy .modal-overlay is a deep navy scrim with a real blur, not a flat
+     black 40%. The dialog itself gets legacy's pop-in easing. */
+  .efin-modal-overlay {
+    background: rgba(8, 18, 52, .55);
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    animation: efin-overlay-in .18s ease-out;
+  }
+  .efin-modal-panel { animation: efin-modal-in .26s cubic-bezier(.34, 1.56, .64, 1); }
+
+  /* Optional Modal `headerClassName` for the rare dialog with a richer
+     title (icon + badges) -- same gradient formula already used by the
+     notification panel and premium page heroes elsewhere in this file. */
+  .modal-header-gradient {
+    background: linear-gradient(120deg, var(--surface) 0%, var(--accent-subtle) 170%);
+  }
+
+}
+
+/* Legacy compacts tables on small screens rather than shipping a separate
+   dense variant (app.css:7245, `@media (max-width: 600px)`). Ported verbatim
+   so narrow viewports fit the same number of columns before scrolling.
+   Outside @layer components: these override .efin-table's own declarations and
+   must win on specificity/order. */
+@media (max-width: 600px) {
+  .efin-table th { font-size: 10px; padding: 9px 10px; }
+  .efin-table td { font-size: 12px; padding: 11px 10px; }
+}
+
+/* Legacy interaction keyframes. toastIn/modal easing is legacy's signature
+   overshoot curve — cubic-bezier(.34, 1.56, .64, 1). */
+@keyframes efin-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes efin-modal-in {
+  from { transform: translateY(8px) scale(.97); opacity: 0; }
+  to   { transform: translateY(0)   scale(1);   opacity: 1; }
+}
+/* ── Full-page loader (egl-*) removed — PageLoader is now fully self-contained
+   inside LoadingSpinner.tsx using the loanms-loader dual-ring animation.
+   No CSS classes needed here. */
+
+/* ── Route transition (legacy app.css `.page.active`) ─────────────────────
+   Legacy animated every page swap. React had no page transition at all, so
+   route changes snapped. Legacy declares this twice; the later rule wins, so
+   the real values are .3s cubic-bezier(.4,0,.2,1) over an 8px rise. */
+.efin-page { animation: efin-page-in .3s cubic-bezier(.4, 0, .2, 1); }
+@keyframes efin-page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toastIn {
+  from { transform: translateX(40px) scale(.92); opacity: 0; }
+  to   { transform: translateX(0)    scale(1);   opacity: 1; }
+}
+@keyframes toastOut {
+  from { transform: translateX(0) scale(1);      opacity: 1; max-height: 80px; }
+  to   { transform: translateX(40px) scale(.92); opacity: 0; max-height: 0; }
+}
+
+/* ── Toasts ────────────────────────────────────────────────────────────────
+   Ported from legacy .toast-container / .toast (app.css:4110+) and the
+   showToast() behaviour at efin-app.js:15291. React had no toast system at
+   all — this is a genuine feature gap being closed, not a restyle.
+   Kept outside @layer components because the host renders these class names
+   directly; Tailwind's purge only keeps @layer rules whose literal class name
+   it finds in source, and the variant names are built dynamically. */
+.efin-toast-container {
+  position: fixed;
+  top: 22px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+.efin-toast {
+  background: rgba(255, 255, 255, .96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(12, 23, 61, .15), 0 0 0 1px rgba(255, 255, 255, .8);
+  color: var(--text);
+  padding: 13px 18px;
+  font-size: 13px;
+  min-width: 280px;
+  max-width: 380px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  cursor: pointer;
+  animation: toastIn .3s cubic-bezier(.34, 1.56, .64, 1);
+}
+.efin-toast--leaving { animation: toastOut .35s ease-in forwards; }
+.efin-toast__icon { font-size: 17px; flex-shrink: 0; }
+
+/* Legacy uses a 4px left rule to carry the status colour. */
+.efin-toast--success { border-left: 4px solid #1a7340; }
+.efin-toast--error   { border-left: 4px solid var(--danger); }
+.efin-toast--warn    { border-left: 4px solid var(--warn); }
+.efin-toast--info    { border-left: 4px solid var(--accent); }
+
+/* Legacy's mobile rule re-anchors the stack to the bottom centre. */
+@media (max-width: 640px) {
+  .efin-toast-container {
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    top: auto;
+    right: 50%;
+    transform: translateX(50%);
+    width: calc(100vw - 24px);
+    max-width: 360px;
+  }
+  .efin-toast { min-width: 0; max-width: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .efin-toast, .efin-toast--leaving,
+  .efin-modal-panel, .efin-modal-overlay { animation: none; }
+  /* Shimmer and the route rise are decorative; kill the motion but keep the
+     skeleton's fill so placeholders stay visible. */
+  .efin-page { animation: none; }
+}
+
+/* ── Calculator module parity (P10) ──────────────────────────────────────
+   Ported from legacy app.css:8770-8869 (.calc-*, .prepay-result-*). The
+   Calculator page/ReverseEmiMode/PrepaymentMode previously hand-rolled
+   Tailwind-only cards/tabs/inputs instead of using shared primitives, so
+   this block gives them their own legacy-matched classes (distinct from
+   the generic .efin-card, which is 16px/1px — legacy's calculator cards
+   are specifically 18px/1.5px, same numbers as the generic card's <=900px
+   variant, but hardcoded here at every width per app.css itself). */
+@layer components {
+  /* .calc-layout (app.css:8781-8782) — the Standard-mode two-column shell:
+     inputs on the left, results on the right, stacking to one column below
+     860px. This was never ported, which is why the React Calculator page
+     rendered everything (inputs, results, amortisation) in one long
+     single-column stack instead of matching the legacy side-by-side
+     layout. */
+  .calc-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .calc-layout { grid-template-columns: 1fr; }
+  }
+
+  /* .calc-input-card / .calc-result-card / .calc-amort-section (app.css
+     :8785, :8800, :8835) — surface panel, no shadow at any width. */
+  .calc-card {
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 18px;
+  }
+
+  /* .calc-mode-tabs / .calc-mode-tab (app.css:8776-8778) — segmented pill
+     control. Legacy defines no distinct hover rule. */
+  .calc-mode-tabs {
+    display: flex;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 4px;
+    width: fit-content;
+  }
+  .calc-mode-tab {
+    padding: 7px 18px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text3);
+    border: none;
+    background: transparent;
+    transition: all .18s;
+  }
+  .calc-mode-tab.active {
+    background: var(--surface);
+    color: var(--accent);
+    box-shadow: 0 2px 10px rgba(8, 88, 151, .12);
+  }
+
+  /* .calc-loan-type button / .calc-amort-toggle button (app.css:8796-8797,
+     8839-8840) — identical subtle-tint toggle pattern used in both the
+     Reducing/Flat switch and the Monthly/Yearly amortisation switch. */
+  .calc-toggle-btn {
+    padding: 8px;
+    border-radius: 8px;
+    border: 1.5px solid var(--border);
+    background: var(--surface2);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text3);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .calc-toggle-btn.active {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+    color: var(--accent);
+  }
+  /* Slider min/max captions — legacy renders these under every calc range
+     input (index.html:3973): 10px --text3, spread to the ends. */
+  .calc-range-labels {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--text3); margin-top: 4px;
+  }
+
+  /* .calc-field input[type=range] (app.css:8791-8793) — custom track/thumb,
+     legacy has no dedicated range class name so this is scoped here. */
+  .efin-range {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 5px;
+    border-radius: 99px;
+    background: var(--surface3);
+    outline: none;
+    cursor: pointer;
+  }
+  .efin-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 2px 8px rgba(8, 88, 151, .35);
+    cursor: pointer;
+    transition: transform .15s;
+  }
+  .efin-range::-webkit-slider-thumb:hover { transform: scale(1.2); }
+  .efin-range::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 2px 8px rgba(8, 88, 151, .35);
+    cursor: pointer;
+  }
+}
+
+/* ── Customers — premium redesign (Page 4) ────────────────────────────────
+   Additive only, scoped to CustomersPage / CustomerDetailPage. Same token
+   vocabulary as the Dashboard/Loan Detail redesigns above (--accent/
+   --success/--warn/--danger, --kpi-*, .section-icon-badge, .doc-card,
+   .kpi-card) — no new palette, no existing class touched. ──────────────── */
+@layer components {
+  /* -- Toolbar card: search + filters wrapped as its own surface instead of
+     living loose inside the list card. */
+  .customer-toolbar {
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 14px 16px;
+  }
+
+  /* -- Avatar / initials badge. Color is driven by --avatar-accent /
+     --avatar-tint (set inline per-row from the CIBIL tier) so the badge
+     itself carries information, not just decoration. */
+  .customer-avatar {
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    border-radius: 999px;
+    font-family: var(--font-head);
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(135deg, var(--avatar-accent, var(--accent-light)), var(--avatar-accent-dark, var(--accent-dark)));
+    box-shadow: 0 6px 16px -6px var(--avatar-accent, var(--accent));
+  }
+
+  /* -- Customer list: stacked row-cards replacing the plain <table>. */
+  .customer-list { display: flex; flex-direction: column; gap: 10px; }
+  .customer-row {
+    position: relative;
+    display: flex; align-items: center; gap: 14px;
+    border-radius: 15px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    padding: 13px 16px;
+    transition: transform .18s cubic-bezier(.4,0,.2,1), box-shadow .18s, border-color .18s;
+  }
+  .customer-row:hover {
+    transform: translateY(-2px);
+    border-color: var(--border2);
+    box-shadow: 0 14px 32px -18px rgba(8,88,151,.28);
+  }
+  .customer-row-actions {
+    display: flex; align-items: center; gap: 4px;
+    opacity: 0; transform: translateX(4px);
+    transition: opacity .18s, transform .18s;
+  }
+  .customer-row:hover .customer-row-actions,
+  .customer-row:focus-within .customer-row-actions { opacity: 1; transform: translateX(0); }
+  .customer-row-action-btn {
+    width: 30px; height: 30px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text3);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    transition: color .15s, background .15s, border-color .15s;
+  }
+  .customer-row-action-btn:hover { color: var(--accent); background: var(--accent-subtle); border-color: var(--border2); }
+
+  /* -- Small tinted pill, reused for CIBIL / loan-count / PAN chips on the
+     list rows. Color set inline via --pill-fg/--pill-bg. */
+  .info-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px; font-weight: 700;
+    color: var(--pill-fg, var(--text2));
+    background: var(--pill-bg, var(--surface2));
+    white-space: nowrap;
+  }
+
+  /* -- Empty state illustration: layered rings behind the icon instead of a
+     single flat circle. */
+  .empty-illustration {
+    position: relative;
+    width: 76px; height: 76px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .empty-illustration::before, .empty-illustration::after {
+    content: '';
+    position: absolute; border-radius: 999px;
+    background: var(--accent-subtle);
+  }
+  .empty-illustration::before { inset: 0; }
+  .empty-illustration::after { inset: 12px; background: var(--surface2); }
+  .empty-illustration-icon { position: relative; z-index: 1; color: var(--accent); }
+
+  /* -- Customer profile hero (Customer Detail page) — mirrors .loan-hero's
+     gradient wash + top accent bar, with a circular avatar instead of a
+     square icon tile. */
+  .customer-hero {
+    position: relative;
+    border-radius: 20px;
+    background: linear-gradient(120deg, var(--surface) 0%, var(--accent-subtle) 140%);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .customer-hero::before {
+    content: '';
+    position: absolute; inset: 0 0 auto 0; height: 4px;
+    background: linear-gradient(90deg, var(--accent), var(--accent3));
+  }
+  .customer-hero-fact {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12.5px;
+    color: var(--text3);
+  }
+
+  /* -- CIBIL score widget: radial SVG gauge + big number, replacing plain
+     colored text. Ring color set inline via --gauge-color. */
+  .cibil-gauge-wrap { position: relative; width: 132px; height: 132px; flex-shrink: 0; }
+  .cibil-gauge-wrap svg { transform: rotate(-90deg); }
+  .cibil-gauge-track { stroke: var(--surface3); }
+  .cibil-gauge-value { stroke: var(--gauge-color, var(--accent)); transition: stroke-dashoffset .6s cubic-bezier(.4,0,.2,1); }
+  .cibil-gauge-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+
+  /* -- Linked loan card (Customer Detail): clickable card replacing plain
+     rows, same visual family as .kpi-mini / .doc-card. */
+  .linked-loan-card {
+    position: relative;
+    display: block; width: 100%; text-align: left;
+    border-radius: 15px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    padding: 14px 16px;
+    transition: transform .2s cubic-bezier(.4,0,.2,1), box-shadow .2s, border-color .2s;
+  }
+  .linked-loan-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border2);
+    box-shadow: 0 14px 32px -18px rgba(8,88,151,.28);
+  }
+  .linked-loan-card-icon {
+    width: 38px; height: 38px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+}
+/* ── Master Visual-Parity Loop — shared premium primitives (Pages 5-11) ────
+   Additive only. Reuses the existing token vocabulary (--accent/--accent3/
+   --success/--warn/--danger/--surface, --border, --text, --kpi families). These
+   generic primitives back the Reports, Perfios, Lender Config, Tickets,
+   Calculator, Notifications and Audit redesigns so every page picks up the
+   same hero / chart-card / toolbar language already used by Dashboard,
+   Loan Detail and Customers. No existing class is modified. ─────────────── */
+@layer components {
+  /* Note: the React-only ".page-hero" gradient banner + icon tile has been
+     removed — the 5 pages that used it (Reports, Lender Config, Tickets,
+     Calculator, Audit) now render Vanilla's plain page header via
+     <PageHeader> / a .calc-header, matching index.html. */
+
+  /* -- Section / chart card: aligned to Vanilla "Design System v2" .card /
+     .card-head (app.css:5111) — 1.5px border, the same resting shadow and
+     hairline gradient header strip, not a distinct premium surface. */
+  .chart-card {
+    position: relative;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(8,88,151,.05);
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .chart-card:hover { border-color: rgba(8,88,151,.18); box-shadow: 0 6px 28px rgba(8,88,151,.09); }
+  .chart-card-head {
+    display: flex; align-items: center; gap: 11px;
+    padding: 18px 24px;
+    border-bottom: 1.5px solid var(--border);
+    background: linear-gradient(90deg, rgba(8,88,151,.025) 0%, transparent 60%);
+  }
+  .chart-card-body { padding: 24px; }
+
+  /* (React-only ".premium-toolbar" wrapper removed — the pages that used it
+     now render Vanilla's plain inline section-header / filter rows.) */
+
+  /* -- Progress/meter bar — solid fill like Vanilla .progress-bar (not a
+     two-stop gradient). */
+  .meter-track { position: relative; height: 8px; border-radius: 999px; background: var(--surface3); overflow: hidden; }
+  .meter-fill {
+    position: absolute; inset: 0 auto 0 0; border-radius: 999px;
+    background: var(--meter-accent, var(--accent));
+    transition: width .6s cubic-bezier(.4,0,.2,1);
+  }
+
+  /* (React-only ".rank-row/.rank-medal" medallion list removed — Vanilla's
+     agent leaderboard is a plain table, reproduced with .v-table.) */
+}
+
+/* ── Perfios — premium redesign (Page 6) ──────────────────────────────────
+   Additive, scoped to the Perfios upload + analysis components. Reuses the
+   shared page-hero / chart-card / meter primitives plus a few Perfios-only
+   pieces (upload dropzone, health-score ring, summary stat tiles). ──────── */
+@layer components {
+  .perfios-shell {
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .perfios-shell-head {
+    display: flex; align-items: center; gap: 13px;
+    padding: 18px 20px;
+    background: linear-gradient(120deg, var(--surface) 0%, var(--accent-subtle) 160%);
+    border-bottom: 1px solid var(--border);
+  }
+  .perfios-shell-icon {
+    width: 46px; height: 46px; border-radius: 14px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
+    box-shadow: 0 8px 20px -8px var(--accent);
+  }
+  .perfios-drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; border-radius: 18px; padding: 40px 20px; cursor: pointer;
+    border: 2px dashed var(--border2);
+    background: radial-gradient(ellipse 70% 60% at 50% 0%, var(--accent-subtle) 0%, transparent 70%), var(--surface);
+    transition: border-color .2s, background .2s, transform .2s, box-shadow .2s;
+  }
+  .perfios-drop:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 16px 40px -22px var(--accent); }
+  .perfios-drop.is-over {
+    border-style: solid; border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-glow), 0 12px 32px -14px var(--accent);
+    transform: translateY(-2px);
+  }
+  .perfios-drop-icon {
+    width: 64px; height: 64px; border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+    background: var(--accent-subtle);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  /* -- Health-score ring (derived from the existing validation-check pass
+     ratio — a presentation of data already computed, not a new metric). */
+  .score-ring-wrap { position: relative; width: 128px; height: 128px; flex-shrink: 0; }
+  .score-ring-wrap svg { transform: rotate(-90deg); }
+  .score-ring-track { stroke: var(--surface3); }
+  .score-ring-value { stroke: var(--ring-color, var(--accent)); transition: stroke-dashoffset .7s cubic-bezier(.4,0,.2,1); }
+  .score-ring-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  /* -- Summary stat tile (compact KPI for the Perfios summary grid). */
+  .perfios-stat {
+    position: relative; border-radius: 14px;
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 13px 15px;
+    transition: border-color .18s, box-shadow .18s, transform .18s;
+  }
+  .perfios-stat:hover { border-color: var(--border2); transform: translateY(-2px); box-shadow: 0 10px 26px -16px rgba(8,88,151,.28); }
+  .perfios-stat::before {
+    content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; border-radius: 3px 0 0 3px;
+    background: var(--stat-accent, var(--accent));
+  }
+  /* -- Validation check row card. */
+  .check-card {
+    display: flex; align-items: flex-start; gap: 11px;
+    padding: 12px 14px; border-radius: 13px;
+    border: 1px solid var(--border); background: var(--surface);
+    border-left: 3px solid var(--check-accent, var(--border2));
+    transition: box-shadow .16s, transform .16s;
+  }
+  .check-card:hover { box-shadow: 0 8px 22px -16px rgba(8,88,151,.28); transform: translateX(2px); }
+}
+
+/* ── Lender Configuration — premium redesign (Page 7) ─────────────────────
+   Additive. Reuses page-hero / section-icon-badge / meter primitives plus a
+   few config-only cards (entity card, eligibility line, match result). ──── */
+@layer components {
+  /* -- Entity card (Company / Category) — icon badge + hover lift. */
+  .entity-card {
+    position: relative; border-radius: 15px;
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 15px 16px;
+    transition: transform .18s cubic-bezier(.4,0,.2,1), box-shadow .18s, border-color .18s;
+  }
+  .entity-card:hover { transform: translateY(-2px); border-color: var(--border2); box-shadow: 0 14px 32px -18px rgba(8,88,151,.26); }
+  .entity-card-icon {
+    width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ent-fg, var(--accent));
+    background: var(--ent-bg, var(--accent-subtle));
+  }
+  /* -- Lender (bank) card holding a set of eligibility lines. */
+  .lender-card {
+    border-radius: 17px; overflow: hidden;
+    background: var(--surface); border: 1px solid var(--border);
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .lender-card:hover { border-color: var(--border2); box-shadow: 0 12px 30px -20px rgba(8,88,151,.24); }
+  .lender-card-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 16px;
+    background: linear-gradient(90deg, var(--accent-subtle), transparent 65%);
+    border-bottom: 1px solid var(--border);
+  }
+  .lender-card-badge {
+    width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-family: var(--font-head); font-weight: 800; font-size: 13px;
+    background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
+    box-shadow: 0 6px 16px -8px var(--accent);
+  }
+  /* -- Single eligibility line pill inside a lender card. */
+  .elig-line {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; border-radius: 11px; padding: 9px 12px;
+    background: var(--surface2); border: 1px solid var(--border);
+    transition: background .15s, border-color .15s;
+  }
+  .elig-line:hover { background: var(--accent-subtle); border-color: var(--border2); }
+  /* -- Match result card — eligible/ineligible with a score meter. */
+  .match-card {
+    position: relative; display: flex; align-items: center; gap: 13px;
+    border-radius: 14px; padding: 13px 15px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 4px solid var(--match-accent, var(--border2));
+    transition: transform .16s, box-shadow .16s;
+  }
+  .match-card:hover { transform: translateX(2px); box-shadow: 0 10px 26px -18px rgba(8,88,151,.26); }
+}
+
+/* ── Tickets — premium redesign (Page 8) ──────────────────────────────────
+   Additive. Stacked ticket row-cards (priority accent), segmented status
+   filter, and richer comment/activity cards for the detail modal. ───────── */
+@layer components {
+  .ticket-card {
+    position: relative; display: flex; align-items: center; gap: 14px;
+    border-radius: 15px; padding: 14px 16px 14px 18px;
+    background: var(--surface); border: 1px solid var(--border);
+    transition: transform .18s cubic-bezier(.4,0,.2,1), box-shadow .18s, border-color .18s;
+  }
+  .ticket-card::before {
+    content: ''; position: absolute; inset: 8px auto 8px 0; width: 4px; border-radius: 3px;
+    background: var(--tk-accent, var(--accent));
+  }
+  .ticket-card:hover { transform: translateY(-2px); border-color: var(--border2); box-shadow: 0 14px 32px -18px rgba(8,88,151,.26); }
+  .ticket-card-icon {
+    width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--tk-accent, var(--accent));
+    background: var(--tk-tint, var(--accent-subtle));
+  }
+  /* (React-only ".seg-filter/.seg-chip" segmented control removed — Tickets
+     now uses Vanilla's .filter-chip row.) */
+  /* -- Comment / activity card (ticket detail thread). */
+  .comment-card { display: flex; gap: 11px; border-radius: 13px; padding: 11px 13px; }
+  .comment-card.is-note { background: var(--accent-subtle); border: 1px solid var(--border); }
+  .comment-card.is-activity { background: var(--surface2); border: 1px dashed var(--border2); }
+  .comment-avatar {
+    width: 30px; height: 30px; border-radius: 999px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-head); font-weight: 700; font-size: 11.5px; color: #fff;
+    background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
+  }
+}
+
+/* ── Calculator — premium redesign (Page 9) ───────────────────────────────
+   Additive. Adds a hero header, a prominent EMI result hero, and richer
+   result stat tiles on top of the existing calc-card / calc-mode-tab set. */
+@layer components {
+  /* -- EMI result hero: gradient wash, oversized EMI figure. */
+  .calc-result-hero {
+    position: relative; overflow: hidden;
+    border-radius: 20px;
+    background: linear-gradient(135deg, #1b4fa0 0%, #143d82 55%, #0f2f66 100%);
+    color: #fff;
+    padding: 26px 28px;
+    box-shadow: 0 20px 48px -20px rgba(20,61,130,.6);
+  }
+  .calc-result-hero::after {
+    content: ''; position: absolute; top: -80px; right: -60px;
+    width: 260px; height: 260px; border-radius: 50%;
+    background: rgba(255,255,255,.07); pointer-events: none;
+  }
+  .calc-result-hero-emi {
+    font-family: var(--font-head); font-weight: 900;
+    font-size: 42px; line-height: 1; letter-spacing: -1px;
+  }
+  /* Result card — legacy .calc-result-card / .calc-result-top / .calc-emi-big /
+     .calc-breakdown-* (app.css): a light-gradient EMI hero (red 48px figure)
+     over a value-above-label breakdown grid, all in one bordered card. */
+  .calc-result-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: 18px; overflow: hidden; }
+  .calc-result-top { background: linear-gradient(135deg, rgba(8,88,151,.06) 0%, rgba(212,43,43,.04) 100%); padding: 28px 24px 20px; text-align: center; border-bottom: 1px solid var(--border); }
+  .calc-emi-big { font-family: var(--font-head); font-size: 48px; font-weight: 900; color: var(--accent2); line-height: 1; }
+  .calc-breakdown-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; }
+  .calc-bk-item { padding: 16px 12px; text-align: center; border-right: 1px solid var(--border); }
+  .calc-bk-val { font-family: var(--font-head); font-size: 16px; font-weight: 800; color: var(--text); }
+  .calc-bk-lbl { font-size: 10.5px; color: var(--text3); text-transform: uppercase; letter-spacing: .7px; margin-top: 3px; }
+  /* -- Supporting result stat tile inside the results card. */
+  .calc-stat {
+    border-radius: 14px; padding: 14px 16px; text-align: center;
+    background: var(--surface); border: 1px solid var(--border);
+    transition: transform .16s, box-shadow .16s;
+  }
+  .calc-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -16px rgba(8,88,151,.28); }
+}
+
+/* ── Notifications — premium redesign (Page 10) ───────────────────────────
+   Additive, scoped to the topbar NotificationBell dropdown. Gradient header,
+   unread cards with an icon tile + accent rail, timestamp polish. ───────── */
+@layer components {
+  .notif-panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px;
+    background: linear-gradient(120deg, var(--surface) 0%, var(--accent-subtle) 170%);
+    border-bottom: 1px solid var(--border);
+  }
+  .notif-count-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+    font-size: 11px; font-weight: 800; color: #fff;
+    background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
+  }
+  .notif-item {
+    position: relative; display: flex; align-items: flex-start; gap: 11px;
+    padding: 12px 16px 12px 18px; cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background .15s;
+  }
+  .notif-item:hover { background: var(--surface2); }
+  .notif-item.is-unread { background: var(--accent-subtle); }
+  .notif-item.is-unread::before {
+    content: ''; position: absolute; inset: 10px auto 10px 0; width: 3px; border-radius: 3px;
+    background: var(--accent);
+  }
+  .notif-icon-tile {
+    width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .notif-item.is-unread .notif-icon-tile { background: var(--surface); border-color: var(--border2); box-shadow: 0 4px 12px -6px var(--accent); }
+
+  /* Dropdown entrance -- the panel previously just appeared with no
+     transition at all. */
+  .notif-panel-enter { animation: notif-panel-in .18s cubic-bezier(.2,0,.1,1); transform-origin: top right; }
+  @keyframes notif-panel-in {
+    from { opacity: 0; transform: translateY(-6px) scale(.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* Bell ring when unread state turns on (new notifications loaded). */
+  .notif-bell-ring { animation: notif-bell-ring .5s cubic-bezier(.36,.07,.19,.97); }
+  @keyframes notif-bell-ring {
+    0%, 100% { transform: rotate(0); }
+    15%      { transform: rotate(14deg); }
+    30%      { transform: rotate(-11deg); }
+    45%      { transform: rotate(7deg); }
+    60%      { transform: rotate(-4deg); }
+    75%      { transform: rotate(2deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .notif-panel-enter, .notif-bell-ring { animation: none; }
+  }
+}
+
+/* ── Audit Log — premium redesign (Page 11) ───────────────────────────────
+   Additive. Vertical timeline of history cards with action-coded nodes and
+   richer badges, replacing the plain audit table. ───────────────────────── */
+@layer components {
+  .audit-timeline { position: relative; padding-left: 30px; }
+  .audit-timeline::before {
+    content: ''; position: absolute; top: 6px; bottom: 6px; left: 9px; width: 2px;
+    background: linear-gradient(to bottom, var(--border2), var(--border) 85%, transparent);
+  }
+  .audit-node {
+    position: relative;
+    border-radius: 14px; padding: 13px 15px;
+    background: var(--surface); border: 1px solid var(--border);
+    transition: transform .16s, box-shadow .16s, border-color .16s;
+  }
+  .audit-node:hover { transform: translateX(2px); border-color: var(--border2); box-shadow: 0 10px 26px -18px rgba(8,88,151,.24); }
+  .audit-node::before {
+    content: ''; position: absolute; top: 18px; left: -25px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--surface); border: 3px solid var(--node-color, var(--accent));
+    box-shadow: 0 0 0 3px var(--surface);
+  }
+  .audit-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 700;
+    color: var(--ab-fg, var(--accent)); background: var(--ab-bg, var(--accent-subtle));
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Auth screens (Login / Forgot / Reset Password) — ported verbatim from
+   the EFFECTIVE Vanilla "Design System v2" auth override (app.css:5519+),
+   which WINS over the base block at 930. The earlier port used the base
+   block → a near-black canvas + dark-glass card; the real Vanilla render is
+   a dark-BLUE gradient canvas (no grid) behind a WHITE card with light
+   inputs and a blue-gradient button. Values below were read from
+   getComputedStyle on the live Vanilla login served at /index.html. ────── */
+@layer components {
+  .login-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    display: flex;
+    align-items: stretch;
+    overflow: hidden;
+    /* Vanilla .login-screen (app.css:5519): dark-blue gradient + two static
+       radial orbs (blue + red). No grid, no animated drifting orbs. */
+    background:
+      radial-gradient(ellipse 80% 60% at 20% 20%, rgba(45,99,199,.4) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 50% at 80% 80%, rgba(212,43,43,.25) 0%, transparent 55%),
+      linear-gradient(135deg, #0d2a6e 0%, #1b4fa0 45%, #0f2060 75%, #0a1844 100%);
+  }
+
+  .lp-left {
+    flex: 0 0 46%;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 48px 56px; position: relative; z-index: 1;
+  }
+  .lp-badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 16px;
+    background: rgba(255,255,255,.15);
+    border: 1.5px solid rgba(255,255,255,.35);
+    border-radius: 100px;
+    font-size: 12px; font-weight: 700; color: #ffffff;
+    letter-spacing: .6px; margin-bottom: 28px; width: fit-content;
+    text-shadow: 0 1px 3px rgba(0,0,0,.3);
+  }
+  .lp-headline {
+    font-size: clamp(30px, 3.5vw, 44px);
+    font-weight: 900; color: #ffffff; line-height: 1.08;
+    letter-spacing: -1.5px; margin: 0 0 20px;
+    font-family: var(--font-head);
+    text-shadow: 0 2px 12px rgba(0,0,0,.25);
+  }
+  .lp-hl-accent {
+    background: linear-gradient(135deg, #7dd3fc, #38bdf8, #a5b4fc);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lp-desc {
+    font-size: 15px; color: rgba(255,255,255,.88);
+    line-height: 1.7; max-width: 400px; margin: 0;
+    text-shadow: 0 1px 4px rgba(0,0,0,.2); font-weight: 400;
+  }
+
+  .lp-right {
+    flex: 0 0 54%;
+    display: flex; align-items: center; justify-content: center;
+    padding: 32px 44px; position: relative; z-index: 1;
+  }
+
+  /* Vanilla .login-box (app.css:5527) — WHITE card, 24px radius, big soft
+     shadow, max-width 400px. */
+  .login-box {
+    background: rgba(255,255,255,.96);
+    backdrop-filter: blur(20px);
+    border: 1.5px solid rgba(255,255,255,.9);
+    border-radius: 24px;
+    padding: 28px 36px 32px;
+    width: 100%; max-width: 400px; margin: 12px;
+    box-shadow: 0 40px 100px rgba(8,18,52,.4), 0 0 0 1px rgba(255,255,255,.5);
+    position: relative;
+    animation: lp-fade-up .5s .1s ease-out both;
+  }
+
+  .lp-logo-wrap {
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 4px;
+  }
+  .lp-divider { height: 1px; background: rgba(12,23,51,.08); margin: 14px 0 12px; }
+  .lp-form-sub { font-size: 13px; color: var(--text3); margin: 0 0 20px; text-align: center; }
+
+  .lp-field { margin-bottom: 14px; }
+  .login-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--text3); font-weight: 600; display: block; margin-bottom: 7px;
+  }
+  /* Vanilla .login-input (app.css:5554) — LIGHT: var(--bg) fill, hairline
+     border, 12px radius, dark text. */
+  .login-input {
+    width: 100%;
+    background: var(--bg);
+    border: 1.5px solid var(--border);
+    border-radius: 12px; padding: 12px 16px;
+    color: var(--text);
+    font-family: var(--font-body); font-size: 14px;
+    outline: none; margin-bottom: 0;
+    transition: border-color .18s, box-shadow .18s, background .18s;
+    box-sizing: border-box;
+  }
+  .login-input::placeholder { color: var(--text3); }
+  .login-input:focus {
+    border-color: var(--accent);
+    background: #fff;
+    box-shadow: 0 0 0 3px var(--accent-subtle);
+  }
+
+  .lp-remember {
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; font-size: 12.5px; color: var(--text2); user-select: none;
+  }
+  .lp-checkbox { display: none; }
+  .lp-check-box {
+    width: 16px; height: 16px;
+    border: 1.5px solid var(--border2);
+    border-radius: 4px; background: var(--surface);
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s; flex-shrink: 0;
+  }
+  .lp-checkbox:checked + .lp-check-box { background: var(--accent); border-color: var(--accent); }
+  .lp-checkbox:checked + .lp-check-box::after {
+    content: ''; display: block; width: 8px; height: 5px;
+    border-left: 2px solid #fff; border-bottom: 2px solid #fff;
+    transform: rotate(-45deg) translateY(-1px);
+  }
+  .lp-forgot-btn {
+    background: none; border: none;
+    color: var(--accent); font-size: 12.5px;
+    cursor: pointer; font-weight: 600; padding: 0;
+    transition: color .15s;
+  }
+  .lp-forgot-btn:hover { color: var(--accent-dark); }
+
+  .lp-error-box {
+    font-size: 12.5px; margin-bottom: 14px; text-align: center;
+    background: rgba(192,57,43,.08); border: 1px solid rgba(192,57,43,.25);
+    color: var(--danger); padding: 10px 14px; border-radius: 10px;
+  }
+  .lp-success-box {
+    font-size: 12.5px; margin-bottom: 14px; text-align: center;
+    background: rgba(26,115,64,.1); border: 1px solid rgba(26,115,64,.3);
+    color: var(--success); padding: 10px 14px; border-radius: 10px;
+  }
+
+  /* Vanilla .login-btn (app.css:5575) — blue token gradient, 12px radius. */
+  .login-btn {
+    width: 100%;
+    background: linear-gradient(135deg, var(--accent-light) 0%, var(--accent) 50%, var(--accent-dark) 100%);
+    color: #fff; border: none; border-radius: 12px;
+    padding: 14px;
+    font-family: var(--font-body); font-size: 15px; font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(8,88,151,.4), inset 0 1px 0 rgba(255,255,255,.2);
+    transition: all .2s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    letter-spacing: .3px;
+  }
+  .login-btn:hover:not(:disabled) {
+    box-shadow: 0 12px 32px rgba(8,88,151,.5);
+    transform: translateY(-2px);
+  }
+  .login-btn:active:not(:disabled) { transform: translateY(0); }
+  .login-btn:disabled { opacity: .6; cursor: not-allowed; }
+
+  .lp-back-btn {
+    width: 100%; margin-top: 10px;
+    background: var(--surface2);
+    border: 1.5px solid var(--border);
+    color: var(--text2); font-size: 13px; font-weight: 600;
+    padding: 11px; border-radius: 10px;
+    cursor: pointer; transition: all .15s;
+  }
+  .lp-back-btn:hover { background: var(--surface3); color: var(--text); }
+
+  .lp-footer {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; margin-top: 24px; font-size: 11px; color: var(--text3);
+  }
+
+  @keyframes lp-fade-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .lp-left > * { animation: lp-fade-up .6s ease-out both; }
+  .lp-left > *:nth-child(1) { animation-delay: .05s; }
+  .lp-left > *:nth-child(2) { animation-delay: .15s; }
+  .lp-left > *:nth-child(3) { animation-delay: .25s; }
+
+  @media (max-width: 768px) {
+    .login-screen { flex-direction: column; overflow-y: auto; height: auto; min-height: 100vh; }
+    .lp-left { display: none; }
+    .lp-right { flex: 1; padding: 24px 20px; min-height: 100vh; }
+    .login-box { padding: 28px 22px; max-width: 100%; }
+  }
+}
+
+/* ── Offer-generating interstitial (React port of Vanilla's
+   #offer-interstitial / .oi-* — LoanMS.API/wwwroot/css/app.css:725-923,
+   efin-app.js:8198 showOfferInterstitial()). Shown for 2.5s (once) while
+   transitioning into wizard step 6 (Initial Offer). ── */
+@layer components {
+  .oi-overlay {
+    display: none; position: fixed; inset: 0; z-index: 9999;
+    background: rgba(6, 12, 34, .84); backdrop-filter: blur(14px) saturate(1.5);
+    align-items: center; justify-content: center;
+  }
+  .oi-overlay.oi-active { display: flex; }
+
+  .oi-card {
+    background: linear-gradient(160deg, #ffffff 0%, #f4f7ff 100%);
+    border-radius: 32px; padding: 24px 40px 32px;
+    max-width: 400px; width: 92%; text-align: center;
+    box-shadow: 0 40px 100px rgba(10, 25, 80, .32), 0 0 0 1px rgba(8, 88, 151, .1);
+    position: relative; overflow: hidden;
+    animation: oi-rise .42s cubic-bezier(.34, 1.46, .64, 1) both;
+  }
+  @keyframes oi-rise {
+    from { opacity: 0; transform: translateY(32px) scale(.94); }
+    to   { opacity: 1; transform: translateY(0)    scale(1); }
+  }
+
+  .oi-orbital { width: 120px; height: 120px; margin: 4px auto 24px; position: relative; display: flex; align-items: center; justify-content: center; }
+  .oi-title { font-family: var(--font-head); font-size: 20px; font-weight: 800; color: var(--text); margin-bottom: 7px; letter-spacing: -.3px; }
+  .oi-sub   { font-size: 12.5px; color: var(--text3); line-height: 1.65; margin-bottom: 20px; font-weight: 500; }
+
+  .oi-bar-track { height: 3px; border-radius: 3px; background: rgba(8, 88, 151, .08); overflow: hidden; margin-bottom: 14px; }
+  .oi-bar-fill {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), #2c6fff, #6fa3ff);
+    transition: width 2.3s cubic-bezier(.25, .46, .45, .94);
+  }
+
+  .oi-hint {
+    font-size: 11px; color: var(--text3); min-height: 16px; font-weight: 500;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    transition: opacity .22s ease;
+  }
+  .oi-hint::before {
+    content: ''; width: 5px; height: 5px; border-radius: 50%; background: #2c6fff;
+    display: inline-block; flex-shrink: 0;
+    animation: oi-pulse-dot 1.2s ease-in-out infinite;
+  }
+  @keyframes oi-pulse-dot {
+    0%, 100% { opacity: .4; transform: scale(.8); }
+    50%      { opacity: 1;  transform: scale(1.2); }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   KYC VERIFICATION — ID-card scan animation (Step 2)
+   Ported verbatim from Vanilla efin-improvements.css:597-830 so the React
+   wizard's KYC extraction shows the same "identity verification" scan overlay
+   Vanilla shows, instead of a plain button spinner.
+═══════════════════════════════════════════════════════════════════════════ */
+@layer components {
+  .kyc-loading-overlay {
+    position: absolute; inset: 0; z-index: 20;
+    background: rgba(240,244,255,.97); backdrop-filter: blur(10px);
+    border-radius: 16px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .kyc-anim-wrap {
+    position: relative; width: 180px; height: 166px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 22px; overflow: visible;
+  }
+  .kyc-card {
+    position: relative; width: 148px; height: 96px; border-radius: 10px;
+    background: linear-gradient(145deg, #fff 0%, #f0f4ff 100%);
+    border: 1.5px solid rgba(8,88,151,.22);
+    box-shadow: 0 8px 32px rgba(8,88,151,.18), 0 2px 6px rgba(8,88,151,.1);
+    overflow: hidden; z-index: 3;
+  }
+  .kyc-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 22px;
+    background: linear-gradient(90deg, #085897, #1a72b8);
+  }
+  .kyc-card-chip {
+    position: absolute; top: 5px; left: 10px; width: 22px; height: 16px; border-radius: 3px;
+    background: linear-gradient(135deg, #d4a843 0%, #f0c060 40%, #c8932a 100%);
+    box-shadow: 0 1px 3px rgba(0,0,0,.2); z-index: 1;
+  }
+  .kyc-card-photo {
+    position: absolute; top: 28px; left: 10px; width: 28px; height: 34px; border-radius: 4px;
+    background: linear-gradient(145deg, #dce8ff, #c8d8f4); border: 1px solid rgba(8,88,151,.2);
+    overflow: hidden; display: flex; align-items: center; justify-content: center;
+  }
+  .kyc-card-photo::after {
+    content: ''; width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(8,88,151,.25); box-shadow: 0 8px 0 rgba(8,88,151,.15);
+  }
+  .kyc-card-lines {
+    position: absolute; top: 30px; left: 46px; right: 10px;
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .kyc-line {
+    height: 5px; border-radius: 3px; background: rgba(8,88,151,.12);
+    transform-origin: left; transform: scaleX(0);
+    animation: kyc-line-fill 0.5s ease-out forwards;
+  }
+  .kyc-line-1 { width: 82%; animation-delay: 0.2s; }
+  .kyc-line-2 { width: 64%; animation-delay: 0.5s; background: rgba(8,88,151,.18); }
+  .kyc-line-3 { width: 74%; animation-delay: 0.8s; }
+  .kyc-line-4 { width: 50%; animation-delay: 1.1s; background: rgba(8,88,151,.14); }
+  @keyframes kyc-line-fill { from { transform: scaleX(0); opacity: 0; } to { transform: scaleX(1); opacity: 1; } }
+  .kyc-scan-beam {
+    position: absolute; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, transparent 0%, rgba(44,111,255,.0) 8%, rgba(44,111,255,.85) 35%, rgba(111,163,255,1) 50%, rgba(44,111,255,.85) 65%, rgba(44,111,255,.0) 92%, transparent 100%);
+    filter: blur(0.5px); box-shadow: 0 0 10px 3px rgba(44,111,255,.45);
+    animation: kyc-beam-travel 2.4s cubic-bezier(.4,0,.6,1) infinite; z-index: 4; pointer-events: none;
+  }
+  .kyc-scan-glow {
+    position: absolute; left: 0; right: 0; height: 40px;
+    background: linear-gradient(180deg, transparent 0%, rgba(44,111,255,.06) 40%, rgba(44,111,255,.1) 50%, rgba(44,111,255,.06) 60%, transparent 100%);
+    animation: kyc-beam-travel 2.4s cubic-bezier(.4,0,.6,1) infinite; margin-top: -20px; z-index: 3; pointer-events: none;
+  }
+  @keyframes kyc-beam-travel { 0% { top: 0; opacity: 0; } 5% { opacity: 1; } 95% { opacity: 1; } 100% { top: calc(100% - 3px); opacity: 0; } }
+  .kyc-corner { position: absolute; width: 14px; height: 14px; z-index: 5; animation: kyc-corner-pulse 2s ease-in-out infinite; }
+  .kyc-corner-tl { top: -2px; left: -2px; border-top: 2.5px solid #085897; border-left: 2.5px solid #085897; border-radius: 3px 0 0 0; }
+  .kyc-corner-tr { top: -2px; right: -2px; border-top: 2.5px solid #085897; border-right: 2.5px solid #085897; border-radius: 0 3px 0 0; }
+  .kyc-corner-bl { bottom: -2px; left: -2px; border-bottom: 2.5px solid #085897; border-left: 2.5px solid #085897; border-radius: 0 0 0 3px; }
+  .kyc-corner-br { bottom: -2px; right: -2px; border-bottom: 2.5px solid #085897; border-right: 2.5px solid #085897; border-radius: 0 0 3px 0; }
+  @keyframes kyc-corner-pulse { 0%,100% { opacity: .7; } 50% { opacity: 1; filter: drop-shadow(0 0 3px rgba(8,88,151,.6)); } }
+  .kyc-verified-mark {
+    position: absolute; top: -12px; right: -12px; width: 26px; height: 26px; border-radius: 50%;
+    background: linear-gradient(135deg, #16a34a, #1a7340); border: 2.5px solid #fff;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 3px 10px rgba(22,163,74,.4); z-index: 6;
+    animation: kyc-checkmark-pop .5s cubic-bezier(.34,1.56,.64,1) 1.6s both;
+  }
+  .kyc-verified-mark svg { display: block; }
+  @keyframes kyc-checkmark-pop { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+  .kyc-stage-label {
+    position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 5px;
+    background: linear-gradient(135deg, #085897 0%, #064377 100%); color: #fff;
+    font-size: 10px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase;
+    padding: 4px 12px 4px 9px; border-radius: 20px; white-space: nowrap;
+    box-shadow: 0 3px 12px rgba(8,88,151,.45); z-index: 10;
+    animation: kyc-label-slide .5s cubic-bezier(.34,1.46,.64,1) .3s both;
+  }
+  .kyc-stage-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,.9); flex-shrink: 0; animation: kyc-dot-glow 1.2s ease-in-out infinite; }
+  @keyframes kyc-label-slide { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+  @keyframes kyc-dot-glow { 0%,100% { box-shadow: 0 0 4px rgba(74,222,128,.7); } 50% { box-shadow: 0 0 10px rgba(74,222,128,1); transform: scale(1.2); } }
+  .kyc-loading-title { font-size: 13.5px; font-weight: 700; color: var(--text); margin-top: 18px; letter-spacing: -.2px; }
+  .kyc-loading-sub { font-size: 11.5px; color: var(--text3); margin-top: 5px; font-weight: 500; }
+  .kyc-progress-dots { display: flex; gap: 7px; margin-top: 16px; }
+  .kyc-pdot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); opacity: 0.2; animation: kyc-pdot-bounce 1.2s ease-in-out infinite; }
+  .kyc-pdot:nth-child(2) { animation-delay: .18s; }
+  .kyc-pdot:nth-child(3) { animation-delay: .36s; }
+  @keyframes kyc-pdot-bounce { 0%,100% { opacity:.2; transform:translateY(0); } 50% { opacity:1; transform:translateY(-4px); } }
+}
+
+/* ── Reports page — modern/minimal variant (additive, scoped to this page
+   only via the `rp-` prefix). Nothing above is modified: Dashboard and every
+   other page keep using .kpi-card / .chart-card exactly as before. This is
+   a deliberately quieter language — thin single-pixel borders, no gradient
+   blobs or animated top bars, no heavy 2px status borders, more internal
+   padding/whitespace, a softer near-invisible resting shadow that only
+   grows a touch on hover. ─────────────────────────────────────────────── */
+@layer components {
+  .rp-kpi-card {
+    position: relative;
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 26px 24px;
+    box-shadow: 0 1px 2px rgba(12, 23, 51, .04);
+    transition: box-shadow .2s ease, border-color .2s ease;
+  }
+  .rp-kpi-card:hover {
+    border-color: var(--border2);
+    box-shadow: 0 6px 20px rgba(12, 23, 51, .06);
+  }
+  .rp-kpi-icon {
+    width: 38px; height: 38px;
+    border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--rp-tint, var(--accent-subtle));
+    color: var(--rp-accent, var(--accent));
+    margin-bottom: 18px;
+  }
+
+  /* Plain metric card — replaces the heavy border-2 colored-border TAT/DDR
+     cards with a single thin neutral border; the status is carried by the
+     small pill alone instead of tinting the whole card edge. */
+  .rp-metric-card {
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 26px;
+  }
+
+  /* Chart/list card — same idea as .chart-card but quieter: no hover-lift,
+     no colored icon chip background, just a soft divider between head and
+     body and generous body padding. */
+  .rp-card {
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .rp-card-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 22px 24px 18px;
+  }
+  .rp-card-icon {
+    width: 30px; height: 30px;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface2);
+  }
+  .rp-card-body { padding: 0 24px 24px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Applications page — MudraHub brand skin
+   ──────────────────────────────────────────────────────────────────────
+   Additive and page-scoped: every rule below hangs off `.apps-page` (or a
+   new `ap-*` class), so no other screen changes. The palette is sampled
+   straight from the logo (assets/logo-004.png): "Mudra" is #085897 and
+   "Hub" + the "Driven by Elitetru" tagline are #f58730.
+
+   Blue carries structure and primary actions; orange is the accent — used
+   sparingly (header dot, active-chip pip, row hover edge, counts, Draft
+   "Continue"). Orange is never used as a fill behind white text: #f58730
+   is only ~2.6:1 against white, so it is paired with dark ink instead.
+   ══════════════════════════════════════════════════════════════════════ */
+:root {
+  --brand-blue: #085897;
+  --brand-blue-dark: #064377;
+  --brand-blue-light: #1a72b8;
+  --brand-blue-soft: rgba(8, 88, 151, .08);
+  --brand-orange: #f58730;
+  --brand-orange-ink: #b85a0a;      /* orange that is still readable as text on a light tint */
+  --brand-orange-soft: rgba(245, 135, 48, .13);
+  --ap-line: #d5e1ec;               /* brand-tinted hairline (cooler than the global --border) */
+  --ap-line-soft: #e8eff6;
+}
+
+/* Re-point the shared accent tokens for this page only, so everything that
+   already reads var(--accent) — .filter-chip hover, ghost buttons, input
+   focus rings, .efin-mono-id — follows the logo blue here without touching
+   the rest of the app. */
+.apps-page {
+  --accent: var(--brand-blue);
+  --accent-dark: var(--brand-blue-dark);
+  --accent-light: var(--brand-blue-light);
+  --accent-subtle: var(--brand-blue-soft);
+  --accent-glow: rgba(8, 88, 151, .22);
+}
+
+.apps-page input[type="checkbox"] {
+  accent-color: var(--brand-blue);
+  width: 15px; height: 15px; cursor: pointer;
+}
+
+/* ── Page header ─────────────────────────────────────────────────────── */
+.apps-page .ap-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+}
+.apps-page .ap-head-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.apps-page .ap-head-icon {
+  position: relative; flex-shrink: 0;
+  width: 48px; height: 48px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-blue-light) 0%, var(--brand-blue) 55%, var(--brand-blue-dark) 100%);
+  box-shadow: 0 10px 22px -8px rgba(8, 88, 151, .55), 0 1px 0 rgba(255, 255, 255, .25) inset;
+}
+.apps-page .ap-head-icon::after {
+  content: ''; position: absolute; top: -4px; right: -4px;
+  width: 13px; height: 13px; border-radius: 50%;
+  background: var(--brand-orange); border: 2.5px solid var(--bg);
+}
+.apps-page .ap-title {
+  font-family: var(--font-head); font-size: 26px; font-weight: 800;
+  letter-spacing: -.4px; line-height: 1.15; color: var(--text);
+}
+.apps-page .ap-sub {
+  margin-top: 4px; display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text3);
+}
+.apps-page .ap-count {
+  display: inline-flex; align-items: center;
+  padding: 1px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--brand-blue-dark);
+  background: var(--brand-blue-soft);
+  border: 1px solid rgba(8, 88, 151, .16);
+}
+.apps-page .ap-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Buttons on this page: logo blue for primary, blue-tinted outline for secondary. */
+.apps-page .efin-btn--primary {
+  background: linear-gradient(135deg, var(--brand-blue-light) 0%, var(--brand-blue) 55%, var(--brand-blue-dark) 100%);
+  box-shadow: 0 8px 22px rgba(8, 88, 151, .34), 0 1px 0 rgba(255, 255, 255, .22) inset;
+}
+.apps-page .efin-btn--primary:not(:disabled):hover {
+  background: linear-gradient(135deg, #2380c8 0%, #0a66ad 55%, var(--brand-blue) 100%);
+  box-shadow: 0 10px 26px rgba(8, 88, 151, .4);
+}
+.apps-page .efin-btn--secondary {
+  border-color: var(--ap-line);
+  color: var(--brand-blue-dark);
+  box-shadow: 0 1px 2px rgba(8, 88, 151, .06);
+}
+.apps-page .efin-btn--secondary:not(:disabled):hover {
+  background: var(--brand-blue-soft);
+  border-color: var(--brand-blue);
+  color: var(--brand-blue);
+}
+.apps-page .ap-plus {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; margin-right: 7px; border-radius: 5px;
+  background: var(--brand-orange); color: #2b1300;
+}
+
+/* ── Section switch (Applications | Drafts) ──────────────────────────── */
+.apps-page .ap-seg {
+  display: inline-flex; gap: 2px; padding: 4px;
+  border-radius: 14px; background: var(--surface);
+  border: 1px solid var(--ap-line);
+  box-shadow: 0 1px 2px rgba(8, 88, 151, .05);
+}
+.apps-page .ap-seg-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 18px; border: 0; border-radius: 10px;
+  font-size: 13px; font-weight: 600; color: #54708c;
+  background: transparent; cursor: pointer;
+  transition: background .18s, color .18s, box-shadow .18s;
+}
+.apps-page .ap-seg-btn:hover:not(.is-active) { color: var(--brand-blue); background: var(--brand-blue-soft); }
+.apps-page .ap-seg-btn.is-active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-blue-light), var(--brand-blue-dark));
+  box-shadow: 0 4px 12px rgba(8, 88, 151, .3);
+}
+.apps-page .ap-seg-btn:focus-visible,
+.apps-page .filter-chip:focus-visible,
+.apps-page .ap-page-btn:focus-visible {
+  outline: 2px solid var(--brand-orange); outline-offset: 2px;
+}
+.apps-page .ap-pill-orange {
+  min-width: 18px; padding: 0 6px; border-radius: 999px;
+  font-size: 11px; font-weight: 800; line-height: 18px; text-align: center;
+  background: var(--brand-orange); color: #2b1300;
+}
+
+/* ── Status chips ────────────────────────────────────────────────────── */
+.apps-page .filter-chip {
+  position: relative;
+  padding: 8px 17px;
+  border-color: var(--ap-line);
+  color: #54708c;
+}
+.apps-page .filter-chip:hover {
+  border-color: var(--brand-blue); color: var(--brand-blue); background: var(--brand-blue-soft);
+}
+.apps-page .filter-chip.active {
+  color: #fff; border-color: var(--brand-blue-dark);
+  background: linear-gradient(135deg, var(--brand-blue-light), var(--brand-blue-dark));
+  box-shadow: 0 5px 14px rgba(8, 88, 151, .3);
+}
+/* Orange pip under the selected chip — absolutely positioned so selecting a
+   chip never changes its width or reflows the row. */
+.apps-page .filter-chip.active::after {
+  content: ''; position: absolute; left: 50%; bottom: -7px;
+  width: 20px; height: 3px; margin-left: -10px; border-radius: 3px;
+  background: var(--brand-orange);
+}
+.apps-page .ap-filters-btn { margin-left: auto; }
+.apps-page .ap-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 8px; padding-bottom: 6px; }
+
+/* ── Table card ──────────────────────────────────────────────────────── */
+.apps-page .ap-card {
+  position: relative;
+  border-radius: 20px;
+  border: 1px solid var(--ap-line);
+  box-shadow: 0 1px 2px rgba(8, 88, 151, .05), 0 14px 32px -18px rgba(8, 88, 151, .22);
+  padding: 18px;
+  container: apcard / inline-size;
+}
+.apps-page .ap-card:hover { border-color: var(--ap-line); }
+/* Thin logo-coloured rule across the top edge: "Mudra" blue, then a short
+   "Hub" orange tail — a hard stop, since blending blue into orange goes muddy grey. */
+.apps-page .ap-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--brand-blue) 0%, var(--brand-blue-light) 78%, var(--brand-orange) 78%, var(--brand-orange) 100%);
+}
+
+.apps-page .ap-search-note {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px;
+  margin-bottom: 14px; padding: 9px 12px; border-radius: 12px;
+  font-size: 12.5px; color: var(--brand-blue-dark);
+  background: var(--brand-blue-soft);
+  border: 1px solid rgba(8, 88, 151, .16);
+}
+.apps-page .ap-search-note strong { font-weight: 700; word-break: break-word; }
+.apps-page .ap-search-count {
+  padding: 1px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
+  background: var(--brand-orange-soft); color: var(--brand-orange-ink);
+}
+.apps-page .ap-link-btn {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 8px; border: 1px solid rgba(8, 88, 151, .22);
+  font-size: 11.5px; font-weight: 700; color: var(--brand-blue); background: var(--surface);
+  cursor: pointer; transition: all .16s;
+}
+.apps-page .ap-link-btn:hover { background: var(--brand-blue); border-color: var(--brand-blue); color: #fff; }
+
+.apps-page .ap-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 4px 3px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; white-space: nowrap;
+  color: var(--brand-blue-dark); background: var(--brand-blue-soft);
+  border: 1px solid rgba(8, 88, 151, .18);
+}
+.apps-page .ap-tag button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%; border: 0; cursor: pointer;
+  color: var(--brand-blue-dark); background: transparent; opacity: .65;
+}
+.apps-page .ap-tag button:hover { opacity: 1; background: rgba(8, 88, 151, .14); }
+.apps-page .ap-clear-all {
+  margin-left: 4px; font-size: 11.5px; font-weight: 700; color: var(--brand-orange-ink);
+  background: none; border: 0; cursor: pointer;
+}
+.apps-page .ap-clear-all:hover { text-decoration: underline; }
+
+.apps-page .ap-bulk {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin-bottom: 14px; padding: 10px 14px; border-radius: 12px;
+  background: var(--brand-orange-soft);
+  border: 1px solid rgba(245, 135, 48, .35);
+}
+.apps-page .ap-bulk-count { font-size: 13px; font-weight: 800; color: var(--brand-orange-ink); }
+.apps-page .ap-note {
+  margin-bottom: 14px; padding: 9px 13px; border-radius: 12px;
+  font-size: 13px; color: var(--text2);
+  background: var(--surface2); border: 1px solid var(--ap-line);
+}
+
+.apps-page .ap-select {
+  border: 1px solid var(--ap-line); border-radius: 10px;
+  padding: 6px 12px; font-size: 13px; font-weight: 600;
+  color: var(--text); background: var(--surface);
+  outline: none; transition: border-color .16s, box-shadow .16s;
+}
+.apps-page .ap-select:hover { border-color: var(--brand-blue); }
+.apps-page .ap-select:focus { border-color: var(--brand-blue); box-shadow: 0 0 0 3px var(--accent-glow); }
+
+/* ── Table ───────────────────────────────────────────────────────────── */
+.apps-page .ap-table-wrap {
+  overflow-x: auto; border-radius: 14px; border: 1px solid var(--ap-line);
+}
+.apps-page .ap-table { width: 100%; border-collapse: collapse; }
+.apps-page .ap-table thead th {
+  position: sticky; top: 0;
+  padding: 12px 14px; text-align: left; white-space: nowrap;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.1px;
+  color: #4d6a87;
+  background: #eef4fa;   /* solid — a per-cell gradient leaves hairline seams on sticky headers */
+  border-bottom: 1px solid var(--ap-line);
+}
+.apps-page .ap-table thead th.is-right { text-align: right; }
+.apps-page .ap-table tbody td {
+  padding: 12px 14px; vertical-align: middle; white-space: nowrap;
+  border-bottom: 1px solid var(--ap-line-soft);
+  font-size: 13.5px; color: var(--text2);
+}
+.apps-page .ap-table tbody tr:last-child td { border-bottom: 0; }
+.apps-page .ap-table tbody tr { transition: background .15s; }
+.apps-page .ap-table tbody tr:hover { background: rgba(8, 88, 151, .035); }
+.apps-page .ap-table tbody td:first-child { box-shadow: inset 3px 0 0 transparent; transition: box-shadow .15s; }
+.apps-page .ap-table tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--brand-orange); }
+.apps-page .ap-table tbody tr.is-selected { background: rgba(8, 88, 151, .07); }
+.apps-page .ap-table tbody tr.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--brand-blue); }
+.apps-page .ap-table td.is-right { text-align: right; }
+.apps-page .ap-th-check, .apps-page .ap-td-check { width: 40px; padding-right: 0 !important; }
+
+.apps-page .efin-mono-id {
+  color: var(--brand-blue-dark);
+  background: var(--brand-blue-soft);
+  border-color: rgba(8, 88, 151, .2);
+  border-radius: 7px; padding: 3px 9px; font-size: 11.5px;
+}
+
+.apps-page .ap-person { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.apps-page .ap-avatar {
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase;
+  color: var(--brand-blue-dark);
+  background: linear-gradient(135deg, #e3f0fb, #cfe3f5);
+  border: 1.5px solid rgba(8, 88, 151, .18);
+}
+.apps-page .ap-person-name {
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+  font-weight: 700; color: var(--text); line-height: 1.3;
+}
+.apps-page .ap-person-phone { margin-top: 1px; font-size: 12px; color: var(--text3); font-variant-numeric: tabular-nums; }
+.apps-page .ap-risk {
+  margin-left: 7px; display: inline-block; vertical-align: middle;
+  padding: 0 6px; border-radius: 5px; font-size: 10px; font-weight: 800;
+}
+.apps-page .ap-risk--a { background: rgba(26, 115, 64, .12); color: #1a7340; }
+.apps-page .ap-risk--d { background: rgba(212, 43, 43, .12); color: #d42b2b; }
+.apps-page .ap-risk--mid { background: rgba(230, 126, 0, .13); color: #b86500; }
+
+.apps-page .ap-type {
+  display: inline-block; padding: 3px 10px; border-radius: 7px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  color: var(--brand-blue-dark); background: #eef5fb; border: 1px solid var(--ap-line-soft);
+}
+.apps-page .ap-amount {
+  font-weight: 800; color: var(--text); white-space: nowrap;
+  font-variant-numeric: tabular-nums; letter-spacing: -.1px;
+}
+.apps-page .ap-muted { font-size: 12.5px; color: var(--text3); }
+
+/* Row actions — lucide icons instead of emoji so they take the brand colours. */
+.apps-page .ap-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.apps-page .ap-act {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 13px; border-radius: 9px;
+  font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer;
+  transition: all .16s;
+}
+.apps-page .ap-act--open {
+  color: var(--brand-blue); background: var(--surface); border: 1.5px solid rgba(8, 88, 151, .3);
+}
+.apps-page .ap-act--open:hover {
+  color: #fff; background: var(--brand-blue); border-color: var(--brand-blue);
+  box-shadow: 0 5px 14px rgba(8, 88, 151, .3);
+}
+.apps-page .ap-act--continue {
+  color: var(--brand-orange-ink); background: var(--brand-orange-soft); border: 1.5px solid rgba(245, 135, 48, .5);
+}
+.apps-page .ap-act--continue:hover {
+  color: #2b1300; background: var(--brand-orange); border-color: var(--brand-orange);
+  box-shadow: 0 5px 14px rgba(245, 135, 48, .35);
+}
+.apps-page .ap-act--danger {
+  color: var(--danger); background: rgba(192, 57, 43, .07); border: 1.5px solid rgba(192, 57, 43, .22);
+}
+.apps-page .ap-act--danger:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); color: #fff; }
+.apps-page .ap-act--danger:disabled { opacity: .5; cursor: not-allowed; }
+.apps-page .ap-act--icon { padding: 6px 9px; }
+.apps-page .ap-act--quiet { color: var(--text3); background: transparent; border: 1.5px solid transparent; }
+.apps-page .ap-act--quiet:hover { color: var(--danger); background: rgba(192, 57, 43, .07); }
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+.apps-page .ap-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 44px 20px 40px;
+}
+.apps-page .ap-empty-icon {
+  position: relative; width: 72px; height: 72px; border-radius: 22px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--brand-blue);
+  background: linear-gradient(135deg, #eaf4fc, #d6e8f7);
+  border: 1.5px solid rgba(8, 88, 151, .16);
+}
+.apps-page .ap-empty-icon::after {
+  content: ''; position: absolute; top: -5px; right: -5px;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: var(--brand-orange); border: 3px solid var(--surface);
+}
+.apps-page .ap-empty-title {
+  margin-top: 18px; font-family: var(--font-head); font-size: 17px; font-weight: 800; color: var(--text);
+}
+.apps-page .ap-empty-hint { margin-top: 5px; max-width: 360px; font-size: 13px; line-height: 1.5; color: var(--text3); }
+.apps-page .ap-empty-actions { margin-top: 18px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+/* ── Pagination footer ───────────────────────────────────────────────── */
+.apps-page .ap-pager {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;
+  margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--ap-line-soft);
+}
+.apps-page .ap-pager-info { font-size: 12.5px; font-weight: 500; color: var(--text3); }
+.apps-page .ap-pager-info b { color: var(--text); font-weight: 700; }
+.apps-page .ap-pages { display: flex; align-items: center; gap: 5px; }
+.apps-page .ap-page-btn {
+  min-width: 30px; height: 30px; padding: 0 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 9px; border: 1px solid var(--ap-line);
+  font-size: 12.5px; font-weight: 700; color: var(--text2); background: var(--surface);
+  cursor: pointer; transition: all .16s;
+}
+.apps-page .ap-page-btn:hover:not(:disabled):not(.is-active) {
+  border-color: var(--brand-blue); color: var(--brand-blue); background: var(--brand-blue-soft);
+}
+.apps-page .ap-page-btn.is-active {
+  color: #fff; border-color: var(--brand-blue-dark);
+  background: linear-gradient(135deg, var(--brand-blue-light), var(--brand-blue-dark));
+  box-shadow: 0 4px 10px rgba(8, 88, 151, .28);
+}
+.apps-page .ap-page-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── Drafts ──────────────────────────────────────────────────────────── */
+.apps-page .ap-draft-intro { margin-top: 8px; margin-bottom: 14px; font-size: 12.5px; color: var(--text3); }
+.apps-page .ap-step {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--text2);
+}
+.apps-page .ap-step-bar { width: 64px; height: 6px; border-radius: 6px; background: #e1ebf4; overflow: hidden; }
+.apps-page .ap-step-bar > i {
+  display: block; height: 100%; border-radius: 6px;
+  background: linear-gradient(90deg, var(--brand-blue), var(--brand-orange));
+}
+
+/* Narrower content areas (expanded sidebar, laptops): drop the avatar and
+   tighten the cell padding so the 8 columns — Actions included — fit without
+   a sideways scroll. Wide screens keep the full layout. */
+@container apcard (max-width: 1160px) {
+  .apps-page .ap-avatar { display: none; }
+  .apps-page .ap-table thead th,
+  .apps-page .ap-table tbody td { padding-left: 11px; padding-right: 11px; }
+}
+
+@media (max-width: 640px) {
+  .apps-page .ap-title { font-size: 22px; }
+  .apps-page .ap-head-actions { width: 100%; }
+  .apps-page .ap-toolbar .ap-filters-btn { margin-left: 0; }
+  .apps-page .ap-card { border-radius: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .apps-page * { transition: none !important; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LoanMS MOTION SYSTEM  (MudraHub premium fintech — subtle, fast, intentional)
+   ──────────────────────────────────────────────────────────────────────────
+   One shared vocabulary for entrances / reveals / menu pops, layered ON TOP of
+   the interaction animations that already live above (efin-page route fade,
+   efin-modal-in, toastIn/Out, efin-btn press, efin-input focus, wiz-step*,
+   kyc-*, loanms-loader). Nothing above is duplicated or replaced — these are
+   only the pieces that were missing.
+
+   Timing follows the brief: micro 120-200ms · normal 180-300ms · larger
+   300-450ms, all on a calm cubic-bezier(.4,0,.2,1) (no bounce/elastic).
+   Brand colours are used by the CONSUMERS (blue = primary/progress/focus,
+   orange = selective accent) — the motion utilities themselves are colourless
+   so they compose with any element.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Reveal-on-mount for result panels / sections that appear after data loads
+   (calculator results, compare/reverse output, report panels, etc.). Reuses
+   the shared `fade-up` keyframe declared above. */
+.lms-reveal { animation: fade-up .34s cubic-bezier(.4, 0, .2, 1) both; }
+
+/* Container-driven stagger: apply to a grid/row wrapper and its direct
+   children fade-up in sequence. Uses `fade-up` (declared above) — no new
+   keyframe. Delays are tiny so a full row still settles under ~300ms. */
+.lms-stagger > * { animation: fade-up .40s cubic-bezier(.4, 0, .2, 1) both; }
+.lms-stagger > *:nth-child(1) { animation-delay: .00s; }
+.lms-stagger > *:nth-child(2) { animation-delay: .05s; }
+.lms-stagger > *:nth-child(3) { animation-delay: .10s; }
+.lms-stagger > *:nth-child(4) { animation-delay: .15s; }
+.lms-stagger > *:nth-child(5) { animation-delay: .20s; }
+.lms-stagger > *:nth-child(6) { animation-delay: .25s; }
+.lms-stagger > *:nth-child(7) { animation-delay: .30s; }
+.lms-stagger > *:nth-child(8) { animation-delay: .35s; }
+
+/* Dropdown / popover / menu entrance — reuses the notification panel's
+   pop-in feel (translateY -6px + slight scale + fade). transform-origin top
+   so menus anchored under a trigger grow downward. */
+.lms-menu-in { animation: notif-panel-in .18s cubic-bezier(.4, 0, .2, 1) both; transform-origin: top; }
+
+/* Wizard step content swap — a subtle fade + 6px rise each time the active
+   step changes (the consumer keys this element by step number so it remounts).
+   Purely presentational; does not touch wizard data/validation/flow. */
+@keyframes wiz-step-body-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.wiz-step-body { animation: wiz-step-body-in .26s cubic-bezier(.4, 0, .2, 1) both; }
+
+/* Wizard connector "fill": the line between steps changes to the done-colour
+   smoothly instead of snapping when a step completes. */
+.wiz-step:not(:last-child)::after { transition: background .5s cubic-bezier(.4, 0, .2, 1); }
+
+/* Optional subtle hover-lift for interactive cards/tiles that should feel
+   pickable (opt-in via class — NOT applied to every card). */
+.lms-lift { transition: transform .18s cubic-bezier(.4,0,.2,1), box-shadow .18s cubic-bezier(.4,0,.2,1); }
+.lms-lift:hover { transform: translateY(-2px); box-shadow: 0 12px 28px -14px rgba(8, 88, 151, .28); }
+
+/* ── Accessibility: global reduced-motion reset ─────────────────────────────
+   Best-practice blanket reset so EVERY animation/transition (existing + new,
+   including any added later) is neutralised for users who ask for reduced
+   motion. Uses 0.01ms rather than `none` so JS animationend/transitionend
+   handlers still fire instantly and nothing hangs; motion is imperceptible.
+   Functionality and layout are unchanged — only movement is removed. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

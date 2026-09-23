@@ -25,6 +25,18 @@ public class ExceptionMiddleware
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception: {Message}", ex.Message);
+
+            // If the response has already started (e.g. an exception thrown
+            // mid-stream, such as a failing SendFileAsync), the headers are
+            // read-only. Trying to write a JSON error body would throw a
+            // second, misleading "Headers are read-only" exception that masks
+            // the real error (observed in the logs as the SPA-fallback 500).
+            // In that case re-throw the ORIGINAL exception (bare `throw`
+            // preserves its stack) so the host aborts the connection cleanly
+            // and the true error surfaces instead of the header exception.
+            if (context.Response.HasStarted)
+                throw;
+
             await HandleExceptionAsync(context, ex, _env.IsDevelopment());
         }
     }

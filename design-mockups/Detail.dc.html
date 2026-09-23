@@ -1,0 +1,658 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#f0f4ff; --surface:#fff; --surface2:#f0f4ff; --surface3:#e6ecf8;
+      --border:#dde3f0; --border2:#c4cfe6; --accent:#1a4fa3; --accent-dark:#0f3278;
+      --accent-subtle:rgba(26,79,163,.08); --accent2:#d42b2b; --warn:#e67e00;
+      --success:#1a7340; --danger:#c0392b; --text:#0c1733; --text2:#3a4d6e; --text3:#7a8aaa;
+      --font-head:'Outfit',sans-serif; --font-body:'Plus Jakarta Sans',sans-serif;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:var(--font-body);color:var(--text);}
+    h1,h2,h3{font-family:var(--font-head);margin:0;}
+    a{color:var(--accent);text-decoration:none;} a:hover{color:var(--accent-dark);}
+    .app{display:flex;height:1360px;width:1440px;background:var(--bg);
+      background-image:radial-gradient(ellipse 80% 50% at 20% -10%,rgba(26,79,163,.06) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 110%,rgba(212,43,43,.04) 0%,transparent 50%);
+      overflow:hidden;}
+
+    /* Sidebar */
+    .rail{width:260px;flex-shrink:0;background:#fff;border-right:1px solid #ebebeb;display:flex;flex-direction:column;height:100%;box-shadow:4px 0 28px rgba(0,0,0,.10);}
+    .brand{display:flex;align-items:center;gap:12px;padding:16px;border-bottom:1px solid #ebebeb;}
+    .brand-logo{width:32px;height:32px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#fff;font-family:var(--font-head);font-weight:800;font-size:15px;}
+    .brand-name{font-family:var(--font-head);font-weight:600;font-size:14px;color:var(--text);line-height:1.1;}
+    .brand-sub{font-size:8.5px;letter-spacing:1.5px;font-weight:700;color:var(--text3);margin-top:2px;}
+    .nav{flex:1;padding:12px 0;overflow-y:auto;}
+    .nav::-webkit-scrollbar{width:6px;} .nav::-webkit-scrollbar-thumb{background:#dde3f0;border-radius:99px;}
+    .nav-sec{margin-top:6px;}
+    .nav-label{display:flex;align-items:center;justify-content:space-between;padding:8px 20px 4px;}
+    .nav-label span{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);}
+    .nav-label i{font-style:normal;font-size:10px;color:var(--text3);}
+    .navitem{display:flex;align-items:center;gap:0;position:relative;min-height:44px;margin:1px 8px;border-radius:8px;font-size:13.5px;font-weight:500;color:#3d4a5e;cursor:pointer;transition:background .15s,color .15s;}
+    .navitem .ic{width:44px;min-width:44px;height:44px;display:flex;align-items:center;justify-content:center;opacity:.55;transition:opacity .18s,transform .18s;}
+    .navitem .ic svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;}
+    .navitem:hover{background:#fff7ed;color:var(--accent2);}
+    .navitem:hover .ic{opacity:1;transform:scale(1.08);}
+    .navitem.active{background:#fff3e2;color:var(--accent2);font-weight:700;}
+    .navitem.active .ic{opacity:1;}
+    .navitem.active::before{content:'';position:absolute;left:0;top:15%;bottom:15%;width:3px;background:var(--accent2);border-radius:0 3px 3px 0;}
+
+    /* Topbar */
+    .main{flex:1;display:flex;flex-direction:column;min-width:0;}
+    .topbar{min-height:68px;padding:14px 32px;display:flex;align-items:center;gap:16px;background:rgba(255,255,255,.92);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);}
+    .topbar-title{font-family:var(--font-head);font-size:18px;font-weight:800;letter-spacing:-.4px;color:var(--text);}
+    .topbar-search{margin-left:auto;position:relative;width:280px;}
+    .topbar-search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:14px;height:14px;stroke:var(--text3);fill:none;stroke-width:1.75;}
+    .topbar-search input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:8px 14px 8px 36px;color:var(--text);font-family:var(--font-body);font-size:14px;outline:none;}
+    .topbar-search input::placeholder{color:var(--text3);}
+    .ic-btn{width:38px;height:38px;flex-shrink:0;border-radius:9px;border:1px solid var(--border2);background:var(--surface2);color:var(--text2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;position:relative;}
+    .ic-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;}
+    .notif-dot{position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:var(--danger);border:1.5px solid var(--surface);}
+    .avatar{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;cursor:pointer;}
+
+    .content{flex:1;overflow-y:auto;padding:24px;}
+    .content::-webkit-scrollbar{width:8px;} .content::-webkit-scrollbar-thumb{background:#dde3f0;border-radius:99px;}
+
+    /* Card */
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;}
+    .card-head{padding:18px 22px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,rgba(26,79,163,.02),transparent);display:flex;align-items:center;justify-content:space-between;}
+    .card-title{font-family:var(--font-head);font-size:14.5px;font-weight:700;letter-spacing:-.2px;display:flex;align-items:center;gap:8px;color:var(--text);}
+    .card-body{padding:22px;}
+    .section-badge{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:var(--accent-subtle);color:var(--accent);flex-shrink:0;}
+    .section-badge svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+
+    /* Buttons */
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:10px;font-family:var(--font-body);font-weight:600;letter-spacing:.1px;cursor:pointer;line-height:normal;padding:9px 18px;font-size:13px;transition:all .18s;}
+    .btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+    .btn-sm{padding:5px 12px;font-size:11.5px;}
+    .btn-primary{background:linear-gradient(135deg,#2563c7 0%,#1b4fa0 50%,#143d82 100%);color:#fff;box-shadow:0 8px 24px rgba(26,79,163,.4),0 1px 0 rgba(255,255,255,.2) inset;}
+    .btn-primary:hover{background:#1a5bc7;transform:translateY(-1px);}
+    .btn-secondary{background:var(--surface);color:var(--text2);border:1px solid var(--border);box-shadow:0 1px 2px rgba(26,79,163,.06);}
+    .btn-secondary:hover{background:var(--surface2);border-color:var(--border2);transform:translateY(-1px);}
+    .btn-success{background:linear-gradient(135deg,#22a06b 0%,#1a7340 50%,#145c33 100%);color:#fff;box-shadow:0 8px 24px rgba(26,115,64,.35),0 1px 0 rgba(255,255,255,.2) inset;}
+    .btn-success:hover{background:#17663a;transform:translateY(-1px);}
+    .btn-danger{background:linear-gradient(135deg,#e94040 0%,#d42b2b 50%,#a81e1e 100%);color:#fff;box-shadow:0 8px 24px rgba(212,43,43,.35),0 1px 0 rgba(255,255,255,.2) inset;}
+    .btn-danger:hover{background:#c62828;transform:translateY(-1px);}
+    .btn-full{width:100%;}
+
+    /* Status badge */
+    .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:600;box-shadow:inset 0 0 0 1px rgba(0,0,0,.05);}
+    .badge .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+
+    /* Header card */
+    .head-card{background:var(--surface);border-radius:18px;border:1px solid var(--border);padding:24px;box-shadow:0 2px 12px rgba(26,79,163,.05);}
+    .back{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:600;color:var(--text2);cursor:pointer;padding:4px 8px;border-radius:8px;margin-bottom:12px;}
+    .back:hover{background:var(--surface2);}
+    .back svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+    .head-num{font-family:var(--font-head);font-size:24px;font-weight:900;letter-spacing:-.3px;color:var(--text);line-height:1.1;}
+    .emp-tip{margin-top:10px;display:flex;align-items:flex-start;gap:8px;font-size:13px;border-radius:12px;padding:10px 14px;background:var(--accent-subtle);border:1.5px solid rgba(26,79,163,.15);color:var(--text2);}
+    .raise{margin-top:12px;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;border:1px solid rgba(26,79,163,.25);font-size:12px;font-weight:600;color:var(--accent);cursor:pointer;background:transparent;}
+    .raise:hover{background:var(--accent-subtle);}
+    .raise svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+
+    /* Detail tab bar */
+    .dtabs{display:flex;gap:24px;border-bottom:1px solid var(--border);overflow-x:auto;}
+    .dtabs::-webkit-scrollbar{height:0;}
+    .dtab{white-space:nowrap;padding-bottom:12px;font-size:14px;font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;color:var(--text3);cursor:pointer;background:none;border-top:none;border-left:none;border-right:none;font-family:var(--font-body);}
+    .dtab:hover{color:var(--text2);}
+    .dtab.active{border-bottom-color:var(--accent);color:var(--accent);}
+    .dtab .em{margin-right:6px;}
+
+    /* Field grids */
+    .fgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
+    .fgrid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+    .fg{display:flex;flex-direction:column;gap:5px;min-width:0;}
+    .fg label{font-size:10px;text-transform:uppercase;letter-spacing:1.1px;color:#7a91c0;font-weight:800;display:flex;align-items:center;gap:5px;}
+    .field-val{font-size:13.5px;font-weight:500;color:var(--text);background:#f5f8ff;border:1.5px solid #dde8fb;border-radius:10px;padding:10px 14px;min-height:40px;display:flex;align-items:center;line-height:1.4;word-break:break-word;}
+    .field-val.empty{color:#b0bcd8;font-style:italic;background:#f8faff;}
+    .check-badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:700;}
+    .check-done{background:rgba(26,160,80,.1);color:#1a7340;border:1px solid rgba(26,160,80,.2);}
+    .check-pending{background:rgba(230,126,0,.1);color:var(--warn);border:1px solid rgba(230,126,0,.2);}
+
+    /* Customer grid */
+    .kv{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+    .kv .k{font-size:12px;color:var(--text3);}
+    .kv .v{font-size:14px;font-weight:500;color:var(--text);margin-top:2px;}
+    .link-sm{font-size:12px;color:var(--accent);cursor:pointer;display:inline-flex;align-items:center;gap:4px;}
+    .link-sm:hover{text-decoration:underline;}
+    .link-sm svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;}
+
+    /* Doc cards */
+    .doc-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
+    .doc-card{border-radius:15px;border:1px solid var(--border);background:var(--surface);overflow:hidden;}
+    .doc-prev{height:76px;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,var(--surface2),var(--surface));border-bottom:1px solid var(--border);}
+    .doc-icon{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border2);color:var(--accent);box-shadow:0 4px 10px rgba(26,79,163,.12);}
+    .doc-icon svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.75;}
+    .doc-meta{padding:12px 14px;}
+    .doc-name{font-size:13px;font-weight:600;color:var(--text);}
+    .doc-sub{font-size:11px;color:var(--text3);margin-top:2px;}
+
+    /* Timeline */
+    .tl{position:relative;padding-left:2px;}
+    .tl::before{content:'';position:absolute;left:19px;top:6px;bottom:6px;width:2px;background:linear-gradient(to bottom,var(--border2),var(--border) 85%,transparent);}
+    .tl-row{display:flex;gap:14px;margin-bottom:14px;position:relative;}
+    .tl-marker{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;box-shadow:0 0 0 4px var(--surface);z-index:1;}
+    .tl-marker svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+    .tl-card{flex:1;border-radius:14px;border:1px solid var(--border);background:var(--surface);padding:12px 14px;}
+    .tl-t{font-size:13.5px;font-weight:600;color:var(--text);}
+    .tl-s{font-size:12px;color:var(--text3);margin-top:2px;}
+
+    /* Verification chips */
+    .vchips{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;}
+    .vchip{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface);font-size:13px;font-weight:600;color:var(--text2);cursor:pointer;}
+    .vchip:hover{border-color:var(--accent);color:var(--accent);}
+    .vchip .cd{width:8px;height:8px;border-radius:50%;}
+
+    /* Sub tabs */
+    .subtabs{display:flex;gap:24px;border-bottom:1px solid var(--border);margin-bottom:20px;}
+    .subtab{padding-bottom:12px;font-size:14px;font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;color:var(--text3);cursor:pointer;background:none;border-top:none;border-left:none;border-right:none;font-family:var(--font-body);}
+    .subtab.active{border-bottom-color:var(--accent);color:var(--accent);}
+
+    /* FOIR tiles */
+    .foir{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+    .foir-tile{border-radius:12px;border:1px solid var(--border);background:#fff;padding:14px 16px;}
+    .foir-tile .l{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);}
+    .foir-tile .n{font-size:18px;font-weight:700;margin-top:4px;color:var(--text);}
+    .foir-tile .s{font-size:11px;color:var(--text3);margin-top:2px;}
+
+    /* Inputs */
+    .inp{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-family:var(--font-body);font-size:14px;color:var(--text);outline:none;}
+    .inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(26,79,163,.2);}
+    textarea.inp{resize:none;}
+    .lbl{font-size:12px;font-weight:500;color:var(--text2);display:block;margin-bottom:6px;}
+    .hint{font-size:11px;color:var(--text3);margin-top:6px;}
+
+    .info-pill{font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;}
+    thead.oblt th{background:none;border-bottom:1px solid var(--border);padding:8px 12px 8px 0;text-align:left;font-size:11px;font-weight:600;color:var(--text3);text-transform:none;letter-spacing:0;}
+    tbody.oblt td{padding:8px 12px 8px 0;font-size:12px;border-bottom:1px solid var(--surface3);color:var(--text2);}
+  </style>
+</helmet>
+
+<div class="app">
+  <!-- ===== SIDEBAR (Applications active) ===== -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-logo">M</div>
+      <div><div class="brand-name">Mudrahub</div><div class="brand-sub">LET'S MAKE IT HAPPEN</div></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-sec">
+        <div class="nav-label"><span>Main Menu</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>Overview</div>
+        <div class="navitem active"><span class="ic"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>Applications</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg></span>Register New</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="11" x2="9" y2="11"/><line x1="12" y1="11" x2="13" y2="11"/><line x1="8" y1="15" x2="9" y2="15"/><line x1="12" y1="15" x2="13" y2="15"/></svg></span>EMI Calculator</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg></span>Tasks</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><line x1="6" y1="6" x2="16" y2="6"/><line x1="6" y1="10" x2="16" y2="10"/><path d="M7 6c5 0 6 8 -1 8l6 4"/></svg></span>Payout</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Customers</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>CIBIL Check</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Management</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><line x1="3" y1="21" x2="21" y2="21"/><path d="M4 21V9l8-5 8 5v12"/><line x1="9" y1="21" x2="9" y2="13"/><line x1="15" y1="21" x2="15" y2="13"/></svg></span>Banks / NBFC</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>InCred Integration</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>Lender Configuration</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span>DSA Management</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M11 17l2 2a1 1 0 0 0 3-3"/><path d="M14 14l2.5 2.5a1 1 0 0 0 3-3l-3.88-3.88"/><path d="M4 12l3-3 4 3 3-3"/></svg></span>Partner Management</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Team Management</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M10 22v-4h4v4"/></svg></span>Team Overview</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>Locations</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><circle cx="19" cy="11" r="2"/></svg></span>Users</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Analytics</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/></svg></span>Reports</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 9a3 3 0 0 1 0 6v3a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3a3 3 0 0 1 0-6V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/></svg></span>Helpdesk Tickets</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Policy &amp; Product</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>Policy &amp; Product</div>
+      </div>
+      <div class="nav-sec">
+        <div class="nav-label"><span>Settings</span><i>&#9662;</i></div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Settings</div>
+        <div class="navitem"><span class="ic"><svg viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg></span>Audit Log</div>
+      </div>
+    </nav>
+  </aside>
+
+  <!-- ===== MAIN ===== -->
+  <div class="main">
+    <header class="topbar">
+      <span class="topbar-title">Application Detail</span>
+      <div class="topbar-search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" placeholder="Search loans, customers...">
+      </div>
+      <button class="ic-btn"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="notif-dot"></span></button>
+      <div class="avatar">PN</div>
+    </header>
+
+    <div class="content">
+      <!-- Header card -->
+      <div class="head-card" style="margin-bottom:24px;">
+        <div class="back"><svg viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Back</div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+          <span class="head-num">MH-2026-00418</span>
+          <span class="badge" style="background:rgba(161,89,255,.15);color:#a159ff;"><span class="dot" style="background:#a159ff;"></span>UnderReview</span>
+        </div>
+        <p style="font-size:13px;margin:4px 0 0;color:var(--text3);">Business Loan &mdash; Rohan Deshmukh</p>
+        <div class="emp-tip"><span>&#128161;</span><span>Self-Employed: Verify ITR, GST returns and banking strength</span></div>
+        <button class="raise"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M4.93 4.93l4.24 4.24"/><path d="M14.83 9.17l4.24-4.24"/><path d="M14.83 14.83l4.24 4.24"/><path d="M9.17 14.83l-4.24 4.24"/><circle cx="12" cy="12" r="4"/></svg>Raise Ticket</button>
+      </div>
+
+      <!-- Detail tab bar -->
+      <div class="dtabs" style="margin-bottom:24px;">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="11">
+          <button class="dtab {{t.cls}}" onClick="{{t.pick}}"><span class="em">{{t.emoji}}</span>{{t.label}}</button>
+        </sc-for>
+      </div>
+
+      <!-- 2-column layout -->
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;align-items:start;">
+        <!-- MAIN COLUMN -->
+        <div style="display:flex;flex-direction:column;gap:20px;">
+
+          <!-- OVERVIEW -->
+          <sc-if value="{{isOverview}}" hint-placeholder-val="{{true}}">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg></span>Loan Details</div></div>
+              <div class="card-body">
+                <div class="fgrid">
+                  <div class="fg"><label>&#128278; Application ID</label><div class="field-val">MH-2026-00418</div></div>
+                  <div class="fg"><label>&#128994; Status</label><div class="field-val"><span class="badge" style="background:rgba(161,89,255,.15);color:#a159ff;"><span class="dot" style="background:#a159ff;"></span>UnderReview</span></div></div>
+                  <div class="fg"><label>&#128176; Loan Type</label><div class="field-val">Business Loan</div></div>
+                  <div class="fg"><label>&#128181; Loan Amount</label><div class="field-val">₹18,00,000</div></div>
+                  <div class="fg"><label>&#127974; Bank/NBFC</label><div class="field-val">HDFC Bank</div></div>
+                  <div class="fg"><label>&#128100; Sales Person</label><div class="field-val">Priya Nair</div></div>
+                  <div class="fg"><label>&#128197; Created</label><div class="field-val">28 Aug 2026</div></div>
+                  <div class="fg"><label>&#128200; Loan Rate</label><div class="field-val">16.5%</div></div>
+                  <div class="fg"><label>&#9201; Tenure</label><div class="field-val">48 months</div></div>
+                  <div class="fg"><label>&#127919; Purpose</label><div class="field-val">Working capital expansion</div></div>
+                  <div class="fg"><label>&#128225; Loan Source</label><div class="field-val">Direct</div></div>
+                  <div class="fg"><label>&#128227; Lead Source</label><div class="field-val">Website</div></div>
+                  <div class="fg"><label>&#128279; Channel</label><div class="field-val">DSA</div></div>
+                  <div class="fg"><label>&#9889; InCred RM</label><div class="field-val empty">&mdash;</div></div>
+                  <div class="fg"><label>&#128203; Doc Checked</label><div class="field-val"><span class="check-badge check-done">&#10003; Done</span></div></div>
+                  <div class="fg"><label>&#128185; Income Checked</label><div class="field-val"><span class="check-badge check-done">&#10003; Done</span></div></div>
+                  <div class="fg"><label>&#127974; Bank Checked</label><div class="field-val"><span class="check-badge check-pending">&#8987; Pending</span></div></div>
+                  <div class="fg"><label>&#8617; ECS Return</label><div class="field-val"><span class="check-badge check-pending">&#8987; Pending</span></div></div>
+                  <div class="fg"><label>&#128221; FI Report</label><div class="field-val"><span class="check-badge check-pending">&#8987; Pending</span></div></div>
+                  <div class="fg"><label>&#9208; Hold Reason</label><div class="field-val">None</div></div>
+                  <div class="fg"><label>&#10060; Rejection Reason</label><div class="field-val">None</div></div>
+                  <div class="fg"><label>&#128197; Disbursement Date</label><div class="field-val empty">&mdash;</div></div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>Customer</div><span class="link-sm"><svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/></svg>View Profile</span></div>
+              <div class="card-body">
+                <div class="kv">
+                  <div><div class="k">Name</div><div class="v">Rohan Deshmukh</div></div>
+                  <div><div class="k">Phone</div><div class="v">+91 98200 41562</div></div>
+                  <div><div class="k">Email</div><div class="v">rohan.deshmukh@example.com</div></div>
+                  <div><div class="k">PAN</div><div class="v">ABCPD1234F</div></div>
+                  <div><div class="k">CIBIL Score</div><div class="v">762</div></div>
+                  <div><div class="k">Monthly Income</div><div class="v">₹2,40,000</div></div>
+                  <div><div class="k">Monthly Obligations</div><div class="v">₹48,000</div></div>
+                  <div><div class="k">Employment</div><div class="v">Self-Employed</div></div>
+                  <div><div class="k">Company</div><div class="v">Deshmukh Traders Pvt Ltd</div></div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- PERSONAL -->
+          <sc-if value="{{isPersonal}}" hint-placeholder-val="{{false}}">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/></svg></span>Personal Details</div></div>
+              <div class="card-body">
+                <div class="fgrid">
+                  <div class="fg"><label>&#128100; Full Name</label><div class="field-val">Rohan Deshmukh</div></div>
+                  <div class="fg"><label>&#128100; Father's Name</label><div class="field-val">Anil Deshmukh</div></div>
+                  <div class="fg"><label>&#127874; Date of Birth</label><div class="field-val">14 Mar 1986</div></div>
+                  <div class="fg"><label>&#9878; Gender</label><div class="field-val">Male</div></div>
+                  <div class="fg"><label>&#128141; Marital Status</label><div class="field-val">Married</div></div>
+                  <div class="fg"><label>&#127463; PAN</label><div class="field-val">ABCPD1234F</div></div>
+                  <div class="fg"><label>&#128179; Aadhaar</label><div class="field-val">XXXX XXXX 4821</div></div>
+                  <div class="fg"><label>&#127760; Nationality</label><div class="field-val">Indian</div></div>
+                  <div class="fg"><label>&#128101; Category</label><div class="field-val">General</div></div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- ADDRESS -->
+          <sc-if value="{{isAddress}}" hint-placeholder-val="{{false}}">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span>Address</div></div>
+              <div class="card-body">
+                <p style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin:0 0 14px;">Current Address</p>
+                <div class="fgrid-2" style="margin-bottom:22px;">
+                  <div class="fg"><label>&#127968; Address Line</label><div class="field-val">B-1204, Lokhandwala Complex, Andheri West</div></div>
+                  <div class="fg"><label>&#127961; City</label><div class="field-val">Mumbai</div></div>
+                  <div class="fg"><label>&#128506; State</label><div class="field-val">Maharashtra</div></div>
+                  <div class="fg"><label>&#128231; Pincode</label><div class="field-val">400053</div></div>
+                </div>
+                <p style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin:0 0 14px;">Permanent Address</p>
+                <div class="fgrid-2">
+                  <div class="fg"><label>&#127968; Address Line</label><div class="field-val">14, Shivaji Nagar, Pune</div></div>
+                  <div class="fg"><label>&#127961; City</label><div class="field-val">Pune</div></div>
+                  <div class="fg"><label>&#128506; State</label><div class="field-val">Maharashtra</div></div>
+                  <div class="fg"><label>&#128231; Pincode</label><div class="field-val">411005</div></div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- EMPLOYMENT -->
+          <sc-if value="{{isEmployment}}" hint-placeholder-val="{{false}}">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span>Employment</div></div>
+              <div class="card-body">
+                <div class="fgrid">
+                  <div class="fg"><label>&#128188; Employment Type</label><div class="field-val">Self-Employed</div></div>
+                  <div class="fg"><label>&#127970; Company</label><div class="field-val">Deshmukh Traders Pvt Ltd</div></div>
+                  <div class="fg"><label>&#127891; Designation</label><div class="field-val">Proprietor</div></div>
+                  <div class="fg"><label>&#128197; Business Vintage</label><div class="field-val">9 years</div></div>
+                  <div class="fg"><label>&#128181; Monthly Income</label><div class="field-val">₹2,40,000</div></div>
+                  <div class="fg"><label>&#127981; Industry</label><div class="field-val">Wholesale Trading</div></div>
+                  <div class="fg"><label>&#128205; Office Address</label><div class="field-val">MIDC, Andheri East, Mumbai</div></div>
+                  <div class="fg"><label>&#129534; GST Number</label><div class="field-val">27ABCPD1234F1Z5</div></div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- REFERENCES -->
+          <sc-if value="{{isReferences}}" hint-placeholder-val="{{false}}">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>References</div></div>
+              <div class="card-body">
+                <div class="fgrid-2" style="margin-bottom:22px;">
+                  <div class="fg"><label>&#128100; Name</label><div class="field-val">Suresh Menon</div></div>
+                  <div class="fg"><label>&#128222; Phone</label><div class="field-val">+91 98191 22345</div></div>
+                  <div class="fg"><label>&#129309; Relationship</label><div class="field-val">Business Associate</div></div>
+                  <div class="fg"><label>&#128205; City</label><div class="field-val">Mumbai</div></div>
+                </div>
+                <div class="fgrid-2">
+                  <div class="fg"><label>&#128100; Name</label><div class="field-val">Anita Kulkarni</div></div>
+                  <div class="fg"><label>&#128222; Phone</label><div class="field-val">+91 90287 65510</div></div>
+                  <div class="fg"><label>&#129309; Relationship</label><div class="field-val">Friend</div></div>
+                  <div class="fg"><label>&#128205; City</label><div class="field-val">Pune</div></div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- DOCUMENTS -->
+          <sc-if value="{{isDocuments}}" hint-placeholder-val="{{false}}">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>Documents</div><span style="font-size:12px;color:var(--text3);">4 of 6 verified</span></div>
+              <div class="card-body">
+                <div class="doc-grid">
+                  <sc-for list="{{docs}}" as="d" hint-placeholder-count="6">
+                    <div class="doc-card">
+                      <div class="doc-prev"><div class="doc-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div></div>
+                      <div class="doc-meta">
+                        <div class="doc-name">{{d.name}}</div>
+                        <div class="doc-sub">{{d.sub}}</div>
+                        <span class="check-badge {{d.cls}}" style="margin-top:8px;">{{d.status}}</span>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- LENDER DETAILS -->
+          <sc-if value="{{isLender}}" hint-placeholder-val="{{false}}">
+            <div>
+              <div class="subtabs">
+                <button class="subtab active">Bank Details</button>
+                <button class="subtab">InCred</button>
+                <button class="subtab">Lender Emails</button>
+              </div>
+              <div class="card">
+                <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><line x1="3" y1="21" x2="21" y2="21"/><path d="M4 21V9l8-5 8 5v12"/></svg></span>Account Details</div></div>
+                <div class="card-body">
+                  <div class="fgrid-2">
+                    <div class="fg"><label>Account Holder</label><div class="field-val">Deshmukh Traders Pvt Ltd</div></div>
+                    <div class="fg"><label>Bank</label><div class="field-val">HDFC Bank</div></div>
+                    <div class="fg"><label>Account Number</label><div class="field-val">50100XXXXXX2317</div></div>
+                    <div class="fg"><label>Account Type</label><div class="field-val">Current</div></div>
+                    <div class="fg"><label>IFSC Code</label><div class="field-val">HDFC0000456</div></div>
+                    <div class="fg"><label>Branch</label><div class="field-val">Andheri East, Mumbai</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- TIMELINE -->
+          <sc-if value="{{isTimeline}}" hint-placeholder-val="{{false}}">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>Timeline</div></div>
+              <div class="card-body">
+                <div class="vchips">
+                  <div class="vchip"><span class="cd" style="background:var(--success);"></span>Income Verified</div>
+                  <div class="vchip"><span class="cd" style="background:var(--warn);"></span>Bank Check</div>
+                  <div class="vchip"><span class="cd" style="background:var(--warn);"></span>ECS</div>
+                  <div class="vchip"><span class="cd" style="background:var(--accent);"></span>Deal / Sanction</div>
+                </div>
+                <div class="tl">
+                  <sc-for list="{{timeline}}" as="e" hint-placeholder-count="5">
+                    <div class="tl-row">
+                      <div class="tl-marker" style="background: {{e.color}}">
+                        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                      </div>
+                      <div class="tl-card">
+                        <div class="tl-t">{{e.title}}</div>
+                        <div class="tl-s">{{e.sub}}</div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- REPORTS -->
+          <sc-if value="{{isReports}}" hint-placeholder-val="{{false}}">
+            <div>
+              <div class="subtabs">
+                <button class="subtab active">Perfios Report</button>
+                <button class="subtab">CIBIL Report</button>
+              </div>
+              <div class="card">
+                <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></span>Bank Statement Verification (Perfios)</div></div>
+                <div class="card-body">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+                    <span style="color:var(--success);display:inline-flex;"><svg style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M9 15l2 2 4-4"/></svg></span>
+                    <span style="font-size:14px;font-weight:600;color:var(--success);">Valid</span>
+                  </div>
+                  <div class="fgrid">
+                    <div class="fg"><label>Average Balance</label><div class="field-val">₹3,84,210</div></div>
+                    <div class="fg"><label>Span</label><div class="field-val">6 months</div></div>
+                    <div class="fg"><label>Total Transactions</label><div class="field-val">412</div></div>
+                    <div class="fg"><label>Salary Detected</label><div class="field-val">No (Self-employed)</div></div>
+                    <div class="fg"><label>Stale Days</label><div class="field-val">0</div></div>
+                    <div class="fg"><label>Verified At</label><div class="field-val">01 Sep 2026, 10:24</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- TASKS -->
+          <sc-if value="{{isTasks}}" hint-placeholder-val="{{false}}">
+            <div class="card"><div class="card-body">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;border-radius:16px;padding:14px 16px;background:linear-gradient(135deg,#eef4ff,#e8f0fe);border:1.5px solid #c8d8f8;">
+                <span style="font-size:20px;">&#128203;</span>
+                <span style="font-family:var(--font-head);font-size:16px;font-weight:800;color:var(--text);">Task Assignments</span>
+                <span class="info-pill" style="background:rgba(230,126,0,.12);color:var(--warn);">2 Pending</span>
+                <span class="info-pill" style="background:rgba(26,115,64,.1);color:var(--success);">1 Done</span>
+                <button class="btn btn-primary btn-sm" style="margin-left:auto;">+ Assign Task</button>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:10px;border:1px solid var(--border);"><input type="checkbox"><div style="flex:1;"><div style="font-size:14px;font-weight:500;color:var(--text);">Collect 6-month bank statement</div><div style="font-size:12px;color:var(--text3);">Assigned to Priya Nair &middot; due 05 Sep 2026</div></div><span class="info-pill" style="background:rgba(255,69,96,.15);color:var(--danger);">High</span></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:10px;border:1px solid var(--border);"><input type="checkbox"><div style="flex:1;"><div style="font-size:14px;font-weight:500;color:var(--text);">Field investigation at office address</div><div style="font-size:12px;color:var(--text3);">Assigned to Karan Mehta &middot; due 06 Sep 2026</div></div><span class="info-pill" style="background:rgba(255,179,71,.15);color:var(--warn);">Medium</span></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:10px;border:1px solid var(--border);"><input type="checkbox" checked><div style="flex:1;"><div style="font-size:14px;font-weight:500;color:var(--text);text-decoration:line-through;opacity:.6;">CIBIL pull &amp; review</div><div style="font-size:12px;color:var(--text3);">Assigned to Arjun Shah</div></div><span class="info-pill" style="background:rgba(0,212,170,.15);color:var(--success);">Low</span></div>
+              </div>
+            </div></div>
+          </sc-if>
+
+          <!-- OBLIGATIONS -->
+          <sc-if value="{{isObligations}}" hint-placeholder-val="{{false}}">
+            <div class="card"><div class="card-body">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                <p style="font-size:13px;color:var(--text3);margin:0;">Running loan obligations used for FOIR (Fixed Obligation to Income Ratio)</p>
+                <button class="btn btn-primary btn-sm">+ Add Obligation</button>
+              </div>
+              <div class="foir" style="margin-bottom:20px;">
+                <div class="foir-tile"><div class="l">Eligible EMI</div><div class="n">₹1,32,000</div><div class="s">55% of income</div></div>
+                <div class="foir-tile"><div class="l">Existing EMI</div><div class="n">₹48,000</div><div class="s">no BT</div></div>
+                <div class="foir-tile"><div class="l">Headroom</div><div class="n" style="color:var(--success);">₹84,000</div><div class="s">for the new loan</div></div>
+                <div class="foir-tile"><div class="l">FOIR Utilisation</div><div class="n" style="color:var(--warn);">36%</div><div class="s">&#128994; Healthy</div></div>
+              </div>
+              <table>
+                <thead class="oblt"><tr><th>Loan Type</th><th>Financer</th><th>EMI (₹)</th><th>Outstanding (₹)</th><th>BT</th></tr></thead>
+                <tbody class="oblt">
+                  <tr><td>Business Loan</td><td>Bajaj Finserv</td><td>₹28,000</td><td>₹6,40,000</td><td>&mdash;</td></tr>
+                  <tr><td>Car Loan</td><td>ICICI Bank</td><td>₹20,000</td><td>₹4,10,000</td><td>Yes</td></tr>
+                </tbody>
+              </table>
+            </div></div>
+          </sc-if>
+
+        </div>
+
+        <!-- RIGHT RAIL -->
+        <div style="display:flex;flex-direction:column;gap:20px;">
+          <!-- Actions -->
+          <div class="card">
+            <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>Actions</div></div>
+            <div class="card-body">
+              <div style="display:flex;flex-direction:column;gap:12px;">
+                <div>
+                  <label class="lbl">Approved Amount (₹)</label>
+                  <input class="inp" type="text" inputmode="decimal" data-numeric placeholder="1800000" value="{{approvedAmount}}" onInput="{{onAmount}}">
+                  <p class="hint">Leave blank to approve the requested amount.</p>
+                </div>
+                <textarea class="inp" rows="3" placeholder="Comment / rejection reason" value="{{comment}}" onInput="{{onComment}}"></textarea>
+                <button class="btn btn-success btn-full"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Approve</button>
+                <button class="btn btn-danger btn-full"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>Reject</button>
+                <button class="btn btn-secondary btn-full"><svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>Hold</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI Insights -->
+          <div class="card">
+            <div class="card-head"><div class="card-title"><span class="section-badge" style="background:rgba(161,89,255,.12);color:#a159ff;"><svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><line x1="9" y1="22" x2="15" y2="22"/></svg></span>AI Insights</div></div>
+            <div class="card-body">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <div style="width:52px;height:52px;border-radius:14px;background:rgba(26,115,64,.1);display:flex;align-items:center;justify-content:center;font-family:var(--font-head);font-weight:800;font-size:18px;color:var(--success);">78</div>
+                <div><div style="font-size:13px;font-weight:700;color:var(--text);">Recommend Proceed</div><div style="font-size:12px;color:var(--text3);">Confidence score 78 / 100</div></div>
+              </div>
+              <p style="font-size:12.5px;line-height:1.55;color:var(--text2);margin:0;">Strong CIBIL (762) and healthy 6-month banking. FOIR utilisation is comfortable at 36%. Complete bank verification and FI before disbursal.</p>
+            </div>
+          </div>
+
+          <!-- Assignment -->
+          <div class="card">
+            <div class="card-head"><div class="card-title"><span class="section-badge"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg></span>Assignment</div></div>
+            <div class="card-body">
+              <div style="display:flex;flex-direction:column;gap:12px;">
+                <div><div style="font-size:12px;color:var(--text3);">Created By</div><div style="font-size:14px;font-weight:500;color:var(--text);margin-top:2px;">Priya Nair</div></div>
+                <div><div style="font-size:12px;color:var(--text3);">Assigned To</div><div style="font-size:14px;font-weight:500;color:var(--text);margin-top:2px;">Credit Team &mdash; Karan Mehta</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this.state = { tab:'overview', approvedAmount:'', comment:'' };
+  }
+
+  renderVals(){
+    const s = this.state;
+    const tabDefs = [
+      {key:'overview',label:'Overview',emoji:'📋'},
+      {key:'personal',label:'Personal Details',emoji:'👤'},
+      {key:'address',label:'Address',emoji:'🏠'},
+      {key:'employment',label:'Employment',emoji:'💼'},
+      {key:'references',label:'References',emoji:'🤝'},
+      {key:'documents',label:'Documents',emoji:'📁'},
+      {key:'lender',label:'Lender Details',emoji:'🏦'},
+      {key:'timeline',label:'Timeline',emoji:'🔵'},
+      {key:'reports',label:'Reports',emoji:'📊'},
+      {key:'tasks',label:'Tasks',emoji:'📌'},
+      {key:'obligations',label:'Obligations',emoji:'💳'},
+    ];
+    const tabs = tabDefs.map(t => ({
+      label:t.label, emoji:t.emoji, cls: s.tab===t.key?'active':'',
+      pick: () => this.setState({ tab:t.key }),
+    }));
+
+    const docs = [
+      {name:'PAN Card', sub:'Uploaded 28 Aug', status:'✓ Verified', cls:'check-done'},
+      {name:'Aadhaar Card', sub:'Uploaded 28 Aug', status:'✓ Verified', cls:'check-done'},
+      {name:'Bank Statement', sub:'6 months · PDF', status:'✓ Verified', cls:'check-done'},
+      {name:'ITR 2024-25', sub:'Uploaded 29 Aug', status:'✓ Verified', cls:'check-done'},
+      {name:'GST Returns', sub:'Awaiting upload', status:'⏳ Pending', cls:'check-pending'},
+      {name:'Business Proof', sub:'Awaiting upload', status:'⏳ Pending', cls:'check-pending'},
+    ];
+
+    const timeline = [
+      {title:'Application Created', sub:'28 Aug 2026 · Priya Nair', color:'#1a4fa3'},
+      {title:'Documents Uploaded', sub:'28 Aug 2026 · Applicant', color:'#2d68cc'},
+      {title:'Submitted for Review', sub:'29 Aug 2026 · Priya Nair', color:'#a159ff'},
+      {title:'Under Review — Credit', sub:'30 Aug 2026 · Credit Team', color:'#a159ff'},
+      {title:'Perfios Analysis Completed', sub:'01 Sep 2026 · System', color:'#1a7340'},
+    ];
+
+    return {
+      tabs,
+      isOverview: s.tab==='overview',
+      isPersonal: s.tab==='personal',
+      isAddress: s.tab==='address',
+      isEmployment: s.tab==='employment',
+      isReferences: s.tab==='references',
+      isDocuments: s.tab==='documents',
+      isLender: s.tab==='lender',
+      isTimeline: s.tab==='timeline',
+      isReports: s.tab==='reports',
+      isTasks: s.tab==='tasks',
+      isObligations: s.tab==='obligations',
+      docs, timeline,
+      approvedAmount: s.approvedAmount,
+      comment: s.comment,
+      onAmount: (e)=> this.setState({ approvedAmount: e.target.value }),
+      onComment: (e)=> this.setState({ comment: e.target.value }),
+    };
+  }
+}
+</script>
+</body>
+</html>

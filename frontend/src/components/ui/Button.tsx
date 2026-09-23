@@ -1,30 +1,39 @@
 import React from 'react'
 import { cn } from '@/utils/format'
+import { InlineLoader } from '@/components/ui/LoadingSpinner'
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'success'
   size?: 'sm' | 'md' | 'lg'
   loading?: boolean
 }
 
-export function Button({ variant = 'primary', size = 'md', loading, className, children, disabled, ...props }: ButtonProps) {
-  const base = 'inline-flex items-center justify-center font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
+export function Button({ variant = 'primary', size = 'md', loading, className, children, disabled, type, ...props }: ButtonProps) {
+  // Default to type="button" so a Button placed inside a <form> (a modal's
+  // Cancel/X, a row action, a toolbar action, etc.) never triggers an
+  // accidental form submit. Every real submit button in the app already passes
+  // type="submit" explicitly, so those keep working — the caller's `type`
+  // always wins over this default.
+  // Geometry, weight and the blue glow come from the legacy .login-btn
+  // (see .efin-btn in globals.css). The previous flat bg-efin-blue at weight
+  // 500 with an 8px radius was the main reason React buttons read as lighter
+  // than the legacy ones. Focus ring is kept so keyboard focus stays visible.
+  const base =
+    'efin-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[color:var(--accent)]'
   const variants = {
-    primary:   'bg-efin-blue text-white hover:bg-efin-blue-dark focus:ring-efin-blue',
-    secondary: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-gray-300',
-    danger:    'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
-    ghost:     'text-gray-600 hover:bg-gray-100 focus:ring-gray-300',
+    primary:   'efin-btn--primary',
+    secondary: 'efin-btn--secondary',
+    danger:    'efin-btn--danger',
+    ghost:     'efin-btn--ghost',
+    // Additive — used to visually distinguish positive workflow actions
+    // (Approve/Disburse) from the generic primary blue CTA elsewhere.
+    success:   'efin-btn--success',
   }
-  const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-4 py-2 text-sm', lg: 'px-6 py-2.5 text-base' }
+  const sizes = { sm: 'efin-btn--sm', md: 'efin-btn--md', lg: 'efin-btn--lg' }
 
   return (
-    <button className={cn(base, variants[variant], sizes[size], className)} disabled={disabled || loading} {...props}>
-      {loading && (
-        <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-      )}
+    <button type={type ?? 'button'} className={cn(base, variants[variant], sizes[size], className)} disabled={disabled || loading} {...props}>
+      {loading && <InlineLoader size={16} className="-ml-1 mr-2" />}
       {children}
     </button>
   )

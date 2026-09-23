@@ -17,16 +17,24 @@ namespace LoanMS.API.Controllers;
 // against ILoanService.GetByIdAsync's existing role-based visibility scope
 // first, so a Perfios report can't be read or written for a loan outside
 // the caller's scope even if the loanId is guessed directly.
+//
+// KNOWN ARCHITECTURAL LIMITATION: GetLatest below returns the single
+// most-recent row for the loan — there is no per-doc-item discriminator
+// (see PerfiosReport's own doc comment for the full detail and why this is
+// deliberately unchanged in 7B-2). Preserved as-is; not a schema/contract
+// change this phase.
 [Authorize]
 public class PerfiosController : BaseController
 {
     private readonly ILoanService _loanService;
     private readonly AppDbContext _db;
+    private readonly IFileStorageService _storage;
 
-    public PerfiosController(ILoanService loanService, AppDbContext db)
+    public PerfiosController(ILoanService loanService, AppDbContext db, IFileStorageService storage)
     {
         _loanService = loanService;
         _db = db;
+        _storage = storage;
     }
 
     /// <summary>Get the most recent Perfios report for a loan, if any.</summary>
@@ -57,7 +65,8 @@ public class PerfiosController : BaseController
             LastTransactionDate = report.LastTransactionDate,
             ManualReviewRequired = report.ManualReviewRequired,
             StaleDays = report.StaleDays,
-            VerifiedAt = report.VerifiedAt
+            VerifiedAt = report.VerifiedAt,
+            ReportDataJson = report.ReportDataJson
         }));
     }
 
@@ -76,6 +85,11 @@ public class PerfiosController : BaseController
         var loan = await _loanService.GetByIdAsync(loanId, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(loan);
 
+        // Gap-1: bind this report to the actual uploaded bank-statement document
+        // (server-side) and hash its bytes. Resolve the explicit id if given (and
+        // it belongs to this loan), else best-effort by matching the file name.
+        var (docId, pdfHash) = await ResolveEvidenceAsync(loanId, request.BankStatementDocumentId, request.FileName);
+
         var report = new PerfiosReport
         {
             LoanId = loanId,
@@ -89,12 +103,46 @@ public class PerfiosController : BaseController
             LastTransactionDate = request.LastTransactionDate,
             ManualReviewRequired = request.ManualReviewRequired,
             StaleDays = request.StaleDays,
+            ReportDataJson = request.ReportDataJson,
+            // Client-parsed evidence is UNTRUSTED (Gap-1). Never set ServerParsed here —
+            // there is no server-authoritative producer. This blocks AutoVerify downstream.
+            EvidenceSource = "ClientParsed",
+            BankStatementDocumentId = docId,
+            SourcePdfHash = pdfHash,
             VerifiedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow
         };
         _db.Set<PerfiosReport>().Add(report);
         await _db.SaveChangesAsync();
 
-        return Ok(ApiResponseDto<object>.Ok(new { report.Id }, "Perfios report saved."));
+        return Ok(ApiResponseDto<object>.Ok(new { report.Id, report.EvidenceSource, report.BankStatementDocumentId }, "Perfios report saved."));
+    }
+
+    // Resolve the bank-statement document (explicit id preferred, else file-name
+    // match among this loan's live documents) and compute a server-side SHA-256 of
+    // its bytes. Best-effort: binding/hash failures never fail the save.
+    private async Task<(int? DocId, string? Hash)> ResolveEvidenceAsync(int loanId, int? explicitDocId, string? fileName)
+    {
+        LoanDocument? doc = null;
+        if (explicitDocId is int id)
+            doc = await _db.LoanDocuments.FirstOrDefaultAsync(d => d.Id == id && d.LoanId == loanId && !d.IsDeleted);
+        if (doc is null && !string.IsNullOrWhiteSpace(fileName))
+            doc = await _db.LoanDocuments.FirstOrDefaultAsync(d =>
+                d.LoanId == loanId && !d.IsDeleted && d.DocumentName == fileName);
+        if (doc is null) return (null, null);
+
+        string? hash = null;
+        try
+        {
+            var obj = await _storage.GetAsync(doc.FilePath);
+            if (obj is not null)
+            {
+                using var ms = new MemoryStream();
+                await obj.Value.Content.CopyToAsync(ms);
+                hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ms.ToArray())).ToLowerInvariant();
+            }
+        }
+        catch { /* best-effort binding — hash stays null on any storage error */ }
+        return (doc.Id, hash);
     }
 }

@@ -16,9 +16,9 @@ const ROLE_DEFINITIONS: Record<string, { color: string; description: string; per
     permissions: ['All modules','User management','Settings','Audit log','Delete records','Export data'],
   },
   Manager: {
-    color: 'bg-blue-100 text-blue-700',
-    description: 'Team management, payout approval, reports, all loan operations',
-    permissions: ['Loans (all)','Customers (all)','Payout approval','Reports','Teams','DSA management'],
+    color: 'bg-efin-blue/12 text-efin-blue',
+    description: 'Team management, reports, all loan operations. Payout: Sales-level (own claims only)',
+    permissions: ['Loans (all)','Customers (all)','Payout (own claims only)','Reports','Teams','DSA management'],
   },
   Sales: {
     color: 'bg-green-100 text-green-700',
@@ -35,7 +35,8 @@ const ROLE_DEFINITIONS: Record<string, { color: string; description: string; per
 const ACCESS_RULES: AccessRule[] = [
   { name: 'Loan Visibility', appliedTo: 'Loans list', domainFilter: 'Own assignments only (Sales)', groups: 'Sales, Partner' },
   { name: 'Customer Visibility', appliedTo: 'Customers list', domainFilter: 'Created by user (Sales)', groups: 'Sales, Partner' },
-  { name: 'Payout Access', appliedTo: 'Payout module', domainFilter: 'All records', groups: 'Admin, Manager' },
+  { name: 'Payout Access', appliedTo: 'Payout module', domainFilter: 'All records', groups: 'Admin, Accounts' },
+  { name: 'Payout Visibility', appliedTo: 'Payout claims', domainFilter: 'Own claims only (Sales-level)', groups: 'Manager, Sales, Partner' },
   { name: 'User Management', appliedTo: 'Users module', domainFilter: 'All users', groups: 'Admin' },
   { name: 'Settings Access', appliedTo: 'System settings', domainFilter: 'Full access', groups: 'Admin' },
   { name: 'Audit Log', appliedTo: 'Audit log viewer', domainFilter: 'Read-only', groups: 'Admin' },
@@ -64,7 +65,7 @@ export default function SecurityRolesPage() {
         {(['groups','rules'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              tab === t ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              tab === t ? 'bg-efin-blue text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}>
             {t === 'groups' ? 'Security Groups' : 'Access Rules'}
           </button>

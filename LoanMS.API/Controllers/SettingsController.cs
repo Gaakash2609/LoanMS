@@ -168,9 +168,9 @@ public class SettingsController : BaseController
             SmtpHost   = string.IsNullOrWhiteSpace(dto.SmtpHost) ? "smtp.gmail.com" : dto.SmtpHost.Trim(),
             SmtpPort   = string.IsNullOrWhiteSpace(dto.SmtpPort) ? "587" : dto.SmtpPort.Trim(),
             SmtpUser   = dto.SmtpUser?.Trim() ?? string.Empty,
-            SmtpPass   = IsMasked(dto.SmtpPass) ? (existing?.SmtpPass ?? string.Empty) : (dto.SmtpPass ?? string.Empty),
+            SmtpPass   = ResolveSecret(dto.SmtpPass, existing?.SmtpPass),
             SmtpUseSsl = dto.SmtpUseSsl,
-            ApiKey     = IsMasked(dto.ApiKey) ? (existing?.ApiKey ?? string.Empty) : (dto.ApiKey ?? string.Empty),
+            ApiKey     = ResolveSecret(dto.ApiKey, existing?.ApiKey),
             InvEnabled = dto.InvEnabled,
             InvSubject = dto.InvSubject ?? string.Empty,
             InvBody    = dto.InvBody ?? string.Empty,
@@ -182,6 +182,28 @@ public class SettingsController : BaseController
 
     private static bool IsMasked(string? value) =>
         !string.IsNullOrEmpty(value) && value.All(c => c == '•');
+
+    /// <summary>
+    /// Decides what to persist for a secret field. A masked placeholder means
+    /// "the admin did not touch this field"; so does an absent/blank value.
+    /// Both keep whatever is already stored.
+    ///
+    /// Blank previously fell through to the incoming value and wiped the stored
+    /// secret. That was reachable in normal use: the two secrets belong to
+    /// different providers, and only the ACTIVE provider's secret is validated
+    /// as non-empty above (SmtpPass only when provider is smtp/gmail). Saving
+    /// the form on Brevo therefore posted an empty SmtpPass and silently erased
+    /// the stored SMTP password — and saving on SMTP did the same to the Brevo
+    /// API key. The loss only surfaced later, when mail stopped sending after a
+    /// provider switch back.
+    ///
+    /// Clearing a secret deliberately is done through DELETE
+    /// /api/settings/email-config, which is what that endpoint is for.
+    /// </summary>
+    private static string ResolveSecret(string? incoming, string? stored) =>
+        IsMasked(incoming) || string.IsNullOrWhiteSpace(incoming)
+            ? (stored ?? string.Empty)
+            : incoming;
 
     [HttpGet("email-config")]
     public async Task<IActionResult> GetEmailConfig()
@@ -337,7 +359,24 @@ public class SettingsController : BaseController
 
     private async Task UpsertSettingInternal(string key, string value, string category)
     {
-        var existing = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == key);
+        // BUGFIX (confirmed at runtime — save → clear → save returned 500
+        // "SQLite Error 19: UNIQUE constraint failed: AppSettings.Key"):
+        // AppSetting carries a global query filter (AppDbContext.cs:404,
+        // HasQueryFilter(s => !s.IsDeleted)), so once a key had been
+        // soft-deleted this lookup could no longer see it. `existing` came
+        // back null, the else-branch below inserted a second row with the
+        // same Key, and the unique index IX_AppSettings_Key_OrgWide_Unique
+        // (AppDbContext.cs:411) rejected it.
+        //
+        // IgnoreQueryFilters() lets the soft-deleted row be found so the
+        // revive path below — which already sets IsDeleted = false — is
+        // actually reached. That revive logic is unchanged; this only makes
+        // it reachable. Reads elsewhere keep the filter, so a cleared
+        // setting still reads as absent.
+        //
+        // Hit by every caller of this helper: InCred credentials, email
+        // config, AI keys, and the sign-in logo.
+        var existing = await _db.AppSettings.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.Key == key);
         if (existing != null)
         {
             existing.Value = value; existing.Category = category;
@@ -383,10 +422,13 @@ public class SettingsController : BaseController
         {
             "efin_logo", "efin_banner_logo", "efin_logo_icon_size",
             "efin_logo_banner_size", "efin_brand_name", "efin_brand_sub",
-            // These two are read (not written) by every role during normal
+            // These are read (not written) by every role during normal
             // use — CAM salary-band display, InCred comment-template
-            // picker — not Admin-only data, just Admin-editable.
-            "efin_cam_matrix", "efin_incred_comment_templates"
+            // picker, and the New Claim form's dropdown lists (Banks/
+            // Products/Contests/Business Categories) — not Admin-only
+            // data, just Admin-editable via PayoutRulesTab's Claim Lists
+            // editor.
+            "efin_cam_matrix", "efin_incred_comment_templates", "efin_payout_claim_lists"
         };
         if (!publicKeys.Contains(key))
         {
@@ -395,17 +437,37 @@ public class SettingsController : BaseController
         }
 
         var setting = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == key);
-        if (setting == null) return NotFound(ApiResponseDto<bool>.Fail("Setting not found."));
+        // An UNSET key is a normal state for this generic key/value store, not
+        // an error: several keys (efin_role_permissions, efin_menu_visibility,
+        // efin_incred_comment_templates, efin_cam_matrix, master lists) are read
+        // on nearly every page and only exist once an Admin saves them. Returning
+        // 404 here made the browser log a red "Failed to load resource: 404" on
+        // every one of those pages even though every caller already treats the
+        // missing key as "use defaults" (permissionsApi.fetchSettingValue's
+        // catch, the CAM/comment-template cards' `?? null`). Return 200 with the
+        // same object shape but a null Value so those callers get their null
+        // without the console noise. Authorization is unchanged — the Admin-only
+        // 403 above still runs first for every non-whitelisted key.
+        if (setting == null)
+            return Ok(ApiResponseDto<object>.Ok(new { Key = key, Value = (string?)null, Category = (string?)null }));
         return Ok(ApiResponseDto<object>.Ok(new { setting.Key, setting.Value, setting.Category }));
     }
 
     [HttpPost]
     public async Task<IActionResult> Upsert([FromBody] SettingDto dto)
     {
-        var existing = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == dto.Key);
+        // BUGFIX (same defect already fixed in UpsertSettingInternal, confirmed
+        // reachable here too: POST key -> DELETE key -> POST same key returned
+        // 500 "UNIQUE constraint failed: AppSettings.Key"). AppSetting carries
+        // a global query filter (AppDbContext.cs:404), so a soft-deleted row
+        // was invisible to this lookup, the else-branch inserted a duplicate,
+        // and the unique index IX_AppSettings_Key_OrgWide_Unique
+        // (AppDbContext.cs:411) rejected it. IgnoreQueryFilters() finds the
+        // row; IsDeleted = false revives it, matching UpsertSettingInternal.
+        var existing = await _db.AppSettings.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.Key == dto.Key);
         if (existing != null) {
             existing.Value = dto.Value; existing.Category = dto.Category;
-            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedAt = DateTime.UtcNow; existing.IsDeleted = false;
         } else {
             _db.AppSettings.Add(new AppSetting {
                 Key = dto.Key, Value = dto.Value,
@@ -420,9 +482,10 @@ public class SettingsController : BaseController
     public async Task<IActionResult> UpsertBatch([FromBody] List<SettingDto> settings)
     {
         foreach (var dto in settings) {
-            var existing = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == dto.Key);
+            // Same soft-delete fix as Upsert above — see the note there.
+            var existing = await _db.AppSettings.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.Key == dto.Key);
             if (existing != null) {
-                existing.Value = dto.Value; existing.UpdatedAt = DateTime.UtcNow;
+                existing.Value = dto.Value; existing.UpdatedAt = DateTime.UtcNow; existing.IsDeleted = false;
             } else {
                 _db.AppSettings.Add(new AppSetting { Key = dto.Key, Value = dto.Value, Category = dto.Category, CreatedAt = DateTime.UtcNow });
             }

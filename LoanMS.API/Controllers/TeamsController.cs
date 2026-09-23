@@ -7,7 +7,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LoanMS.API.Controllers;
 
-[Authorize(Roles = "Admin,Manager")]
+// Phase 4 — role widened from Admin,Manager to also allow ProductTeam through
+// the class-level gate (GetAll), and each write endpoint widened from
+// Admin-only to Admin,ProductTeam. Matches vanilla's twCanManageUsers()
+// (efin-app.js:24863: role==='admin'||role==='product_team'), the gate on
+// Edit/Duplicate/Archive/Delete Team (efin-app.js:24587, twTeamMenu) and
+// Delete Team specifically (efin-app.js:24599: "Only Admin or Product Team
+// can delete teams"). Manager keeps its existing GetAll-only, team-scoped
+// view access (see the comment on GetAll below) — vanilla never lets a
+// Manager edit/archive/delete a team, only Admin/ProductTeam can.
+[Authorize(Roles = "Admin,Manager,ProductTeam")]
 public class TeamsController : BaseController
 {
     private readonly AppDbContext _db;
@@ -59,6 +68,11 @@ public class TeamsController : BaseController
             // resolves that one Location's Name for display.
             LocationName = t.Location != null ? t.Location.Name : null,
             TeamLead = t.TeamLead != null ? t.TeamLead.FullName : null,
+            // Added — the React edit form needs the leader's id (not just
+            // display name) to pre-select the current leader in a dropdown;
+            // GetAll previously only returned the name. Purely additive
+            // field on an existing anonymous projection, no schema change.
+            t.TeamLeadUserId,
             t.IsActive,
             Members  = t.Members.Select(m => new { m.UserId, m.User.FullName, m.User.Email }).ToList()
         }).ToListAsync();
@@ -66,7 +80,7 @@ public class TeamsController : BaseController
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Create([FromBody] TeamCreateDto dto)
     {
         var team = new Team {
@@ -80,7 +94,7 @@ public class TeamsController : BaseController
     }
 
     [HttpPut("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Update(int id, [FromBody] TeamCreateDto dto)
     {
         var team = await _db.Teams.FindAsync(id);
@@ -103,7 +117,7 @@ public class TeamsController : BaseController
     public class SetTeamStatusRequestDto { public bool IsActive { get; set; } }
 
     [HttpPatch("{id:int}/status")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> SetStatus(int id, [FromBody] SetTeamStatusRequestDto request)
     {
         var team = await _db.Teams.FindAsync(id);
@@ -115,7 +129,7 @@ public class TeamsController : BaseController
     }
 
     [HttpPost("{id:int}/members")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> AddMember(int id, [FromBody] TeamMemberDto dto)
     {
         var team = await _db.Teams.FindAsync(id);
@@ -129,7 +143,7 @@ public class TeamsController : BaseController
     }
 
     [HttpDelete("{id:int}/members/{userId:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> RemoveMember(int id, int userId)
     {
         var member = await _db.TeamMembers.FirstOrDefaultAsync(m => m.TeamId == id && m.UserId == userId);
@@ -147,7 +161,7 @@ public class TeamsController : BaseController
     /// ever actually removed server-side.
     /// </summary>
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> Delete(int id)
     {
         var team = await _db.Teams.FindAsync(id);

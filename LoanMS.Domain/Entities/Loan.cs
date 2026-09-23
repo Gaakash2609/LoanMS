@@ -28,6 +28,13 @@ public class Loan : BaseEntity
     public DateTime? DisbursedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
 
+    // ── Reject / Re-open parity (Vanilla rejectApp/reopenApp, efin-app.js:10589,
+    // 10600) — snapshot taken whenever a loan moves TO Rejected, so a later
+    // Reopen can restore the exact pre-rejection stage instead of an admin
+    // guessing a target status. RejectedAt anchors the 45-day reopen window. ──
+    public LoanStatus? PreRejectedStatus { get; set; }
+    public DateTime? RejectedAt { get; set; }
+
     // ── Wizard draft progress (server-side — replaces the old client-only
     // localStorage "wizard_draft_meta" index) ─────────────────────────────
     // Which step of the New Application wizard this Draft-status loan was
@@ -69,6 +76,17 @@ public class Loan : BaseEntity
     // unrelated to this field). Comma-separated bank names, current
     // selection only (overwritten on each save, not a history log).
     public string? SelectedLenderNames { get; set; }
+
+    // ── Per-loan Lender RM override (Lender Email Workflow) ──────────────────
+    // Vanilla's app.lender_rm_override {name,email,mobile} (lender-email-
+    // workflow.js:757). A per-application override of the RM contact used for
+    // the lender-email enquiry/reply workflow, independent of the master
+    // Bank/NBFC record (Vanilla note: "applies only to this application").
+    // Lets Send Enquiry work when the bank master has no RM email on file, or
+    // when a different contact is used for this specific case.
+    public string? LenderRmName   { get; set; }
+    public string? LenderRmEmail  { get; set; }
+    public string? LenderRmMobile { get; set; }
 
     // ── DSA / Partner / Location linkage (Phase 1 — data model only; no
     // wizard mapping, visibility, authorization, or assignment logic yet) ────
@@ -116,6 +134,29 @@ public class Loan : BaseEntity
     public string? IncredLastWebhookEvent { get; set; }
     public string? IncredLastWebhookStatus { get; set; }
     public DateTime? IncredLastSyncedAt { get; set; }
+
+    // ── Overview parity fields (added 2026-09-05, user-authorised) ──────────
+    // Mirrors the VanillaJS loan-detail Overview grid (efin-app.js:2479):
+    // app.rm (InCred RM), app.anaBank (Analytic Bank), and the five
+    // underwriting verification flags (app.document_checked / incom_check /
+    // bank_check / ecs_return / final_report) rendered as ⏳Pending / ✓Done.
+    // These were previously placeholders in the React Overview because no
+    // column, DTO field or setter existed for them.
+    /// <summary>InCred relationship manager assigned to this application (Overview → InCred RM).</summary>
+    public string? IncredRmName { get; set; }
+    /// <summary>Analytic bank selected for this application (Overview → Analytic Bank).</summary>
+    public string? AnalyticBank { get; set; }
+    public bool DocumentChecked { get; set; }
+    public bool IncomeChecked { get; set; }
+    public bool BankChecked { get; set; }
+    public bool EcsReturn { get; set; }
+    public bool FiReportChecked { get; set; }
+
+    // ── Disburse pre-checks (Vanilla nach_done / customer_agreement_done) —
+    // see UpdateLoanOverviewRequestDto for why these exist and LoanService
+    // for the Disburse-time gate that reads them. ──
+    public bool NachDone { get; set; }
+    public bool CustomerAgreementDone { get; set; }
 
     // Navigation
     public Customer Customer { get; set; } = null!;

@@ -6,7 +6,10 @@ export interface KycVisionImage {
 }
 
 export interface KycVisionRequest {
-  documentType: 'PAN' | 'AADHAAR'
+  // Backend KycVisionRequestDto.DocumentType is a plain string used only for
+  // audit logging (the prompt drives extraction) — SALARY_SLIP reuses the same
+  // generic vision relay for payslip Net-Pay/Month reading.
+  documentType: 'PAN' | 'AADHAAR' | 'SALARY_SLIP'
   images: KycVisionImage[]
   prompt: string
 }

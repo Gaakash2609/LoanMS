@@ -1,0 +1,1 @@
+import{j as e}from"./query-Bgq4zerj.js";import{a as r}from"./index-CZ_1fOGr.js";function t({className:n}){return e.jsx("div",{className:n,children:e.jsx(r,{size:"sm"})})}function i(n){return e.jsx(r,{size:"md"})}export{t as S,i as T};

@@ -5,6 +5,8 @@ import type { ApiResponse } from '@/types'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import DataTable, { type Column } from '@/components/shared/DataTable'
+import IncredRmTab from '@/components/shared/IncredRmTab'
+import { IncredAppActionsModal } from '@/components/shared/IncredAppActionsModal'
 import PageHeader from '@/components/shared/PageHeader'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { AlertCircle } from 'lucide-react'
@@ -24,11 +26,15 @@ const STATUS_VARIANT: Record<string, 'success'|'warning'|'info'|'danger'|'defaul
 }
 
 export default function IncredPage() {
-  const [tab, setTab] = useState<'apps'|'config'>('apps')
+  const [tab, setTab] = useState<'apps'|'rm'|'config'>('apps')
+  const [actionsApp, setActionsApp] = useState<IncredApp | null>(null)
 
   const { data: status } = useQuery({
     queryKey: ['incred-status'],
-    queryFn: () => api.get<ApiResponse<IncredStatus>>('/api/incred/status').then(r => r.data.data),
+    // `?? null` — React Query forbids an undefined return; the API's data can be
+    // null when InCred isn't configured, which otherwise triggers the
+    // "Query data cannot be undefined" warning + refetch churn.
+    queryFn: () => api.get<ApiResponse<IncredStatus>>('/api/incred/status').then(r => r.data.data ?? null),
     staleTime: 60_000,
   })
 
@@ -46,6 +52,18 @@ export default function IncredPage() {
     { key: 'loanAmount',    label: 'Loan Amount', render: a => `₹${a.loanAmount.toLocaleString('en-IN')}` },
     { key: 'offerStatus',   label: 'Offer Status',render: a => (
       <Badge variant={STATUS_VARIANT[a.offerStatus?.toLowerCase()] ?? 'default'}>{a.offerStatus ?? 'Pending'}</Badge>
+    )},
+    // Eligibility/document/cancel/repayment-schedule/applicant-sync/
+    // disbursement all existed on the backend with zero React caller — see
+    // IncredAppActionsModal's own doc comment.
+    { key: 'actions', label: '', render: a => (
+      <button
+        type="button"
+        onClick={() => setActionsApp(a)}
+        className="text-xs font-medium text-efin-blue hover:underline"
+      >
+        Actions
+      </button>
     )},
   ]
 
@@ -67,12 +85,12 @@ export default function IncredPage() {
       )}
 
       <div className="flex gap-2 mb-5">
-        {(['apps','config'] as const).map(t => (
+        {(['apps','rm','config'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              tab === t ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              tab === t ? 'bg-efin-blue text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}>
-            {t === 'apps' ? 'InCred Applications' : 'API Configuration'}
+            {t === 'apps' ? 'InCred Applications' : t === 'rm' ? '👤 RM Emails' : 'API Configuration'}
           </button>
         ))}
       </div>
@@ -83,6 +101,18 @@ export default function IncredPage() {
             <DataTable columns={columns} data={apps ?? []} />
           )}
         </Card>
+      )}
+
+      {/* RM Emails — legacy adds this tab to the InCred page (incred-rm.js). */}
+      {tab === 'rm' && <IncredRmTab />}
+
+      {actionsApp && (
+        <IncredAppActionsModal
+          loanId={actionsApp.loanId}
+          incredAppId={actionsApp.incredAppId}
+          applicantName={actionsApp.applicantName}
+          onClose={() => setActionsApp(null)}
+        />
       )}
 
       {tab === 'config' && (

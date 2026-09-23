@@ -6,6 +6,7 @@ public class LoanReferenceDto
     public string Name { get; set; } = string.Empty;
     public string Mobile { get; set; } = string.Empty;
     public string Relation { get; set; } = string.Empty;
+    public string? Address { get; set; }
     public int RefNumber { get; set; }
 }
 
@@ -14,11 +15,16 @@ public class UpdateLoanReferenceItemDto
     public string? Name { get; set; }
     public string? Mobile { get; set; }
     public string? Relation { get; set; }
+    public string? Address { get; set; }
     public int RefNumber { get; set; }
 }
 
 public class LoanSanctionDetailDto
 {
+    public decimal? SanctionLoanAmt { get; set; }
+    public int? SanctionTenureMonths { get; set; }
+    public decimal? SanctionRoi { get; set; }
+    public decimal? SanctionEmi { get; set; }
     public string? StampDuty { get; set; }
     public decimal? Gst { get; set; }
     public decimal? Insurance { get; set; }

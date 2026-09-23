@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { Upload, Loader2, Lock, AlertTriangle, CheckCircle2, Eye, EyeOff, X } from 'lucide-react'
+import { InlineLoader } from '@/components/ui/LoadingSpinner'
+import { Upload, Lock, AlertTriangle, CheckCircle2, Eye, EyeOff, X, ScanLine } from 'lucide-react'
 import { usePerfiosUpload, type PerfiosUploadResult } from '@/hooks/usePerfiosUpload'
 
 // ── Perfios bank-statement upload ────────────────────────────────────────
@@ -12,7 +12,14 @@ import { usePerfiosUpload, type PerfiosUploadResult } from '@/hooks/usePerfiosUp
 // No results tables here — this component's only job is to get from "PDF
 // file(s)" to a validated PerfiosUploadResult and hand it to the caller via
 // onComplete. No backend save, no postMessage, no iframe.
-export default function PerfiosUpload({ onComplete }: { onComplete?: (result: PerfiosUploadResult) => void }) {
+export default function PerfiosUpload({ onComplete, onFilesSelected }: {
+  onComplete?: (result: PerfiosUploadResult) => void
+  // Fired with the raw File(s) the moment they are picked/dropped, BEFORE
+  // parsing — lets an embedder (the wizard Step-8 doc row) also attach the
+  // statement as the loan document, since the analysis engine consumes the
+  // File internally and never hands it back.
+  onFilesSelected?: (files: File[]) => void
+}) {
   const {
     status, errorMessage, passwordPrompt, progress, result,
     addFiles, submitPassword, skipFile, setBulkPassword, clearBulkPassword, reset,
@@ -28,7 +35,9 @@ export default function PerfiosUpload({ onComplete }: { onComplete?: (result: Pe
 
   function handleFilesPicked(files: FileList | null) {
     if (!files || !files.length) return
-    void addFiles(Array.from(files))
+    const arr = Array.from(files)
+    onFilesSelected?.(arr)
+    void addFiles(arr)
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -67,7 +76,16 @@ export default function PerfiosUpload({ onComplete }: { onComplete?: (result: Pe
   }, [status, result, onComplete])
 
   return (
-    <Card>
+    <div className="perfios-shell">
+      {/* ── premium header ── */}
+      <div className="perfios-shell-head">
+        <div className="perfios-shell-icon"><ScanLine size={24} strokeWidth={2.25} /></div>
+        <div className="min-w-0">
+          <h3 className="text-base font-black leading-tight" style={{ fontFamily: 'var(--font-head)', color: 'var(--text)', letterSpacing: '-.3px' }}>Bank Statement Analysis</h3>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text3)' }}>Upload statements for automated Perfios validation &amp; scoring</p>
+        </div>
+      </div>
+      <div className="p-5">
       {/* ── idle / drag-drop zone ── */}
       {(status === 'idle' || status === 'error') && (
         <div>
@@ -76,30 +94,38 @@ export default function PerfiosUpload({ onComplete }: { onComplete?: (result: Pe
             onDragOver={e => { e.preventDefault(); setDragOver(true) }}
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
-            className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl py-10 px-4 cursor-pointer transition-colors ${dragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400'}`}
+            className={`perfios-drop ${dragOver ? 'is-over' : ''}`}
           >
-            <Upload size={28} className="text-gray-400" />
-            <p className="text-sm font-semibold text-gray-700">Click or drag bank statement PDF(s) here</p>
-            <p className="text-xs text-gray-400 text-center">Supports 45+ banks · password-protected &amp; plain PDFs · multiple files<br />90-day span check · staleness check · salary, bounce &amp; overdraft detection</p>
+            <div className="perfios-drop-icon"><Upload size={30} strokeWidth={2} /></div>
+            <p className="text-sm font-bold mt-1" style={{ color: 'var(--text)' }}>Click or drag bank statement PDF(s) here</p>
+            <p className="text-xs text-center leading-relaxed" style={{ color: 'var(--text3)' }}>Supports 45+ banks · password-protected &amp; plain PDFs · multiple files<br />90-day span check · staleness check · salary, bounce &amp; overdraft detection</p>
           </div>
           <input ref={fileInputRef} type="file" accept=".pdf" multiple className="hidden"
             onChange={e => handleFilesPicked(e.target.files)} />
 
           {status === 'error' && errorMessage && (
-            <div className="mt-4 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
-              <p className="text-sm text-red-700">{errorMessage}</p>
+            <div className="mt-4 flex items-start gap-2 p-3 rounded-lg" style={{ background: 'rgba(192,57,43,.08)', border: '1px solid rgba(192,57,43,.2)' }}>
+              <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: 'var(--danger)' }} />
+              <p className="text-sm" style={{ color: 'var(--danger)' }}>{errorMessage}</p>
             </div>
           )}
         </div>
       )}
 
-      {/* ── processing ── */}
+      {/* ── processing — with a real progress meter ── */}
       {(status === 'processing' || status === 'password-required') && progress && (
-        <div className="flex items-center gap-3 py-6">
-          <Loader2 size={18} className="animate-spin text-blue-600" />
-          <p className="text-sm text-gray-700">
-            Processing file {progress.current} of {progress.total}: <span className="font-medium">{progress.fileName}</span>
+        <div className="py-4">
+          <div className="flex items-center gap-3 mb-3">
+            <InlineLoader size={18} style={{ color: 'var(--accent)' }} />
+            <p className="text-sm" style={{ color: 'var(--text2)' }}>
+              Processing file {progress.current} of {progress.total}: <span className="font-semibold" style={{ color: 'var(--text)' }}>{progress.fileName}</span>
+            </p>
+          </div>
+          <div className="meter-track" style={{ height: 10 }}>
+            <div className="meter-fill" style={{ width: `${Math.round((progress.current / Math.max(1, progress.total)) * 100)}%` }} />
+          </div>
+          <p className="text-[11px] mt-2 font-semibold uppercase" style={{ letterSpacing: '.5px', color: 'var(--text3)' }}>
+            {Math.round((progress.current / Math.max(1, progress.total)) * 100)}% complete
           </p>
         </div>
       )}
@@ -113,13 +139,13 @@ export default function PerfiosUpload({ onComplete }: { onComplete?: (result: Pe
           </div>
 
           {passwordPrompt.bankHint && (
-            <div className="mb-3 p-2.5 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800">
+            <div className="mb-3 p-2.5 bg-efin-blue/10 border border-efin-blue/12 rounded-lg text-xs text-efin-blue">
               <p className="font-medium mb-1">💡 {passwordPrompt.bankHint.bank} Hint</p>
               <p className="mb-1.5">{passwordPrompt.bankHint.hint}</p>
               <div className="flex flex-wrap gap-1.5">
                 {passwordPrompt.bankHint.examples.map(ex => (
                   <button key={ex} onClick={() => setPwdInput(ex)}
-                    className="px-2 py-0.5 bg-white border border-blue-200 rounded text-blue-700 text-[11px]">{ex}</button>
+                    className="px-2 py-0.5 bg-white border border-efin-blue/20 rounded text-efin-blue text-[11px]">{ex}</button>
                 ))}
               </div>
             </div>
@@ -141,7 +167,7 @@ export default function PerfiosUpload({ onComplete }: { onComplete?: (result: Pe
           </div>
 
           {passwordPrompt.errorMessage && (
-            <p className="text-xs text-red-600 mb-2">❌ {passwordPrompt.errorMessage}</p>
+            <p className="text-xs mb-2" style={{ color: 'var(--danger)' }}>❌ {passwordPrompt.errorMessage}</p>
           )}
           {passwordPrompt.attempts > 0 && (
             <p className="text-xs text-gray-500 mb-2">{passwordPrompt.attempts} failed attempt{passwordPrompt.attempts > 1 ? 's' : ''} — you can skip this file if needed.</p>
@@ -170,7 +196,7 @@ export default function PerfiosUpload({ onComplete }: { onComplete?: (result: Pe
                 <Button size="sm" variant="ghost" onClick={handleClearBulkPassword}><X size={13} className="mr-1" />Clear</Button>
               )}
             </div>
-            {bulkPwdSaved && <p className="text-[11px] text-green-600 mt-1">✓ Will be tried automatically on remaining protected files.</p>}
+            {bulkPwdSaved && <p className="text-[11px] mt-1" style={{ color: 'var(--success)' }}>✓ Will be tried automatically on remaining protected files.</p>}
           </div>
         </div>
       )}
@@ -178,10 +204,16 @@ export default function PerfiosUpload({ onComplete }: { onComplete?: (result: Pe
       {/* ── complete ── */}
       {status === 'complete' && result && (
         <div>
-          <div className={`flex items-start gap-2 p-3 rounded-lg border ${result.valid ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
-            <CheckCircle2 size={16} className={result.valid ? 'text-green-600 shrink-0 mt-0.5' : 'text-yellow-600 shrink-0 mt-0.5'} />
+          <div
+            className="flex items-start gap-2 p-3 rounded-lg"
+            style={{
+              background: result.valid ? 'rgba(26,115,64,.08)' : 'rgba(230,126,0,.08)',
+              border: `1px solid ${result.valid ? 'rgba(26,115,64,.2)' : 'rgba(230,126,0,.2)'}`,
+            }}
+          >
+            <CheckCircle2 size={16} className="shrink-0 mt-0.5" style={{ color: result.valid ? 'var(--success)' : 'var(--warn)' }} />
             <div>
-              <p className={`text-sm font-semibold ${result.valid ? 'text-green-700' : 'text-yellow-700'}`}>
+              <p className="text-sm font-semibold" style={{ color: result.valid ? 'var(--success)' : 'var(--warn)' }}>
                 {result.valid ? 'Statement validated' : 'Processed — needs review'}
               </p>
               <p className="text-xs text-gray-600 mt-0.5">
@@ -204,7 +236,7 @@ export default function PerfiosUpload({ onComplete }: { onComplete?: (result: Pe
           </div>
         </div>
       )}
-
-    </Card>
+      </div>
+    </div>
   )
 }

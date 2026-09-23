@@ -1,0 +1,1 @@
+import{d as o}from"./router-DX_74pto.js";function u(e=null,a="asc"){const[s,c]=o.useState({key:e,dir:a}),i=o.useCallback(r=>{c(t=>t.key===r?{key:r,dir:t.dir==="asc"?"desc":"asc"}:{key:r,dir:"asc"})},[]);return{sortKey:s.key,sortDir:s.dir,toggle:i}}export{u};

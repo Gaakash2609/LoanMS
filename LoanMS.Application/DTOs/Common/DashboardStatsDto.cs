@@ -15,4 +15,9 @@ public class DashboardStatsDto
     public decimal TotalApprovedAmount { get; set; }
     public decimal TotalDisbursedAmount { get; set; }
     public List<LoanListDto> RecentLoans { get; set; } = new();
+    // Gap 2 — real persisted activity feed (LoanStatusHistory-backed), see
+    // RecentActivityDto. RecentLoans above is left in place (still the most
+    // recently CREATED loans, used elsewhere), this is a separate,
+    // reverse-chronological feed of actual status-change events.
+    public List<RecentActivityDto> RecentActivity { get; set; } = new();
 }

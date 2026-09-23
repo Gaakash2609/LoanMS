@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/authStore'
 import { rejectionReasonsApi, type RejectionReason } from '@/api/rejectionReasonsApi'
 import ProductOfferMatrixCard from '@/components/shared/ProductOfferMatrixCard'
 import IncredCommentTemplatesCard from '@/components/shared/IncredCommentTemplatesCard'
+import { PageLoader } from '@/components/ui/LoadingSpinner'
 
 // Legacy page-policy-product: role-action permission matrix + DSA/Partner tables
 // + Rejection Reasons card (rejection-reasons.js). DSA and Partner tables are
@@ -155,7 +156,7 @@ function RejectionReasonsCard() {
             </div>
           </div>
           {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
-          <div className="flex gap-2">
+          <div className="flex justify-end gap-2">
             <Button size="sm" loading={editingId ? update.isPending : create.isPending} onClick={save}>
               {editingId ? 'Update Reason' : 'Save Reason'}
             </Button>
@@ -165,7 +166,7 @@ function RejectionReasonsCard() {
       )}
 
       {isLoading ? (
-        <p className="text-sm text-gray-400 py-4">Loading…</p>
+        <PageLoader />
       ) : reasons.length === 0 ? (
         <p className="text-sm text-gray-400 py-4">No reasons configured.</p>
       ) : (
@@ -222,7 +223,7 @@ export default function PolicyProductPage() {
                     <td key={role} className="py-2 px-3 text-center">
                       {MATRIX[action]?.[role]
                         ? <Check size={16} className="text-green-500 mx-auto" strokeWidth={3} />
-                        : <span className="text-gray-200 text-sm">—</span>
+                        : <span className="text-gray-400 text-sm" aria-label="not permitted">—</span>
                       }
                     </td>
                   ))}

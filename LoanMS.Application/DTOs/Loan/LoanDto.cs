@@ -46,6 +46,21 @@ public class LoanDto
     public string? ProductDataJson { get; set; }
     // Same field/source as LoanListDto.RiskGrade — see that DTO's comment.
     public string? RiskGrade { get; set; }
+    // Per-loan Lender RM override (Lender Email Workflow) — see Loan entity.
+    public string? LenderRmName   { get; set; }
+    public string? LenderRmEmail  { get; set; }
+    public string? LenderRmMobile { get; set; }
+    // Overview parity fields (Vanilla efin-app.js:2479) — InCred RM, Analytic
+    // Bank, and the five underwriting verification flags. See Loan entity.
+    public string? IncredRmName { get; set; }
+    public string? AnalyticBank { get; set; }
+    public bool DocumentChecked { get; set; }
+    public bool IncomeChecked { get; set; }
+    public bool BankChecked { get; set; }
+    public bool EcsReturn { get; set; }
+    public bool FiReportChecked { get; set; }
+    public bool NachDone { get; set; }
+    public bool CustomerAgreementDone { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<LoanStatusHistoryDto> StatusHistory { get; set; } = new();
 }

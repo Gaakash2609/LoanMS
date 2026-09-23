@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -383,18 +384,40 @@ public class IncredController : BaseController
 
     // ─────────────────────────────────────────────────────────────────────────
     // GET /api/incred/status — check if credentials are configured
+    //
+    // BUGFIX: this unconditionally called _loadCreds(), which throws
+    // InvalidOperationException the moment credentials are NOT configured
+    // (the PHASE 6 security fix removed the old built-in-fallback path that
+    // used to make _loadCreds() always succeed — see that method's own
+    // comment). That made the one endpoint whose entire job is "tell the
+    // caller whether InCred is configured" 500 specifically when the answer
+    // is "no", which is every fresh install / any environment without
+    // InCred Settings saved. IncredPage.tsx calls this on every page load,
+    // so the InCred module 500'd on its own status check by default.
+    // Reports configured/not from the same three raw lookups _loadCreds()
+    // itself uses, without ever throwing.
     // ─────────────────────────────────────────────────────────────────────────
     [HttpGet("status")]
     public async Task<IActionResult> GetStatus()
     {
-        var hasDbCreds = await _db.AppSettings.AnyAsync(
-            s => s.Key == KEY_CLIENT_ID && !s.IsDeleted && s.Value != null);
-        var creds = await _loadCreds();
+        var baseUrl   = await _db.AppSettings
+            .Where(s => s.Key == KEY_BASE_URL && !s.IsDeleted)
+            .Select(s => s.Value).FirstOrDefaultAsync();
+        var clientId  = await _db.AppSettings
+            .Where(s => s.Key == KEY_CLIENT_ID && !s.IsDeleted)
+            .Select(s => s.Value).FirstOrDefaultAsync();
+        var hasSecret = await _db.AppSettings.AnyAsync(
+            s => s.Key == KEY_CLIENT_SECRET && !s.IsDeleted && s.Value != null);
+
+        var configured = !string.IsNullOrEmpty(baseUrl)
+            && !string.IsNullOrEmpty(clientId)
+            && hasSecret;
+
         return Ok(new {
-            configured     = true,   // always true — built-in fallback ensures we can always call
-            usingDbCreds   = hasDbCreds,
-            usingBuiltIn   = !hasDbCreds,
-            baseUrl        = creds.baseUrl,
+            configured,
+            usingDbCreds = configured,
+            usingBuiltIn = false, // the built-in fallback was removed in the PHASE 6 security fix
+            baseUrl      = configured ? baseUrl : null,
         });
     }
 
@@ -1041,6 +1064,35 @@ public class IncredController : BaseController
             {
                 _log.LogWarning("InCred webhook received an empty/invalid JSON body");
                 return Ok(new { status = "error", message = "Request body is missing or is not valid JSON." });
+            }
+
+            // ── Webhook caller authentication ──────────────────────────────────
+            // This endpoint is [AllowAnonymous] because InCred's server calls it
+            // with no LoanMS JWT, so a configured shared secret is the ONLY auth
+            // boundary. Without it, any anonymous caller could POST a spoofed
+            // callback (PARTNER_REFERENCE is just loan.Id, a sequential integer)
+            // and pollute the loan's InCred sync fields and the webhook log. When
+            // incred_webhook_secret is set, require it as the X-Webhook-Token
+            // header (constant-time compare) and reject mismatches; when it is not
+            // set, log loudly so it gets configured before production (kept
+            // fail-open-when-unset so dev/test callbacks are not broken).
+            var webhookSecret = (await _db.AppSettings
+                .FirstOrDefaultAsync(x => x.Key == "incred_webhook_secret" && !x.IsDeleted))?.Value;
+            if (!string.IsNullOrWhiteSpace(webhookSecret))
+            {
+                var provided = Request.Headers["X-Webhook-Token"].ToString();
+                var authorized = !string.IsNullOrEmpty(provided) && CryptographicOperations.FixedTimeEquals(
+                    Encoding.UTF8.GetBytes(provided), Encoding.UTF8.GetBytes(webhookSecret));
+                if (!authorized)
+                {
+                    _log.LogWarning("InCred webhook REJECTED: missing/invalid X-Webhook-Token");
+                    return Unauthorized(new { status = "error", message = "Unauthorized webhook caller." });
+                }
+            }
+            else
+            {
+                _log.LogWarning("SECURITY: InCred webhook secret (incred_webhook_secret) is NOT configured — "
+                    + "the callback endpoint is unauthenticated. Set it in Settings before production.");
             }
 
             _log.LogInformation("Received InCred Webhook: {Payload}", payload.GetRawText());

@@ -14,6 +14,8 @@ public class PerfiosReportDto
     public bool ManualReviewRequired { get; set; }
     public int? StaleDays { get; set; }
     public DateTime VerifiedAt { get; set; }
+    /// <summary>Complete report payload as JSON (see PerfiosReport.ReportDataJson). Null for legacy summary-only rows.</summary>
+    public string? ReportDataJson { get; set; }
 }
 
 public class SavePerfiosReportRequestDto
@@ -28,4 +30,10 @@ public class SavePerfiosReportRequestDto
     public string? LastTransactionDate { get; set; }
     public bool ManualReviewRequired { get; set; }
     public int? StaleDays { get; set; }
+    /// <summary>Complete report payload as JSON so the whole report (not just the summary) can be reloaded later.</summary>
+    public string? ReportDataJson { get; set; }
+    /// <summary>Gap-1: the uploaded bank-statement document this report was derived
+    /// from. Optional — when omitted the server best-effort resolves it by file name.
+    /// The report's trust level (EvidenceSource) is set server-side, never here.</summary>
+    public int? BankStatementDocumentId { get; set; }
 }

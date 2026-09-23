@@ -1,22 +1,31 @@
 import { useEffect, useMemo, useState } from 'react'
+import { SubTabBar } from '@/components/ui/SubTabBar'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { CheckCircle2, XCircle, AlertTriangle, Info, RotateCcw, Save } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertTriangle, Info, RotateCcw, Save, ScanLine } from 'lucide-react'
 import type { PerfiosUploadResult } from '@/hooks/usePerfiosUpload'
 import { buildFullAnalysis } from '@/utils/perfios/orchestrate'
 import { fmt, fmtDate } from '@/utils/perfios/analysis'
 import type { ValidationCheck } from '@/utils/perfios/types'
 import { perfiosApi, type PerfiosReportSaveRequest } from '@/api/perfiosApi'
+import { serializePerfiosReport } from '@/utils/perfios/persist'
+import { applyTargetDateFilter } from '@/utils/perfios/calculations'
+import {
+  TxnTable, TargetDateTable, AccountsPanel, ValidationPanel,
+  EXTRA_CATEGORY, EXTRA_SALARY, EXTRA_ACH, EXTRA_ECS, EXTRA_NEFT,
+  EXTRA_UPI, EXTRA_CHEQUE, EXTRA_BOUNCE,
+} from '@/components/shared/PerfiosTxnPanels'
 
 const CHECK_ICON: Record<ValidationCheck['status'], typeof CheckCircle2> = {
   pass: CheckCircle2, warn: AlertTriangle, fail: XCircle,
 }
-const CHECK_COLOR: Record<ValidationCheck['status'], string> = {
-  pass: 'text-green-600', warn: 'text-yellow-600', fail: 'text-red-600',
-}
 
-type Tab = 'analysis' | 'breakup' | 'eod' | 'finone'
+// Legacy's #pfr-tabs set, in legacy's order (index.html).
+type Tab =
+  | 'txn' | 'abb' | 'target' | 'salary' | 'ach' | 'ecs' | 'neft' | 'upi'
+  | 'cheque' | 'bounce' | 'finone' | 'analysis' | 'breakup' | 'eod'
+  | 'accounts' | 'validation'
 
 // ── Perfios analysis results (read-only) ────────────────────────────────
 // Consumes Phase 2's PerfiosUploadResult and orchestrates the four
@@ -27,14 +36,33 @@ type Tab = 'analysis' | 'breakup' | 'eod' | 'finone'
 // already produced. Stays in React memory only — no localStorage/
 // sessionStorage/backend save/postMessage/iframe. Save-to-backend is
 // Phase 4, not here.
-export default function PerfiosAnalysisResults({ result, onReset, loanId }: { result: PerfiosUploadResult; onReset: () => void; loanId: number }) {
+// `readOnly` renders the SAME full report from a persisted/reloaded run
+// (Reports > Perfios Report after a refresh) without the Confirm & Save /
+// Analyze-Another footer — that report is already saved. The live-run path
+// (PerfiosWorkflow) leaves readOnly false so the save/reset actions show.
+export default function PerfiosAnalysisResults({ result, onReset, loanId, readOnly = false }: { result: PerfiosUploadResult; onReset: () => void; loanId: number; readOnly?: boolean }) {
   const full = useMemo(() => buildFullAnalysis(result), [result])
-  const [tab, setTab] = useState<Tab>('analysis')
+  const [tab, setTab] = useState<Tab>('txn')
   const qc = useQueryClient()
 
   const { upload, finOne, analysis, breakup, eod } = full
   const monthOrder = upload.monthOrder
   const monthLabels = monthOrder.map(mk => upload.abbData[mk]?.label ?? mk)
+
+  // Validation pass/warn/fail counts — the same breakdown Vanilla's
+  // renderPerfiosReport shows as badges (#pfr-validation-badge). Vanilla has
+  // NO derived "health score" ring or progress meter, so neither does this
+  // (removed to match Vanilla exactly — no React-only metric with no legacy
+  // equivalent).
+  const passCount = upload.validChecks.filter(c => c.status === 'pass').length
+  const warnCount = upload.validChecks.filter(c => c.status === 'warn').length
+  const failCount = upload.validChecks.filter(c => c.status === 'fail').length
+
+  // ABB and Target Dates both render the target-date grid. The rows are not
+  // part of PerfiosUploadResult, so they are recomputed here with the very
+  // same pure function usePerfiosUpload calls (applyTargetDateFilter) —
+  // no second implementation of the rule.
+  const targetRows = useMemo(() => applyTargetDateFilter(upload.allTxns), [upload.allTxns])
 
   // ── Confirm & Save — reproduces legacy's pfv9ConfirmAttachment save call
   // exactly: same 10 fields, same source values (this run's already-
@@ -60,6 +88,11 @@ export default function PerfiosAnalysisResults({ result, onReset, loanId }: { re
         lastTransactionDate: upload.lastDate ? fmtDate(upload.lastDate) : null,
         manualReviewRequired: !!upload.manualReviewRequired,
         staleDays: upload.staledays || null,
+        // Full report payload — this is what makes the ENTIRE report (all
+        // transactions + ABB/FinOne/Analysis/Breakup/EOD source + validation
+        // + account header) reload from the backend later, not just the
+        // summary above.
+        reportDataJson: serializePerfiosReport(upload),
       }
       return perfiosApi.save(loanId, payload)
     },
@@ -74,47 +107,70 @@ export default function PerfiosAnalysisResults({ result, onReset, loanId }: { re
   useEffect(() => { setSaveState('idle') }, [result])
 
   return (
-    <div className="space-y-6">
-      {/* A. Summary */}
-      <Card>
-        <CardHeader title="Perfios Summary" />
-        <div className={`flex items-start gap-2 p-3 rounded-lg border mb-4 ${upload.valid ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
-          {upload.valid ? <CheckCircle2 size={16} className="text-green-600 shrink-0 mt-0.5" /> : <AlertTriangle size={16} className="text-yellow-600 shrink-0 mt-0.5" />}
-          <div>
-            <p className={`text-sm font-semibold ${upload.valid ? 'text-green-700' : 'text-yellow-700'}`}>
-              {upload.valid ? 'Valid' : 'Needs Review'}{upload.manualReviewRequired ? ' · Manual Review Required' : ''}
-            </p>
-            {!upload.valid && <p className="text-xs text-yellow-700 mt-0.5">Span or staleness rule did not pass — see Validation Checks below.</p>}
+    <div className="space-y-6 lms-reveal">
+      {/* A. Summary — validation-count badges (Vanilla's #pfr-validation-badge)
+          + summary stat tiles (Vanilla's #pfr-summary-cards). No health-score
+          ring / progress meter: Vanilla has no equivalent. */}
+      <div className="perfios-shell">
+        <div className="perfios-shell-head">
+          <div className="perfios-shell-icon"><ScanLine size={24} strokeWidth={2.25} /></div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-base font-black leading-tight" style={{ fontFamily: 'var(--font-head)', color: 'var(--text)', letterSpacing: '-.3px' }}>Perfios Summary</h3>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text3)' }}>{upload.perFileData.map(f => f.fileName).join(', ') || '—'}</p>
           </div>
+          <span className="text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 shrink-0"
+            style={{ color: upload.valid ? 'var(--success)' : 'var(--warn)', background: upload.valid ? 'rgba(26,115,64,.1)' : 'rgba(230,126,0,.12)' }}>
+            {upload.valid ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
+            {upload.valid ? 'Valid' : 'Needs Review'}{upload.manualReviewRequired ? ' · Manual Review' : ''}
+          </span>
         </div>
 
-        <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 text-sm">
-          <div><dt className="text-gray-400 text-xs">File(s)</dt><dd className="text-gray-800">{upload.perFileData.map(f => f.fileName).join(', ') || '—'}</dd></div>
-          <div><dt className="text-gray-400 text-xs">Total Transactions (90d)</dt><dd className="text-gray-800">{upload.totalTxns}</dd></div>
-          <div><dt className="text-gray-400 text-xs">First Transaction</dt><dd className="text-gray-800">{fmtDate(upload.firstDate)}</dd></div>
-          <div><dt className="text-gray-400 text-xs">Last Transaction</dt><dd className="text-gray-800">{fmtDate(upload.lastDate)}</dd></div>
-          <div><dt className="text-gray-400 text-xs">Span</dt><dd className="text-gray-800">{upload.span} days</dd></div>
-          <div><dt className="text-gray-400 text-xs">Average Bank Balance</dt><dd className="text-gray-800">₹{fmt(upload.abb)}</dd></div>
-          <div><dt className="text-gray-400 text-xs">Salary Detected</dt><dd className="text-gray-800">{upload.hasSalary ? 'Yes' : 'No'}</dd></div>
-          <div><dt className="text-gray-400 text-xs">Stale Days</dt><dd className="text-gray-800">{upload.staledays}</dd></div>
-          <div><dt className="text-gray-400 text-xs">Manual Review Required</dt><dd className="text-gray-800">{upload.manualReviewRequired ? 'Yes' : 'No'}</dd></div>
-        </dl>
-      </Card>
+        <div className="p-5">
+          <div className="mb-5">
+            <p className="text-[11px] font-bold uppercase mb-2" style={{ letterSpacing: '1px', color: 'var(--text3)' }}>Validation Breakdown</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="info-pill" style={{ ['--pill-fg' as string]: 'var(--success)', ['--pill-bg' as string]: 'rgba(26,115,64,.1)' }}><CheckCircle2 size={12} /> {passCount} passed</span>
+              <span className="info-pill" style={{ ['--pill-fg' as string]: 'var(--warn)', ['--pill-bg' as string]: 'rgba(230,126,0,.12)' }}><AlertTriangle size={12} /> {warnCount} warnings</span>
+              <span className="info-pill" style={{ ['--pill-fg' as string]: 'var(--danger)', ['--pill-bg' as string]: 'rgba(192,57,43,.1)' }}><XCircle size={12} /> {failCount} failed</span>
+            </div>
+            {!upload.valid && <p className="text-xs mt-2" style={{ color: 'var(--warn)' }}>Span or staleness rule did not pass — see Validation Checks below.</p>}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Total Txns (90d)', value: String(upload.totalTxns), accent: 'var(--accent)' },
+              { label: 'Span', value: `${upload.span} days`, accent: '#7c3aed' },
+              { label: 'Avg Bank Balance', value: `₹${fmt(upload.abb)}`, accent: 'var(--success)' },
+              { label: 'Stale Days', value: String(upload.staledays), accent: 'var(--warn)' },
+              { label: 'First Transaction', value: fmtDate(upload.firstDate), accent: 'var(--accent)' },
+              { label: 'Last Transaction', value: fmtDate(upload.lastDate), accent: 'var(--accent)' },
+              { label: 'Salary Detected', value: upload.hasSalary ? 'Yes' : 'No', accent: upload.hasSalary ? 'var(--success)' : 'var(--danger)' },
+              { label: 'Manual Review', value: upload.manualReviewRequired ? 'Yes' : 'No', accent: upload.manualReviewRequired ? 'var(--warn)' : 'var(--success)' },
+            ].map(s => (
+              <div key={s.label} className="perfios-stat" style={{ ['--stat-accent' as string]: s.accent }}>
+                <p className="text-[10.5px] font-semibold uppercase" style={{ letterSpacing: '.5px', color: 'var(--text3)' }}>{s.label}</p>
+                <p className="text-[15px] font-bold mt-1 truncate" style={{ color: 'var(--text)' }}>{s.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {/* B. Validation Checks */}
       <Card>
         <CardHeader title="Validation Checks" subtitle={`${upload.validChecks.length} checks from the Perfios rule engine`} />
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           {upload.validChecks.map(c => {
             const Icon = CHECK_ICON[c.status]
+            const accent = c.status === 'pass' ? 'var(--success)' : c.status === 'warn' ? 'var(--warn)' : 'var(--danger)'
             return (
-              <div key={c.id} className="flex items-start gap-2.5 p-2.5 border border-gray-100 rounded-lg">
-                <Icon size={15} className={`shrink-0 mt-0.5 ${CHECK_COLOR[c.status]}`} />
-                <div className="min-w-0">
-                  <p className={`text-sm font-medium ${CHECK_COLOR[c.status]}`}>{c.title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{c.detail}</p>
+              <div key={c.id} className="check-card" style={{ ['--check-accent' as string]: accent }}>
+                <Icon size={16} className="shrink-0 mt-0.5" style={{ color: accent }} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{c.title}</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text3)' }}>{c.detail}</p>
                 </div>
-                <span className="ml-auto text-xs text-gray-400 shrink-0 whitespace-nowrap">{c.value}</span>
+                <span className="text-xs font-bold shrink-0 whitespace-nowrap" style={{ color: accent }}>{c.value}</span>
               </div>
             )
           })}
@@ -148,19 +204,41 @@ export default function PerfiosAnalysisResults({ result, onReset, loanId }: { re
 
       {/* D-G. Detailed report tables */}
       <Card>
-        <div className="flex gap-6 border-b border-gray-200 mb-4">
-          {([
-            ['analysis', 'Transaction Analysis'],
-            ['breakup', 'Breakup'],
-            ['eod', 'EOD / Balance'],
-            ['finone', 'FinOne'],
-          ] as [Tab, string][]).map(([key, label]) => (
-            <button key={key} onClick={() => setTab(key)}
-              className={`pb-3 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-              {label}
-            </button>
-          ))}
-        </div>
+        <SubTabBar
+          className="mb-4"
+          tabs={[
+            { key: 'txn', label: 'Transactions' },
+            { key: 'abb', label: 'ABB / Perfios' },
+            { key: 'target', label: 'Target Dates' },
+            { key: 'salary', label: 'Salary' },
+            { key: 'ach', label: 'ACH' },
+            { key: 'ecs', label: 'ECS' },
+            { key: 'neft', label: 'NEFT/RTGS' },
+            { key: 'upi', label: 'UPI/IMPS' },
+            { key: 'cheque', label: 'Cheque/CTS' },
+            { key: 'bounce', label: 'Bounces' },
+            { key: 'finone', label: 'FinOne' },
+            { key: 'analysis', label: 'Analysis' },
+            { key: 'breakup', label: 'Breakup' },
+            { key: 'eod', label: 'EOD Balances' },
+            { key: 'accounts', label: 'Accounts' },
+            { key: 'validation', label: 'Validation' },
+          ] as { key: Tab; label: string }[]}
+          active={tab}
+          onChange={setTab}
+        />
+
+        {tab === 'txn'        && <TxnTable rows={upload.allTxns}     extra={EXTRA_CATEGORY} emptyLabel="transactions" />}
+        {tab === 'salary'     && <TxnTable rows={upload.salaryTxns}  extra={EXTRA_SALARY}   emptyLabel="salary credits" />}
+        {tab === 'ach'        && <TxnTable rows={upload.achTxns}     extra={EXTRA_ACH}      emptyLabel="ACH transactions" />}
+        {tab === 'ecs'        && <TxnTable rows={upload.ecsTxns}     extra={EXTRA_ECS}      emptyLabel="ECS transactions" />}
+        {tab === 'neft'       && <TxnTable rows={upload.neftTxns}    extra={EXTRA_NEFT}     emptyLabel="NEFT/RTGS transactions" />}
+        {tab === 'upi'        && <TxnTable rows={upload.upiTxns}     extra={EXTRA_UPI}      emptyLabel="UPI/IMPS transactions" />}
+        {tab === 'cheque'     && <TxnTable rows={upload.chequeTxns}  extra={EXTRA_CHEQUE}   emptyLabel="cheque/CTS transactions" />}
+        {tab === 'bounce'     && <TxnTable rows={upload.bounceTxns}  extra={EXTRA_BOUNCE}   emptyLabel="bounces" />}
+        {(tab === 'abb' || tab === 'target') && <TargetDateTable rows={targetRows} />}
+        {tab === 'accounts'   && <AccountsPanel info={upload.accountInfo} />}
+        {tab === 'validation' && <ValidationPanel checks={upload.validChecks} />}
 
         {tab === 'analysis' && (
           <div className="overflow-auto max-h-[520px]">
@@ -303,17 +381,21 @@ export default function PerfiosAnalysisResults({ result, onReset, loanId }: { re
         )}
       </Card>
 
-      <div className="flex items-center gap-3">
-        <Button loading={save.isPending} disabled={save.isPending} onClick={() => { setSaveState('idle'); save.mutate() }}>
-          <Save size={14} className="mr-1.5" />Confirm &amp; Save
-        </Button>
-        <Button variant="secondary" onClick={onReset}><RotateCcw size={14} className="mr-1.5" />Analyze Another Statement</Button>
-      </div>
-      {saveState === 'success' && (
-        <p className="text-sm text-green-600 flex items-center gap-1.5"><CheckCircle2 size={15} />Saved — this is now the loan's latest Perfios report.</p>
-      )}
-      {saveState === 'error' && (
-        <p className="text-sm text-red-600 flex items-center gap-1.5"><XCircle size={15} />Could not save — your analysis results are unchanged, you can retry.</p>
+      {!readOnly && (
+        <>
+          <div className="flex items-center gap-3">
+            <Button loading={save.isPending} disabled={save.isPending} onClick={() => { setSaveState('idle'); save.mutate() }}>
+              <Save size={14} className="mr-1.5" />Confirm &amp; Save
+            </Button>
+            <Button variant="secondary" onClick={onReset}><RotateCcw size={14} className="mr-1.5" />Analyze Another Statement</Button>
+          </div>
+          {saveState === 'success' && (
+            <p className="text-sm flex items-center gap-1.5" style={{ color: 'var(--success)' }}><CheckCircle2 size={15} />Saved — this is now the loan's latest Perfios report.</p>
+          )}
+          {saveState === 'error' && (
+            <p className="text-sm flex items-center gap-1.5" style={{ color: 'var(--danger)' }}><XCircle size={15} />Could not save — your analysis results are unchanged, you can retry.</p>
+          )}
+        </>
       )}
     </div>
   )

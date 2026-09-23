@@ -152,29 +152,29 @@ export function extractAccountInfo(text: string, accountInfo: AccountInfo = {}):
     }
 
     if (!accountInfo.accountNo) {
-      const m = line.match(/(?:A\/C\s*(?:No\.?|Num(?:ber)?)?|Account\s*(?:No\.?|Num(?:ber)?)|Acct\.?\s*(?:No\.?|Num)?|SB\s*A\/C|CA\s*A\/C|OD\s*A\/C|CC\s*A\/C|NRE\s*A\/C|NRO\s*A\/C|FCNR\s*A\/C)[\s:\-]*([0-9Xx]{6,20})/i)
+      const m = line.match(/(?:A\/C\s*(?:No\.?|Num(?:ber)?)?|Account\s*(?:No\.?|Num(?:ber)?)|Acct\.?\s*(?:No\.?|Num)?|SB\s*A\/C|CA\s*A\/C|OD\s*A\/C|CC\s*A\/C|NRE\s*A\/C|NRO\s*A\/C|FCNR\s*A\/C)[\s:-]*([0-9Xx]{6,20})/i)
       if (m) accountInfo.accountNo = m[1].replace(/[Xx]/g, 'x').trim()
     }
 
     if (!accountInfo.ifsc) {
-      const m = line.match(/(?:IFSC|IFS\s*Code|Branch\s*Code)[\s:\-]*([A-Z]{4}0[A-Z0-9]{6})/i)
+      const m = line.match(/(?:IFSC|IFS\s*Code|Branch\s*Code)[\s:-]*([A-Z]{4}0[A-Z0-9]{6})/i)
       if (m) accountInfo.ifsc = m[1].toUpperCase()
     }
 
     if (!accountInfo.micr) {
-      const m = line.match(/(?:MICR|MICR\s*Code)[\s:\-]*([0-9]{9})/i)
+      const m = line.match(/(?:MICR|MICR\s*Code)[\s:-]*([0-9]{9})/i)
       if (m) accountInfo.micr = m[1]
     }
 
     if (!accountInfo.accountType) {
-      const m = line.match(/(?:Account\s*Type|A\/C\s*Type|Type\s*of\s*Account)[\s:\-]+(Savings|Current|Overdraft|Cash\s*Credit|NRE|NRO|FCNR|Recurring|Fixed\s*Deposit)[A-Za-z\s]*/i)
+      const m = line.match(/(?:Account\s*Type|A\/C\s*Type|Type\s*of\s*Account)[\s:-]+(Savings|Current|Overdraft|Cash\s*Credit|NRE|NRO|FCNR|Recurring|Fixed\s*Deposit)[A-Za-z\s]*/i)
       if (m) accountInfo.accountType = m[1].trim()
       else if (/\b(Savings\s*Account|SB\s*Account|Regular\s*Savings)\b/i.test(line)) accountInfo.accountType = 'Savings'
       else if (/\b(Current\s*Account|CA\b)\b/i.test(line)) accountInfo.accountType = 'Current'
     }
 
     if (!accountInfo.branch) {
-      const m = line.match(/(?:Branch\s*(?:Name)?|Home\s*Branch)[\s:\-]+([A-Za-z][A-Za-z\s,\-.]{3,60})/i)
+      const m = line.match(/(?:Branch\s*(?:Name)?|Home\s*Branch)[\s:-]+([A-Za-z][A-Za-z\s,-.]{3,60})/i)
       if (m) accountInfo.branch = m[1].trim().replace(/\s+/g, ' ').slice(0, 60)
     }
 
@@ -198,26 +198,26 @@ export function extractAccountInfo(text: string, accountInfo: AccountInfo = {}):
     }
 
     if (!accountInfo.pan) {
-      const m = line.match(/(?:PAN|Permanent\s*Account\s*Number)[\s:\-]*([A-Z]{5}[0-9]{4}[A-Z])/i)
+      const m = line.match(/(?:PAN|Permanent\s*Account\s*Number)[\s:-]*([A-Z]{5}[0-9]{4}[A-Z])/i)
       if (m) accountInfo.pan = m[1].toUpperCase()
     }
 
     if (!accountInfo.address) {
-      const m = line.match(/(?:Address|Registered\s*Address|Mailing\s*Address|Communication\s*Address)[\s:\-]+(.{15,120})/i)
+      const m = line.match(/(?:Address|Registered\s*Address|Mailing\s*Address|Communication\s*Address)[\s:-]+(.{15,120})/i)
       if (m) accountInfo.address = m[1].trim().replace(/\s+/g, ' ')
     }
 
     if (!accountInfo.cif) {
-      const m = line.match(/(?:CIF\s*(?:No\.?|ID)?|Customer\s*ID|Cust(?:omer)?\s*(?:No\.?|ID))[\s:\-]*([A-Z0-9]{5,16})/i)
+      const m = line.match(/(?:CIF\s*(?:No\.?|ID)?|Customer\s*ID|Cust(?:omer)?\s*(?:No\.?|ID))[\s:-]*([A-Z0-9]{5,16})/i)
       if (m) accountInfo.cif = m[1].trim()
     }
 
     if (!accountInfo.periodFrom) {
-      const m = line.match(/(?:From|Statement\s*From|Period\s*From)[\s:\-]+(\d{1,2}[-/][A-Za-z0-9]{2,3}[-/]\d{2,4})/i)
+      const m = line.match(/(?:From|Statement\s*From|Period\s*From)[\s:-]+(\d{1,2}[-/][A-Za-z0-9]{2,3}[-/]\d{2,4})/i)
       if (m) accountInfo.periodFrom = m[1].trim()
     }
     if (!accountInfo.periodTo) {
-      const m = line.match(/(?:To|Statement\s*To|Period\s*To)[\s:\-]+(\d{1,2}[-/][A-Za-z0-9]{2,3}[-/]\d{2,4})/i)
+      const m = line.match(/(?:To|Statement\s*To|Period\s*To)[\s:-]+(\d{1,2}[-/][A-Za-z0-9]{2,3}[-/]\d{2,4})/i)
       if (m) accountInfo.periodTo = m[1].trim()
     }
   }

@@ -3,10 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/axios'
 import type { ApiResponse, Loan } from '@/types'
 import { emailApi, lenderEmailThreadsApi } from '@/api/lenderEmailApi'
+import { loansApi } from '@/api/loansApi'
 import { aiApi } from '@/api/aiApi'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import { formatDateTime } from '@/utils/format'
 import { buildSubjectAndBody, STAGE_OPTIONS } from '@/utils/lenderEmailTemplates'
+import { SkeletonText } from '@/components/ui/Skeleton'
 
 interface BankRow { id: number; bankName: string; rmName?: string; rmMobile?: string; email?: string }
 
@@ -86,7 +89,34 @@ export default function LenderEmailCard({ loan }: { loan: Loan }) {
   })
 
   const selectedLine = bankLines.find(b => b.id === selectedBankId)
-  const rm = (banks ?? []).find(b => (b.bankName || '').toLowerCase() === (selectedLine?.bankName || '').toLowerCase())
+  const bankRm = (banks ?? []).find(b => (b.bankName || '').toLowerCase() === (selectedLine?.bankName || '').toLowerCase())
+  // Effective RM = per-loan override (Update Lender RM) when set, else the
+  // master Bank/NBFC RM. Mirrors Vanilla's app.lender_rm_override precedence
+  // (_getLenderRm: override first). This lets Send Enquiry work even when the
+  // bank master has no RM email, or when a different contact is used here.
+  const rm: BankRow | undefined = loan.lenderRmEmail
+    ? { id: -1, bankName: selectedLine?.bankName || 'Lender', rmName: loan.lenderRmName || undefined, rmMobile: loan.lenderRmMobile || undefined, email: loan.lenderRmEmail }
+    : bankRm
+
+  // ── Update Lender RM (per-loan override) modal ──
+  const [showRmModal, setShowRmModal] = useState(false)
+  const [rmForm, setRmForm] = useState({ rmName: '', rmEmail: '', rmMobile: '' })
+  const openRmModal = () => {
+    setRmForm({
+      rmName: loan.lenderRmName || bankRm?.rmName || '',
+      rmEmail: loan.lenderRmEmail || bankRm?.email || '',
+      rmMobile: loan.lenderRmMobile || bankRm?.rmMobile || '',
+    })
+    setShowRmModal(true)
+  }
+  const saveRm = useMutation({
+    mutationFn: () => loansApi.updateLenderRm(loan.id, rmForm),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['loans', 'detail', loan.id] })
+      qc.invalidateQueries({ queryKey: ['lenderEmailThread', loan.id] })
+      setShowRmModal(false)
+    },
+  })
 
   function draft() {
     const { subject: s, html } = buildSubjectAndBody(loan, rm?.rmName || '', stageKey)
@@ -125,6 +155,7 @@ export default function LenderEmailCard({ loan }: { loan: Loan }) {
   // manual review only, per the "do not overwrite loan data unless the
   // backend explicitly supports it" rule.
   const [rawReply, setRawReply] = useState('')
+  const [replyFromEmail, setReplyFromEmail] = useState('')
   const [parsed, setParsed] = useState<ParsedBankReply | null>(null)
   const [parseError, setParseError] = useState('')
 
@@ -134,9 +165,15 @@ export default function LenderEmailCard({ loan }: { loan: Loan }) {
       if (!res.data.success || !res.data.text) throw new Error(res.data.error || 'AI parsing failed')
       const clean = res.data.text.trim().replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim()
       const data: ParsedBankReply = JSON.parse(clean)
+      // Sender Email is legacy's optional "who actually replied" field
+      // (lew-reply-from, lender-email-workflow.js openLogReplyModal) — the
+      // reply may come from a different address than the RM on file, so
+      // legacy does NOT fall back to the master RM record here, only to the
+      // literal string '(unknown)' (logBankReply → _appendThread:
+      // `rmEmail: rmEmail || '(unknown)'`). Reproduced exactly.
       await lenderEmailThreadsApi.addEntry({
         loanApplicationId: loan.id, direction: 'received', stage: loan.status,
-        rmEmail: rm?.email, subject: '(inbound reply)', bodyText: rawReply.slice(0, 800),
+        rmEmail: replyFromEmail.trim() || '(unknown)', subject: '(inbound reply)', bodyText: rawReply.slice(0, 800),
         source: 'manual_paste',
       })
       return data
@@ -151,14 +188,82 @@ export default function LenderEmailCard({ loan }: { loan: Loan }) {
     },
   })
 
+  // ── Vanilla-style LENDER EMAIL bar (efin-app.js #lew-action-bar, 3188-3210)
+  // A gradient header bar with the 🏦 label, an RM pill (blue when an RM email
+  // is on file, amber warning otherwise) and the four workflow buttons —
+  // Send Enquiry / Log Bank Reply / View Thread / Update Lender RM. Reproduces
+  // Vanilla's exact colours/spacing; the buttons drive the existing React
+  // draft/reply/thread surface below (scroll-to), so no functionality is lost.
+  const threadCount = thread?.length ?? 0
+  const lewBtn = (bg: string, fg: string, border: string): React.CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', gap: 5, background: bg, color: fg,
+    border, borderRadius: 8, padding: '7px 13px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+  })
+  const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const lewBar = (
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '12px 16px',
+      marginBottom: 14, background: 'linear-gradient(135deg,#F0F7FF,#E8F4FD)',
+      border: '1.5px solid rgba(0,71,171,.15)', borderRadius: 12,
+    }}>
+      <span style={{ fontSize: 10.5, fontWeight: 800, color: '#0047AB', textTransform: 'uppercase', letterSpacing: 1, marginRight: 2 }}>🏦 Lender Email</span>
+      {rm?.email
+        ? <span style={{ background: '#E8F4FD', color: '#0047AB', border: '1px solid rgba(0,71,171,.2)', borderRadius: 100, padding: '3px 10px', fontSize: 11, fontWeight: 600 }}>📧 {rm.rmName || rm.bankName}</span>
+        : <span style={{ background: '#FFF3E8', color: '#c05000', border: '1px solid rgba(192,80,0,.25)', borderRadius: 100, padding: '3px 10px', fontSize: 11, fontWeight: 600 }}>⚠ No RM Email — Click Update Lender RM</span>}
+      {threadCount > 0 && <span style={{ background: '#E8F5EE', color: '#1a6b4a', border: '1px solid rgba(26,107,74,.2)', borderRadius: 100, padding: '3px 10px', fontSize: 11, fontWeight: 600 }}>{threadCount} email(s) logged</span>}
+      <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexWrap: 'wrap' }}>
+        <button type="button" onClick={() => { if (selectedLine) { draft() } scrollTo('lew-compose') }} style={lewBtn('#0047AB', '#fff', 'none')}>✉ Send Enquiry</button>
+        <button type="button" onClick={() => scrollTo('lew-reply')} style={lewBtn('#1a6b4a', '#fff', 'none')}>📥 Log Bank Reply</button>
+        <button type="button" onClick={() => scrollTo('lew-thread')} style={lewBtn('#fff', '#0047AB', '1.5px solid rgba(0,71,171,.3)')}>💬 View Thread</button>
+        <button type="button" onClick={openRmModal} style={lewBtn('#fff', '#4a5568', '1.5px solid rgba(0,71,171,.2)')}>👤 Update Lender RM</button>
+      </div>
+      {showRmModal && (
+        <Modal open onClose={() => setShowRmModal(false)} title="Update Lender RM Details"
+          subtitle={`${loan.loanNumber} · ${selectedLine?.bankName || 'Lender'}`} size="md"
+          footer={<>
+            <Button variant="secondary" onClick={() => setShowRmModal(false)}>Cancel</Button>
+            <Button loading={saveRm.isPending} disabled={!rmForm.rmName.trim() || !rmForm.rmEmail.trim()} onClick={() => saveRm.mutate()}>Save RM Details</Button>
+          </>}>
+          <div className="rounded-lg border px-3 py-2 text-xs mb-4" style={{ background: '#fff8e1', borderColor: '#f59e0b', color: '#7a4f00' }}>
+            ⚠ This update applies only to this application and does not change the master Bank/NBFC record.
+          </div>
+          <div className="grid gap-3">
+            <div>
+              <label className="text-xs font-semibold text-gray-600 block mb-1">RM Name *</label>
+              <input value={rmForm.rmName} onChange={e => setRmForm(f => ({ ...f, rmName: e.target.value }))}
+                placeholder="e.g. Deepak Mehta" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-600 block mb-1">RM Email *</label>
+              <input type="email" value={rmForm.rmEmail} onChange={e => setRmForm(f => ({ ...f, rmEmail: e.target.value }))}
+                placeholder="rm@bank.com" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-600 block mb-1">RM Mobile</label>
+              <input type="tel" value={rmForm.rmMobile} onChange={e => setRmForm(f => ({ ...f, rmMobile: e.target.value }))}
+                placeholder="9876543210" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            {saveRm.isError && <p className="text-xs text-red-600">Could not save RM details. Please try again.</p>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+
   if (bankLines.length === 0) {
-    return <p className="text-sm text-gray-400 py-4">No lender/bank submission on this loan yet — add a bank line first.</p>
+    return (
+      <div>
+        {lewBar}
+        <p className="text-sm text-gray-400 py-2">No lender/bank submission on this loan yet — add a bank line first to send enquiries.</p>
+      </div>
+    )
   }
 
   return (
     <div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-        <div>
+      {lewBar}
+      <div id="lew-compose" className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div id="lew-rm">
           <label className="text-xs font-medium text-gray-600 block mb-1">Lender / Bank</label>
           <select value={selectedBankId} onChange={e => { setSelectedBankId(Number(e.target.value)); setDrafted(false) }}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
@@ -193,15 +298,19 @@ export default function LenderEmailCard({ loan }: { loan: Loan }) {
           {result && (
             <p className={`text-xs mb-2 ${result.ok ? 'text-green-600' : 'text-red-600'}`}>{result.message}</p>
           )}
-          <div className="flex gap-2">
+          <div className="flex justify-end gap-2">
             <Button size="sm" loading={send.isPending} disabled={!rm?.email} onClick={() => send.mutate()}>Send</Button>
             <Button size="sm" variant="secondary" onClick={() => setDrafted(false)}>Cancel</Button>
           </div>
         </div>
       )}
 
-      <div className="mt-6 pt-4 border-t border-gray-100">
+      <div id="lew-reply" className="mt-6 pt-4 border-t border-gray-100">
         <p className="text-xs font-semibold text-gray-600 mb-2">Log Bank Reply</p>
+        <label className="text-xs font-medium text-gray-600 block mb-1">Sender Email (optional)</label>
+        <input type="email" value={replyFromEmail} onChange={e => setReplyFromEmail(e.target.value)}
+          placeholder="rm@bank.com"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs mb-2" />
         <textarea value={rawReply} onChange={e => setRawReply(e.target.value)} rows={4}
           placeholder="Paste the raw email reply from the bank/lender here…"
           className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs mb-2" />
@@ -223,10 +332,10 @@ export default function LenderEmailCard({ loan }: { loan: Loan }) {
         )}
       </div>
 
-      <div className="mt-6">
+      <div id="lew-thread" className="mt-6">
         <p className="text-xs font-semibold text-gray-600 mb-2">Email Thread</p>
         {threadLoading ? (
-          <p className="text-sm text-gray-400">Loading…</p>
+          <SkeletonText lines={3} className="py-2" />
         ) : !thread || thread.length === 0 ? (
           <p className="text-sm text-gray-400">No emails logged for this loan yet.</p>
         ) : (
@@ -234,7 +343,7 @@ export default function LenderEmailCard({ loan }: { loan: Loan }) {
             {thread.map(t => (
               <div key={t.id} className="p-3 border border-gray-200 rounded-lg text-xs">
                 <div className="flex items-center justify-between mb-1">
-                  <span className={`font-semibold ${t.direction === 'sent' ? 'text-blue-600' : 'text-green-600'}`}>
+                  <span className={`font-semibold ${t.direction === 'sent' ? 'text-efin-blue' : 'text-green-600'}`}>
                     {t.direction === 'sent' ? '→ Sent' : '← Received'}{t.stage ? ` · ${t.stage}` : ''}
                   </span>
                   <span className="text-gray-400">{formatDateTime(t.createdAt)}</span>

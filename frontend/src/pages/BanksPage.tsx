@@ -6,12 +6,19 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import DataTable, { type Column } from '@/components/shared/DataTable'
 import PageHeader from '@/components/shared/PageHeader'
-import { Plus, Trash2, Pencil, Download } from 'lucide-react'
+import { Badge } from '@/components/ui/Badge'
+import BulkUploadBanksModal from '@/components/shared/BulkUploadBanksModal'
+import { Plus, Trash2, Pencil, Download, Upload } from 'lucide-react'
 import { buildCsv, downloadCsv } from '@/utils/loanExport'
+import { useAuthStore } from '@/store/authStore'
 
 interface Bank {
   id: number; bankName: string; ifscPrefix?: string; empCode?: string
   location?: string; rmName?: string; rmMobile?: string; email?: string; remarks?: string
+  // Lender flags — legacy's bank-detail InCred + Mudrahub (Elite) checkboxes
+  // (efin-app.js laSaveBankDetails). Backend BankDto/BanksController already
+  // persist these; the form just never exposed them.
+  isIncred?: boolean; isElite?: boolean
 }
 
 export default function BanksPage() {
@@ -21,9 +28,18 @@ export default function BanksPage() {
   // form is creating a new bank (null) or editing an existing one (its id).
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<Partial<Bank>>({})
+  const [showBulk, setShowBulk] = useState(false)
   const qc = useQueryClient()
 
-  const { data: banks, isLoading } = useQuery({
+  // PHASE 5 FIX: this page offered Add / Edit / Delete / Bulk Upload to every
+  // role, but BanksController gates all three mutations to Admin + ProductTeam
+  // (and legacy saveBank/editBank/deleteBank refused non-admins outright), so a
+  // Manager or Sales user could fill in the whole form and only discover the
+  // block on submit, as a bare 403. Same gate LenderConfigPage already uses.
+  const user = useAuthStore(s => s.user)
+  const canManage = user?.role === 'Admin' || user?.role === 'ProductTeam'
+
+  const { data: banks, isLoading, error, refetch } = useQuery({
     queryKey: ['banks'],
     queryFn: () => api.get<ApiResponse<Bank[]>>('/api/banks').then(r => r.data.data ?? []),
     staleTime: 120_000,
@@ -43,6 +59,16 @@ export default function BanksPage() {
     mutationFn: (id: number) => api.delete(`/api/banks/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['banks'] }),
   })
+
+  // Server-side rejections (duplicate name, 403) were swallowed entirely — the
+  // form just sat there on failure with no indication anything went wrong.
+  const mutErr = (create.error ?? update.error ?? remove.error) as
+    { response?: { data?: { message?: string; errors?: string[] } } } | null | undefined
+  const mutErrText = mutErr
+    ? mutErr.response?.data?.message
+      ?? mutErr.response?.data?.errors?.join(' ')
+      ?? 'Could not save the bank. Please try again.'
+    : ''
 
   function openCreate() {
     setEditingId(null)
@@ -83,37 +109,59 @@ export default function BanksPage() {
   ]
 
   const columns: Column<Bank>[] = [
-    { key: 'bankName',  label: 'Bank Name', render: b => <span className="font-medium">{b.bankName}</span> },
-    { key: 'ifscPrefix',label: 'IFSC', render: b => <span className="font-mono text-xs">{b.ifscPrefix ?? '—'}</span> },
-    { key: 'empCode',   label: 'Emp Code', render: b => b.empCode ?? '—' },
-    { key: 'location',  label: 'Location', render: b => b.location ?? '—' },
-    { key: 'rmName',    label: 'RM Name',  render: b => (
+    { key: 'bankName',  label: 'Bank Name', sortable: true, render: b => (
+      <span className="font-medium inline-flex items-center gap-1.5">
+        {b.bankName}
+        {b.isIncred && <Badge variant="info">InCred</Badge>}
+        {b.isElite && <Badge variant="warning">Mudrahub</Badge>}
+      </span>
+    )},
+    { key: 'ifscPrefix',label: 'IFSC', sortable: true, render: b => <span className="font-mono text-xs">{b.ifscPrefix ?? '—'}</span> },
+    { key: 'empCode',   label: 'Emp Code', sortable: true, render: b => b.empCode ?? '—' },
+    { key: 'location',  label: 'Location', sortable: true, render: b => b.location ?? '—' },
+    { key: 'rmName',    label: 'RM Name', sortable: true, render: b => (
       <div><p className="text-sm">{b.rmName ?? '—'}</p><p className="text-xs text-gray-500">{b.rmMobile ?? ''}</p></div>
     )},
-    { key: 'email',     label: 'Email',    render: b => b.email ?? '—' },
-    { key: 'actions',   label: '', render: b => (
+    { key: 'email',     label: 'Email', sortable: true, render: b => b.email ?? '—' },
+    // Remarks was the one legacy renderBanksTable column with no React
+    // equivalent — it was captured in the form and exported to CSV, but never
+    // shown back in the grid.
+    { key: 'remarks',   label: 'Remarks', render: b => (
+      <span className="text-xs text-gray-500" title={b.remarks ?? ''}>{b.remarks ?? '—'}</span>
+    )},
+    ...(canManage ? [{ key: 'actions', label: '', render: (b: Bank) => (
       <div className="flex gap-1">
-        <button onClick={() => openEdit(b)} className="text-gray-400 hover:text-gray-700 p-1">
+        <button onClick={() => openEdit(b)} className="text-gray-400 hover:text-gray-700 p-1" title="Edit bank">
           <Pencil size={14} />
         </button>
-        <button onClick={() => remove.mutate(b.id)} className="text-red-400 hover:text-red-600 p-1">
+        <button
+          title="Delete bank"
+          onClick={() => { if (confirm(`Remove bank "${b.bankName}"? This cannot be undone.`)) remove.mutate(b.id) }}
+          className="text-red-400 hover:text-red-600 p-1">
           <Trash2 size={14} />
         </button>
       </div>
-    )},
+    )}] as Column<Bank>[] : []),
   ]
 
   return (
     <div>
-      <PageHeader title="Banks" subtitle={`${banks?.length ?? 0} banks`}
+      <PageHeader title="Banks & NBFCs" subtitle="Manage lending partners"
         action={
           <div className="flex items-center gap-2">
             <Button size="sm" variant="secondary" disabled={!banks?.length} onClick={exportCsv}>
               <Download size={14} className="mr-1" />Export CSV
             </Button>
-            <Button size="sm" onClick={openCreate}><Plus size={14} className="mr-1" />Add Bank</Button>
+            {canManage && (
+              <Button size="sm" variant="secondary" onClick={() => setShowBulk(true)}>
+                <Upload size={14} className="mr-1" />Bulk Upload
+              </Button>
+            )}
+            {canManage && <Button size="sm" onClick={openCreate}><Plus size={14} className="mr-1" />Add Bank</Button>}
           </div>
         } />
+
+      {showBulk && <BulkUploadBanksModal onClose={() => setShowBulk(false)} />}
 
       {showForm && (
         <Card className="mb-5 p-5">
@@ -129,7 +177,24 @@ export default function BanksPage() {
               </div>
             ))}
           </div>
-          <div className="flex gap-2">
+          {/* Lender flags — legacy bank-detail InCred + Mudrahub toggles
+              (efin-app.js laSaveBankDetails). Persist to BankDto.IsIncred/IsElite. */}
+          <div className="flex flex-wrap items-center gap-6 mb-4">
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={!!form.isIncred}
+                onChange={e => setForm(p => ({ ...p, isIncred: e.target.checked }))} />
+              InCred lender
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={!!form.isElite}
+                onChange={e => setForm(p => ({ ...p, isElite: e.target.checked }))} />
+              Mudrahub (Elite) lender
+            </label>
+          </div>
+          {mutErrText && (
+            <p className="text-xs mb-3" style={{ color: 'var(--danger)' }}>{mutErrText}</p>
+          )}
+          <div className="flex justify-end gap-2">
             <Button size="sm" loading={editingId ? update.isPending : create.isPending}
               onClick={() => editingId ? update.mutate() : create.mutate()}>
               {editingId ? 'Save Changes' : 'Save'}
@@ -138,7 +203,7 @@ export default function BanksPage() {
           </div>
         </Card>
       )}
-      <Card><DataTable columns={columns} data={banks} isLoading={isLoading} /></Card>
+      <Card><DataTable columns={columns} data={banks} isLoading={isLoading} error={error} onRetry={() => refetch()} /></Card>
     </div>
   )
 }

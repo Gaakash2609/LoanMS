@@ -4,9 +4,11 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { useAuthStore } from '@/store/authStore'
 import { ChevronDown, ChevronUp, Pencil, Trash2 } from 'lucide-react'
+import { SkeletonText } from '@/components/ui/Skeleton'
 import {
   productOfferMatrixApi, PP_PRODUCTS, PP_DEFAULTS, type OfferBand,
 } from '@/api/productOfferMatrixApi'
+import { NumberInput } from '@/components/ui/NumberInput'
 
 function fmtK(v: number) {
   const k = v / 1000
@@ -130,7 +132,7 @@ export default function ProductOfferMatrixCard() {
       <p className="text-sm text-gray-500 mb-4">Per-product First Offer income bands, rates, tenure &amp; FOIR caps</p>
 
       {isLoading ? (
-        <p className="text-sm text-gray-400 py-4">Loading…</p>
+        <SkeletonText lines={3} className="py-2" />
       ) : (
         <div className="flex flex-col gap-3">
           {PP_PRODUCTS.map(p => {
@@ -138,21 +140,41 @@ export default function ProductOfferMatrixCard() {
             const mx = matrixFor(p.key)
             const editIdx = editingIdx[p.key] ?? -1
             const incLbl = p.key === 'insurance' ? 'Annual Inc.' : 'Income Band'
+            // Legacy (product-offer-matrix.js ppRenderProductMatrixCards) renders
+            // each of these as its own 16px-radius card with a 40x40 gradient
+            // icon box (per-product `p.color` pair) and an ADMIN ONLY chip at
+            // rgba(212,43,43,.1) bg / var(--accent2) text -- React had the
+            // right radius on the table below but a plain `rounded-xl` (12px)
+            // card, a bare emoji with no icon box at all (the gradient `color`
+            // field already exists on PP_PRODUCTS/ProductInfo and was simply
+            // never read), and a stock red-50/red-600 badge. All three ported
+            // to the confirmed legacy values below.
+            const [c1, c2] = p.color.split(',')
             return (
-              <div key={p.key} className="border border-gray-200 rounded-xl overflow-hidden">
+              <div key={p.key} className="border border-gray-200 rounded-2xl overflow-hidden">
                 <button onClick={() => toggle(p.key)}
-                  className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-gray-50">
-                  <span className="text-xl">{p.icon}</span>
+                  className="w-full flex items-center gap-3.5 px-6 py-[18px] text-left hover:bg-gray-50">
+                  <div
+                    className="w-10 h-10 rounded-[10px] flex items-center justify-center text-xl shrink-0"
+                    style={{ background: `linear-gradient(135deg, ${c1}, ${c2 || c1})` }}
+                  >
+                    {p.icon}
+                  </div>
                   <div className="flex-1">
                     <p className="text-sm font-bold text-gray-900">{p.name} — First Offer Matrix</p>
                     <p className="text-xs text-gray-500">{p.desc} · Edit income bands, rates, tenure &amp; FOIR caps</p>
                   </div>
-                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-red-50 text-red-600">ADMIN ONLY</span>
+                  <span
+                    className="text-[10.5px] font-bold px-2.5 py-[3px] rounded-full tracking-[.3px]"
+                    style={{ background: 'rgba(212, 43, 43, .1)', color: 'var(--accent2)' }}
+                  >
+                    ADMIN ONLY
+                  </span>
                   {isOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
                 </button>
 
                 {isOpen && (
-                  <div className="px-5 py-4 border-t border-gray-200">
+                  <div className="px-6 py-5 border-t border-gray-200">
                     <div className="overflow-x-auto rounded-lg border border-gray-200">
                       <table className="w-full text-xs">
                         <thead>
@@ -170,22 +192,26 @@ export default function ProductOfferMatrixCard() {
                         </thead>
                         <tbody>
                           {mx.map((r, i) => editIdx === i ? (
-                            <tr key={i} className="bg-blue-50 border-b border-gray-100">
+                            // Row border: legacy is `1px solid var(--border)`,
+                            // which is gray-200 in this app's remap -- gray-100
+                            // resolves to --surface3 instead, a step lighter.
+                            <tr key={i} className="bg-efin-blue/10 border-b border-gray-200">
                               <td className="p-1.5"><input value={editRow.label} onChange={e => setEditRow(v => ({ ...v, label: e.target.value }))} className="w-24 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
-                              <td className="p-1.5"><input type="number" value={editRow.salMin} onChange={e => setEditRow(v => ({ ...v, salMin: e.target.value }))} className="w-20 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
-                              <td className="p-1.5"><input type="number" value={editRow.salMax} onChange={e => setEditRow(v => ({ ...v, salMax: e.target.value }))} className="w-20 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
-                              <td className="p-1.5"><input type="number" value={editRow.rateMin} onChange={e => setEditRow(v => ({ ...v, rateMin: e.target.value }))} className="w-14 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
-                              <td className="p-1.5"><input type="number" value={editRow.rateMax} onChange={e => setEditRow(v => ({ ...v, rateMax: e.target.value }))} className="w-14 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
-                              <td className="p-1.5"><input type="number" value={editRow.tenMin} onChange={e => setEditRow(v => ({ ...v, tenMin: e.target.value }))} className="w-14 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
-                              <td className="p-1.5"><input type="number" value={editRow.tenMax} onChange={e => setEditRow(v => ({ ...v, tenMax: e.target.value }))} className="w-14 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
-                              <td className="p-1.5 text-right"><input type="number" value={editRow.foir} onChange={e => setEditRow(v => ({ ...v, foir: e.target.value }))} className="w-12 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
+                              <td className="p-1.5"><NumberInput value={editRow.salMin} onChange={e => setEditRow(v => ({ ...v, salMin: e.target.value }))} className="w-20 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
+                              <td className="p-1.5"><NumberInput value={editRow.salMax} onChange={e => setEditRow(v => ({ ...v, salMax: e.target.value }))} className="w-20 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
+                              <td className="p-1.5"><NumberInput value={editRow.rateMin} onChange={e => setEditRow(v => ({ ...v, rateMin: e.target.value }))} className="w-14 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
+                              <td className="p-1.5"><NumberInput value={editRow.rateMax} onChange={e => setEditRow(v => ({ ...v, rateMax: e.target.value }))} className="w-14 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
+                              <td className="p-1.5"><NumberInput value={editRow.tenMin} onChange={e => setEditRow(v => ({ ...v, tenMin: e.target.value }))} className="w-14 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
+                              <td className="p-1.5"><NumberInput value={editRow.tenMax} onChange={e => setEditRow(v => ({ ...v, tenMax: e.target.value }))} className="w-14 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
+                              <td className="p-1.5 text-right"><NumberInput value={editRow.foir} onChange={e => setEditRow(v => ({ ...v, foir: e.target.value }))} className="w-12 border border-efin-blue rounded px-1.5 py-1 text-xs" /></td>
                               <td className="p-1.5 text-center whitespace-nowrap">
-                                <button onClick={() => saveRow(p.key, i)} className="text-xs font-semibold text-green-600 mr-2">✓ Save</button>
+                                {/* Legacy's inline "✓ Save" is color: var(--success) -- confirmed exact match. */}
+                                <button onClick={() => saveRow(p.key, i)} className="text-xs font-semibold text-[color:var(--success)] mr-2">✓ Save</button>
                                 <button onClick={() => cancelEdit(p.key)} className="text-xs text-gray-400">✕</button>
                               </td>
                             </tr>
                           ) : (
-                            <tr key={i} className={i % 2 === 0 ? 'bg-gray-50 border-b border-gray-100' : 'bg-white border-b border-gray-100'}>
+                            <tr key={i} className={i % 2 === 0 ? 'bg-gray-50 border-b border-gray-200' : 'bg-white border-b border-gray-200'}>
                               <td className="px-3 py-2 font-semibold text-gray-700">{r.label}</td>
                               <td className="px-3 py-2 text-gray-600">₹{fmtK(r.salaryMin)}</td>
                               <td className="px-3 py-2 text-gray-600">₹{fmtK(r.salaryMax)}</td>
@@ -196,7 +222,7 @@ export default function ProductOfferMatrixCard() {
                               <td className="px-3 py-2 text-right font-bold text-efin-blue">{Math.round(r.foir * 100)}%</td>
                               <td className="px-3 py-2 text-center whitespace-nowrap">
                                 <button onClick={() => startEdit(p.key, i)} className="text-gray-400 hover:text-gray-700 p-1"><Pencil size={13} /></button>
-                                <button onClick={() => deleteRow(p.key, i)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={13} /></button>
+                                <button onClick={() => deleteRow(p.key, i)} className="text-[color:var(--danger)] opacity-70 hover:opacity-100 p-1"><Trash2 size={13} /></button>
                               </td>
                             </tr>
                           ))}
@@ -208,13 +234,13 @@ export default function ProductOfferMatrixCard() {
                       <p className="text-[11px] font-bold text-efin-blue uppercase tracking-wide mb-2">+ Add New Income Band</p>
                       <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2 items-end">
                         <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Band Label</label><input value={addRow.label} onChange={e => setAddRow(v => ({ ...v, label: e.target.value }))} placeholder="30K to 50K" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
-                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Min Income (₹)</label><input type="number" value={addRow.salMin} onChange={e => setAddRow(v => ({ ...v, salMin: e.target.value }))} placeholder="30000" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
-                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Max Income (₹)</label><input type="number" value={addRow.salMax} onChange={e => setAddRow(v => ({ ...v, salMax: e.target.value }))} placeholder="50000" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
-                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Rate Min %</label><input type="number" value={addRow.rateMin} onChange={e => setAddRow(v => ({ ...v, rateMin: e.target.value }))} placeholder="11" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
-                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Rate Max %</label><input type="number" value={addRow.rateMax} onChange={e => setAddRow(v => ({ ...v, rateMax: e.target.value }))} placeholder="15" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
-                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Ten. Min (M)</label><input type="number" value={addRow.tenMin} onChange={e => setAddRow(v => ({ ...v, tenMin: e.target.value }))} placeholder="12" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
-                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Ten. Max (M)</label><input type="number" value={addRow.tenMax} onChange={e => setAddRow(v => ({ ...v, tenMax: e.target.value }))} placeholder="60" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
-                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">FOIR %</label><input type="number" value={addRow.foir} onChange={e => setAddRow(v => ({ ...v, foir: e.target.value }))} placeholder="50" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
+                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Min Income (₹)</label><NumberInput value={addRow.salMin} onChange={e => setAddRow(v => ({ ...v, salMin: e.target.value }))} placeholder="30000" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
+                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Max Income (₹)</label><NumberInput value={addRow.salMax} onChange={e => setAddRow(v => ({ ...v, salMax: e.target.value }))} placeholder="50000" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
+                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Rate Min %</label><NumberInput value={addRow.rateMin} onChange={e => setAddRow(v => ({ ...v, rateMin: e.target.value }))} placeholder="11" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
+                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Rate Max %</label><NumberInput value={addRow.rateMax} onChange={e => setAddRow(v => ({ ...v, rateMax: e.target.value }))} placeholder="15" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
+                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Ten. Min (M)</label><NumberInput value={addRow.tenMin} onChange={e => setAddRow(v => ({ ...v, tenMin: e.target.value }))} placeholder="12" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
+                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">Ten. Max (M)</label><NumberInput value={addRow.tenMax} onChange={e => setAddRow(v => ({ ...v, tenMax: e.target.value }))} placeholder="60" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
+                        <div><label className="text-[10px] font-bold text-gray-400 block mb-1">FOIR %</label><NumberInput value={addRow.foir} onChange={e => setAddRow(v => ({ ...v, foir: e.target.value }))} placeholder="50" className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs" /></div>
                       </div>
                       <Button size="sm" className="mt-2.5" onClick={() => addNewRow(p.key)}>+ Add Band</Button>
                     </div>
@@ -222,7 +248,7 @@ export default function ProductOfferMatrixCard() {
                     <div className="mt-3 flex items-center gap-3 flex-wrap">
                       <Button size="sm" loading={save.isPending && save.variables === p.key} onClick={() => save.mutate(p.key)}>✓ Save Matrix</Button>
                       <Button size="sm" variant="ghost" onClick={() => resetToDefaults(p.key)}>↺ Reset to Defaults</Button>
-                      {savedFlash === p.key && <span className="text-xs font-semibold text-green-600">✓ Saved</span>}
+                      {savedFlash === p.key && <span className="text-xs font-semibold text-[color:var(--success)]">✓ Saved</span>}
                     </div>
                     <p className="mt-2 text-xs text-gray-400">💡 Saved to the database — Income bands for <strong>{p.name}</strong> First Offer calculator apply for every user.</p>
                   </div>

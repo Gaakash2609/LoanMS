@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using LoanMS.Tests.TestHelpers;
 
 namespace LoanMS.Tests.Controllers;
 
@@ -65,7 +66,7 @@ public class ProductLenderAccessControlTests
             new BankMaster { Id = 2, BankName = "Bank B", CreatedByUserId = 6 });
         await db.SaveChangesAsync();
 
-        var controller = new BanksController(db) { ControllerContext = ContextFor("Admin") };
+        var controller = new BanksController(db, RolePermissionTestDouble.AllowAll()) { ControllerContext = ContextFor("Admin") };
         var result = (OkObjectResult)await controller.GetAll();
         var response = (ApiResponseDto<object>)result.Value!;
         var ids = ((IEnumerable<object>)response.Data!)
@@ -90,7 +91,7 @@ public class ProductLenderAccessControlTests
             new BankMaster { Id = 2, BankName = "Bank B", CreatedByUserId = 6 });
         await db.SaveChangesAsync();
 
-        var controller = new BanksController(db) { ControllerContext = ContextFor("Sales", userId: 5) };
+        var controller = new BanksController(db, RolePermissionTestDouble.AllowAll()) { ControllerContext = ContextFor("Sales", userId: 5) };
         var result = (OkObjectResult)await controller.GetAll();
         var response = (ApiResponseDto<object>)result.Value!;
         var ids = ((IEnumerable<object>)response.Data!)

@@ -45,4 +45,12 @@ public class LocalFileStorageService : IFileStorageService
         var fullPath = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
         return Task.FromResult(File.Exists(fullPath));
     }
+
+    public Task DeleteAsync(string key, CancellationToken ct = default)
+    {
+        var fullPath = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
+        // Idempotent — a missing file is not an error (matches S3's behavior).
+        if (File.Exists(fullPath)) File.Delete(fullPath);
+        return Task.CompletedTask;
+    }
 }

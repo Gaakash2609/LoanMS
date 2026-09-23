@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { loansApi } from '@/api/loansApi'
-import type { CreateLoanRequest, LoanFilter } from '@/types'
+import type { CreateLoanRequest, LoanFilter, LoanListItem } from '@/types'
 import api from '@/api/axios'
 import type { ApiResponse } from '@/types'
 import { emailApi, lenderEmailThreadsApi } from '@/api/lenderEmailApi'
 import { buildSubjectAndBody, STATUS_TO_STAGE_KEY, AUTO_EMAIL_TRIGGER_STAGES } from '@/utils/lenderEmailTemplates'
+import { fetchAllPages } from '@/utils/fetchAllPages'
 
 export const LOAN_KEYS = {
   all:       ['loans'] as const,
@@ -39,6 +40,40 @@ export function useDashboard() {
     queryFn:          () => loansApi.getDashboard().then((r) => r.data.data),
     staleTime:        60_000,
     refetchInterval:  120_000,
+  })
+}
+
+// ── Dashboard breakdown (Pipeline stage bars / Monthly Disbursals / Loan
+// Type Mix) ──────────────────────────────────────────────────────────────
+// DashboardController only returns aggregate totals — it has no per-stage,
+// per-month, or per-loan-type breakdown endpoint, and the API surface is
+// locked for this pass. Legacy computed all three of these client-side from
+// the full in-browser APPLICATIONS array (efin-app.js renderPipeline() /
+// renderChart() / renderLoanTypeChart()); this does the same thing, off the
+// existing GET /api/loans list endpoint, so no backend change is needed and
+// server-side visibility scoping (ApplyVisibilityScope) still applies since
+// it's the same endpoint every other loan read uses.
+//
+// BUGFIX (Phase 9 code-level audit) — this used to request a single page of
+// `pageSize: 1000`. LoansController.GetAll clamps PageSize server-side to
+// the server's own [1,100] range and falls back to 10 for anything outside
+// it (`if (filter.PageSize is < 1 or > 100) filter.PageSize = 10;`), so the
+// "1000" was silently reset to 10 on every request — Pipeline/Monthly
+// Disbursals/Loan Type Mix only ever reflected the 10 most recently created
+// loans, incomplete at any dataset size, not just past 1000. Paging through
+// the same endpoint at the server's real maximum (100) via fetchAllPages()
+// and concatenating every page fixes that at any loan count, still off the
+// one existing GET /api/loans endpoint — no duplicate/new endpoint added.
+export function useDashboardBreakdown() {
+  return useQuery({
+    queryKey: ['loans', 'dashboard-breakdown'],
+    queryFn:  () =>
+      fetchAllPages<LoanListItem>(
+        (page, pageSize) => loansApi.getAll({ page, pageSize }).then((r) =>
+          r.data.data ?? { items: [], totalCount: 0, page, pageSize, totalPages: 0, hasNext: false, hasPrev: false }),
+        100,
+      ),
+    staleTime: 60_000,
   })
 }
 

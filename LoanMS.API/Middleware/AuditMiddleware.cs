@@ -118,12 +118,17 @@ public class AuditMiddleware
             // Mask PII before storing — never write raw PAN / Aadhaar / passwords to audit log
             var maskedBody = MaskPiiFields(bodyString);
 
+            // G-23: lift a top-level reason/comment into the structured Reason
+            // column (read from the pre-mask body — reason/comment are not PII).
+            var reason = ExtractReason(bodyString);
+
             var entry = new AuditLog
             {
                 EntityName = Capitalize(entityName),
                 Action     = action,
                 EntityId   = entityId,
                 NewValues  = TruncateJson(maskedBody, 2000),
+                Reason     = reason,
                 UserName   = userName,
                 UserId     = userId,
                 IpAddress  = ip,
@@ -187,6 +192,36 @@ public class AuditMiddleware
             // If regex fails for any reason, return a fully redacted marker
             return "[REDACTED — PII masking error]";
         }
+    }
+
+    /// <summary>
+    /// Best-effort extraction of a top-level "reason" or "comment" string field
+    /// from a JSON request body, for the structured AuditLog.Reason column.
+    /// Returns null on any non-JSON / missing-field case — never throws.
+    /// </summary>
+    private static string? ExtractReason(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+            foreach (var name in new[] { "reason", "comment" })
+            {
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase) &&
+                        prop.Value.ValueKind == JsonValueKind.String)
+                    {
+                        var val = prop.Value.GetString();
+                        if (!string.IsNullOrWhiteSpace(val))
+                            return val.Length > 500 ? val[..500] : val;
+                    }
+                }
+            }
+            return null;
+        }
+        catch { return null; }
     }
 
     private static async Task<byte[]> ReadBodyAsync(Stream body)

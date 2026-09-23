@@ -7,7 +7,6 @@
 // fetch, so no network dependency on cdnjs.cloudflare.com remains.
 
 import * as pdfjsLib from 'pdfjs-dist'
-// eslint-disable-next-line import/no-unresolved
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
@@ -39,6 +38,27 @@ export function getDocumentWithTimeout(
       (err) => { clearTimeout(timer); reject(err) },
     )
   })
+}
+
+/**
+ * Render the first page of a PDF file to a PNG data-URL's base64 payload.
+ * Used by the KYC step so a PDF PAN/Aadhaar can be sent to the (image-only)
+ * vision endpoint — the same thing Vanilla does with pdf.js before OCR.
+ * Reuses the already-configured pdfjs worker above; no new dependency.
+ */
+export async function renderPdfPageToPngBase64(file: File, pageNum = 1, scale = 2): Promise<string> {
+  const buf = await file.arrayBuffer()
+  const pdf = await getDocumentWithTimeout({ data: buf })
+  const page = await pdf.getPage(pageNum)
+  const viewport = page.getViewport({ scale })
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.ceil(viewport.width)
+  canvas.height = Math.ceil(viewport.height)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not get canvas context to render PDF')
+  await page.render({ canvas, canvasContext: ctx, viewport }).promise
+  const dataUrl = canvas.toDataURL('image/png')
+  return dataUrl.split(',')[1] || ''
 }
 
 interface PositionedItem { str: string; x: number; y: number }
