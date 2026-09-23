@@ -60,13 +60,58 @@ public class UserService : IUserService
 
     public async Task<ApiResponseDto<UserDto>> CreateAsync(CreateUserRequestDto request)
     {
-        if (await _uow.Users.EmailExistsAsync(request.Email))
+        // Normalised once and reused for BOTH the duplicate check and the stored
+        // value — the check previously lower-cased but did not Trim, while the
+        // insert below did both, so a padded address could slip past the check.
+        var normalizedEmail = (request.Email ?? string.Empty).ToLower().Trim();
+
+        if (await _uow.Users.EmailExistsAsync(normalizedEmail))
             return ApiResponseDto<UserDto>.Fail("Email already in use.");
+
+        // BUGFIX (confirmed by local repro — "Could not create user. Please check
+        // the details and try again." with a bare 500 and no field message):
+        // Users.Email has a UNIQUE index that is NOT filtered by IsDeleted
+        // (AppDbContext: HasIndex(u => u.Email).IsUnique()), but every query runs
+        // through the !IsDeleted global query filter — so a soft-deleted user
+        // still physically occupies its email while being completely invisible to
+        // EmailExistsAsync above. Creating a user with a previously-deleted
+        // address therefore passed validation and then threw a duplicate-key
+        // DbUpdateException out of SaveChangesAsync, which escaped uncaught and
+        // surfaced as a generic 500 the form could not explain. Deleting a user
+        // and re-adding them with the same address is a completely ordinary admin
+        // action, so reuse and REACTIVATE that row instead of failing — the exact
+        // resolution FindOrCreateCustomerAsync already applies to the identical
+        // Customer PAN/Email case.
+        var existing = await _uow.Users.GetByEmailIncludingDeletedAsync(normalizedEmail);
+        if (existing != null)
+        {
+            existing.IsDeleted    = false;
+            existing.FullName     = request.FullName.Trim();
+            existing.Email        = normalizedEmail;
+            existing.PasswordHash = _auth.HashPassword(request.Password);
+            existing.Role         = request.Role;
+            existing.IsActive     = true;
+            existing.PhoneNumber  = request.PhoneNumber?.Trim();
+            existing.LocationName = request.LocationName?.Trim();
+            existing.SalesTeam    = request.SalesTeam?.Trim();
+            existing.OpTeam       = request.OpTeam?.Trim();
+            // EmployeeCode is a permanent identifier (see User entity) — keep the
+            // one this record already carries, and only mint a code for a row old
+            // enough to predate the column.
+            if (string.IsNullOrWhiteSpace(existing.EmployeeCode))
+                existing.EmployeeCode = await _codeGen.GenerateAsync(request.Role, request.LocationName);
+            existing.UpdatedAt = DateTime.UtcNow;
+
+            await _uow.Users.UpdateAsync(existing);
+            await _uow.SaveChangesAsync();
+            return ApiResponseDto<UserDto>.Ok(MapToDto(existing),
+                "User created successfully. (Re-activated a previously deleted account that used this email address.)");
+        }
 
         var user = new User
         {
             FullName     = request.FullName.Trim(),
-            Email        = request.Email.ToLower().Trim(),
+            Email        = normalizedEmail,
             PasswordHash = _auth.HashPassword(request.Password),
             Role         = request.Role,
             IsActive     = true,

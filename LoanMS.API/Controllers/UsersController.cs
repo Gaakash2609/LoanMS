@@ -122,7 +122,25 @@ public class UsersController : BaseController
             return BadRequest(ApiResponseDto<UserDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
 
-        var result = await _userService.CreateAsync(request);
+        ApiResponseDto<UserDto> result;
+        try
+        {
+            result = await _userService.CreateAsync(request);
+        }
+        catch (DbUpdateException)
+        {
+            // Defence in depth for the remaining unique-index races (two admins
+            // submitting the same address at once, or an EmployeeCode collision
+            // that outlived the generator's retry loop). Caught here rather than
+            // in UserService because the Application layer deliberately carries
+            // no EF Core reference. Without this, the provider's duplicate-key
+            // exception escapes as a bare 500 and the form can only show its
+            // generic "check the details" banner with nothing to act on — the
+            // exact failure the soft-deleted-email fix in CreateAsync removes
+            // for the common case.
+            return BadRequest(ApiResponseDto<UserDto>.Fail(
+                "Could not create this user — the email address or user ID is already taken. Please try again."));
+        }
         if (!result.Success) return BadRequest(result);
 
         // Auto-map Sales/Login team membership (User Creation + Mapping

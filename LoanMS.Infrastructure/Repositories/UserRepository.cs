@@ -27,4 +27,13 @@ public class UserRepository : GenericRepository<User>, IUserRepository
         if (excludeId.HasValue) query = query.Where(u => u.Id != excludeId.Value);
         return await query.AnyAsync();
     }
+
+    // IgnoreQueryFilters is the whole point here — the caller needs to see
+    // soft-deleted rows precisely because the unique index does too.
+    public async Task<User?> GetByEmailIncludingDeletedAsync(string email)
+    {
+        var normalized = (email ?? string.Empty).ToLower().Trim();
+        return await _set.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Email == normalized);
+    }
 }
