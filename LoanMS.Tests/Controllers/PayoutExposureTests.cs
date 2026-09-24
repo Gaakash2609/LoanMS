@@ -1,3 +1,4 @@
+using LoanMS.Domain.Enums;
 using System.Collections;
 using System.Security.Claims;
 using FluentAssertions;
@@ -35,7 +36,13 @@ public class PayoutExposureTests
         var custB = new Customer { Id = 2, FullName = "Cust B" };
         var userA = new User { Id = UserA, FullName = "User A", Email = "a@x.com" };
         var userB = new User { Id = UserB, FullName = "User B", Email = "b@x.com" };
-        var loanA = new Loan { Id = 1, LoanNumber = "EFIN-A", CustomerId = 1, Customer = custA, CreatedByUserId = UserA };
+        // Suggest/Submit now enforce loan visibility, so loan A is placed inside
+        // a Manager's real scope (Manager = same Location AND Sales-team
+        // membership): User A leads a Sales team and is mapped to Location 1.
+        var loanA = new Loan { Id = 1, LoanNumber = "EFIN-A", CustomerId = 1, Customer = custA, CreatedByUserId = UserA, LocationId = 1 };
+        db.Locations.Add(new Location { Id = 1, Name = "Loc 1", City = "C", State = "S" });
+        db.Teams.Add(new Team { Id = 1, Name = "Sales A", Type = "Sales", TeamLeadUserId = UserA });
+        db.UserLocations.Add(new UserLocation { UserId = UserA, LocationId = 1 });
         var loanB = new Loan { Id = 2, LoanNumber = "EFIN-B", CustomerId = 2, Customer = custB, CreatedByUserId = UserB };
 
         db.Customers.AddRange(custA, custB);
@@ -116,6 +123,27 @@ public class PayoutExposureTests
         var body = ok.Value.Should().BeOfType<ApiResponseDto<object>>().Subject;
         var flag = body.Data!.GetType().GetProperty("canOverride")!.GetValue(body.Data);
         flag.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task Submit_OnLoanOutsideCallersScope_IsRefused_AndNoClaimWritten()
+    {
+        // Regression: Submit used FindAsync with no visibility check, so any
+        // user could file a commission claim on any disbursed loan by id.
+        using var db = SeedTwoClaims();
+        var loanA = db.Loans.Single(l => l.Id == 1);
+        loanA.DisbursedAt = DateTime.UtcNow;
+        loanA.LoanType = LoanType.Personal;
+        // A rule exists, so the only thing that may refuse the claim is visibility.
+        db.PayoutRules.Add(new PayoutRule { LoanType = "personal_loan", Percentage = 1.5m, IsActive = true });
+        db.SaveChanges();
+        var before = db.PayoutClaims.Count();
+
+        // User B (Sales) did not create and is not assigned loan A.
+        var result = await ControllerFor(db, "Sales", UserB).Submit(new ClaimCreateDto { LoanId = 1, ClaimAmount = 5000 });
+
+        result.Should().BeOfType<BadRequestObjectResult>();
+        db.PayoutClaims.Count().Should().Be(before);
     }
 
     private static string[] RolesOf(System.Reflection.MemberInfo m) =>

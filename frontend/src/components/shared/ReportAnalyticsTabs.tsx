@@ -35,7 +35,7 @@ const TABS: { key: Tab; label: string; adminOnly?: boolean }[] = [
 
 const STATUS_ORDER = ['Draft', 'Submitted', 'UnderReview', 'Approved', 'Disbursed', 'Rejected', 'Closed']
 
-function Bar({ value, max, color = '#085897' }: { value: number; max: number; color?: string }) {
+function Bar({ value, max, color = '#0a589a' }: { value: number; max: number; color?: string }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0
   return (
     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -320,7 +320,7 @@ export default function ReportAnalyticsTabs({ filters }: { filters: ReportFilter
         targets.isLoading ? <Loading /> : (
           <div className="max-w-md space-y-4">
             <CardHeader title="Report Targets" subtitle="Used by the TAT and DDR cards above" />
-            {/* Same rgba(192,57,43,.1)/--danger and success pairing as
+            {/* Same rgba(227,30,37,.1)/--danger and success pairing as
                 ErrorBanner/StatusBadge use elsewhere, in place of the raw
                 Tailwind red-50/green-50 (a hue the app's gray-remap
                 deliberately leaves untouched, so those classes were
@@ -328,7 +328,7 @@ export default function ReportAnalyticsTabs({ filters }: { filters: ReportFilter
                 tokens). */}
             {targetError && (
               <div role="alert" className="text-sm rounded-lg px-3 py-2"
-                style={{ color: 'var(--danger)', background: 'rgba(192, 57, 43, .1)', border: '1px solid rgba(192, 57, 43, .25)' }}>
+                style={{ color: 'var(--danger)', background: 'rgba(227, 30, 37, .1)', border: '1px solid rgba(227, 30, 37, .25)' }}>
                 {targetError}
               </div>
             )}

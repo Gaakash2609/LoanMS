@@ -92,7 +92,7 @@ public class ReportsController : BaseController
         // reuses the exact same, single, centralized visibility rule
         // Loans/Dashboard/Search already use.
         var q = LoanRepository.ApplyReportNarrowing(_db,
-            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole),
             CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Include(l => l.Customer).Include(l => l.CreatedBy).AsQueryable();
         if (from.HasValue) q = q.Where(l => l.CreatedAt >= from.Value);
@@ -112,7 +112,7 @@ public class ReportsController : BaseController
     public async Task<IActionResult> Performance([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
         var q = LoanRepository.ApplyReportNarrowing(_db,
-            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole),
             CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Include(l => l.CreatedBy).AsQueryable();
         if (from.HasValue) q = q.Where(l => l.CreatedAt >= from.Value);
@@ -143,7 +143,7 @@ public class ReportsController : BaseController
     public async Task<IActionResult> ActiveTime([FromQuery] string? mode, [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
         var q = LoanRepository.ApplyReportNarrowing(_db,
-            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole),
             CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Include(l => l.CreatedBy).Include(l => l.StatusHistory).AsQueryable();
         if (from.HasValue) q = q.Where(l => l.CreatedAt >= from.Value);
@@ -220,7 +220,7 @@ public class ReportsController : BaseController
         var monthKey   = $"{now.Year}-{now.Month:D2}";
 
         var q = LoanRepository.ApplyReportNarrowing(_db,
-            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole),
             CurrentUserId, CurrentUserRole, scope, userId, teamId, null)
             .Where(l => l.CreatedAt >= monthStart && l.CreatedAt < monthEnd);
 
@@ -252,7 +252,7 @@ public class ReportsController : BaseController
     public async Task<IActionResult> Disbursement([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
         var q = LoanRepository.ApplyReportNarrowing(_db,
-            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole),
             CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Where(l => l.Status == Domain.Enums.LoanStatus.Disbursed)
             .Include(l => l.Customer).Include(l => l.CreatedBy)
@@ -272,7 +272,7 @@ public class ReportsController : BaseController
     public async Task<IActionResult> RejectionAnalysis([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
         var q = LoanRepository.ApplyReportNarrowing(_db,
-            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole),
             CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Where(l => l.Status == Domain.Enums.LoanStatus.Rejected)
             .Include(l => l.Customer)
@@ -293,7 +293,7 @@ public class ReportsController : BaseController
     public async Task<IActionResult> Monthly([FromQuery] int months = 12)
     {
         var from  = DateTime.UtcNow.AddMonths(-months);
-        var loans = await LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
+        var loans = await LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole)
             .Where(l => l.CreatedAt >= from)
             .Select(l => new {
                 l.Status, l.RequestedAmount, l.ApprovedAmount,
@@ -344,7 +344,7 @@ public class ReportsController : BaseController
 
         if (type == "disbursement")
         {
-            var q = LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
+            var q = LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole)
                 .Where(l => l.Status == Domain.Enums.LoanStatus.Disbursed)
                 .Include(l => l.Customer).Include(l => l.CreatedBy).AsQueryable();
             if (from.HasValue) q = q.Where(l => l.DisbursedAt >= from.Value);
@@ -365,7 +365,7 @@ public class ReportsController : BaseController
         }
         else if (type == "pipeline")
         {
-            var q = LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
+            var q = LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole)
                 .Include(l => l.Customer).Include(l => l.CreatedBy).AsQueryable();
             if (from.HasValue) q = q.Where(l => l.CreatedAt >= from.Value);
             if (to.HasValue)   q = q.Where(l => l.CreatedAt <= to.Value.AddDays(1));
@@ -410,7 +410,7 @@ public class ReportsController : BaseController
         // monthlyDisbursements and topAgents — that didn't even reuse this
         // `q` at all). All four now go through the same centralized rule.
         var q = LoanRepository.ApplyReportNarrowing(_db,
-            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole),
             CurrentUserId, CurrentUserRole, scope, userId, teamId, status);
         if (from.HasValue) q = q.Where(l => l.CreatedAt >= from.Value);
         if (to.HasValue)   q = q.Where(l => l.CreatedAt <= to.Value);
@@ -500,7 +500,7 @@ public class ReportsController : BaseController
         // in memory. Same rows, same property names, same order: the response
         // shape is byte-for-byte what it was before.
         var monthlyRaw = await LoanRepository.ApplyReportNarrowing(_db,
-            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole),
             CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Where(l => l.Status == Domain.Enums.LoanStatus.Disbursed)
             .Where(l => from == null || l.DisbursedAt >= from.Value)
@@ -524,7 +524,7 @@ public class ReportsController : BaseController
             .ToList();
 
         var topAgents = await LoanRepository.ApplyReportNarrowing(_db,
-            LoanRepository.ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole),
+            LoanRepository.ApplyVisibilityScope(_db, _db.Loans.IncludeDeletedUsers(), CurrentUserId, CurrentUserRole),
             CurrentUserId, CurrentUserRole, scope, userId, teamId, status)
             .Where(l => from == null || l.CreatedAt >= from.Value)
             .Where(l => to == null || l.CreatedAt <= to.Value)

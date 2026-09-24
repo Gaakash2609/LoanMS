@@ -21,19 +21,19 @@ import type { Loan } from '@/types'
 // Color palette (mirrors Vanilla JS CSS variables exactly)
 // ─────────────────────────────────────────────────────────────────────────────
 const C = {
-  accent:      '#085897',
+  accent:      '#0a589a',
   accentLight: '#1a72b8',
-  accentSubtle:'rgba(8,88,151,.08)',
-  accentBorder:'rgba(8,88,151,.18)',
+  accentSubtle:'rgba(10,88,154,.08)',
+  accentBorder:'rgba(10,88,154,.18)',
   success:     '#1a7340',
   successBg:   'rgba(26,115,64,.07)',
   successBorder:'rgba(26,115,64,.25)',
   warn:        '#e67e00',
   warnBg:      'rgba(230,126,0,.08)',
   warnBorder:  'rgba(230,126,0,.25)',
-  danger:      '#c0392b',
-  dangerBg:    'rgba(192,57,43,.06)',
-  dangerBorder:'rgba(192,57,43,.25)',
+  danger:      '#e31e25',
+  dangerBg:    'rgba(227,30,37,.06)',
+  dangerBorder:'rgba(227,30,37,.25)',
   text:        '#0c1733',
   text2:       '#3a4d6e',
   text3:       '#7a8aaa',
@@ -68,7 +68,7 @@ const SOURCE_LABEL: Record<string, string> = {
   Manual: 'Manual', BankStatement: 'Bank Stmt', Bureau: 'Bureau', Document: 'Document',
 }
 const SOURCE_COLOR: Record<string, { bg: string; color: string }> = {
-  BankStatement: { bg: 'rgba(8,88,151,.10)', color: C.accent },
+  BankStatement: { bg: 'rgba(10,88,154,.10)', color: C.accent },
   Bureau:        { bg: 'rgba(230,126,0,.10)', color: C.warn },
   Manual:        { bg: C.surface2, color: C.text3 },
   Document:      { bg: C.surface2, color: C.text2 },
@@ -76,7 +76,7 @@ const SOURCE_COLOR: Record<string, { bg: string; color: string }> = {
 const STATUS_MAP: Record<string, { bg: string; color: string; label: string }> = {
   Verified:        { bg: 'rgba(26,115,64,.10)',  color: C.success,  label: 'Verified'   },
   ReviewRequired:  { bg: 'rgba(230,126,0,.10)',  color: C.warn,     label: 'Review'     },
-  Rejected:        { bg: 'rgba(192,57,43,.10)',  color: C.danger,   label: 'Rejected'   },
+  Rejected:        { bg: 'rgba(227,30,37,.10)',  color: C.danger,   label: 'Rejected'   },
   Unverified:      { bg: C.surface2,             color: C.text3,    label: 'Unverified' },
 }
 
@@ -476,7 +476,7 @@ export default function ObligationsWorkspace({ loanId, loan }: { loanId: number;
           </div>
 
           {formError && (
-            <div style={{ fontSize: 12, color: C.danger, marginBottom: 10, padding: '6px 12px', background: 'rgba(192,57,43,.07)', borderRadius: 8 }}>
+            <div style={{ fontSize: 12, color: C.danger, marginBottom: 10, padding: '6px 12px', background: 'rgba(227,30,37,.07)', borderRadius: 8 }}>
               ⚠ {formError}
             </div>
           )}
@@ -593,7 +593,7 @@ export default function ObligationsWorkspace({ loanId, loan }: { loanId: number;
                                 </ActionBtn>
                               )}
                               {!canAdminVerify && canVerify && o.verificationStatus !== 'Rejected' && (
-                                <ActionBtn title="Reject" color={C.danger} hoverBg="rgba(192,57,43,.1)"
+                                <ActionBtn title="Reject" color={C.danger} hoverBg="rgba(227,30,37,.1)"
                                   onClick={() => handleVerify(o.id, 'Rejected')}>
                                   <XCircle size={14} />
                                 </ActionBtn>
@@ -605,7 +605,7 @@ export default function ObligationsWorkspace({ loanId, loan }: { loanId: number;
                                 </ActionBtn>
                               )}
                               {canDelete && (
-                                <ActionBtn title="Delete" color={C.danger} hoverBg="rgba(192,57,43,.1)"
+                                <ActionBtn title="Delete" color={C.danger} hoverBg="rgba(227,30,37,.1)"
                                   onClick={() => { if (confirm('Delete this obligation?')) remove.mutate(o.id) }}>
                                   <Trash2 size={13} />
                                 </ActionBtn>
@@ -768,7 +768,7 @@ function FoirPanel({
 
   return (
     <div style={{
-      background: `linear-gradient(135deg,rgba(26,79,163,.04),rgba(212,43,43,.03))`,
+      background: `linear-gradient(135deg,rgba(26,79,163,.04),rgba(227,30,37,.03))`,
       border: `1.5px solid rgba(26,79,163,.15)`,
       borderRadius: 18, padding: '22px 24px',
     }}>

@@ -46,4 +46,5 @@ public interface ILoanService
     Task<ApiResponseDto<LoanDto>> UpdateReferencesAsync(int id, List<UpdateLoanReferenceItemDto> request, int currentUserId, string currentUserRole);
     Task<ApiResponseDto<bool>> DeleteAsync(int id, int currentUserId, string currentUserRole);
     Task<ApiResponseDto<DashboardStatsDto>> GetDashboardStatsAsync(int userId, string role);
+    Task<ApiResponseDto<LoanFilterOptionsDto>> GetFilterOptionsAsync(int userId, string role);
 }

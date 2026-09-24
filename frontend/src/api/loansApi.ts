@@ -1,5 +1,6 @@
 import api from './axios'
-import type { ApiResponse, CreateLoanRequest, Loan, LoanFilter, LoanListItem, PagedResult, DashboardStats } from '@/types'
+import { fetchAllPages } from '@/utils/fetchAllPages'
+import type { ApiResponse, CreateLoanRequest, Loan, LoanFilter, LoanListItem, LoanFilterOptions, PagedResult, DashboardStats } from '@/types'
 
 // Matches LoansController.GetDocuments' projection exactly.
 export interface LoanDocument {
@@ -24,10 +25,15 @@ export interface LoanDocument {
 }
 
 export const loansApi = {
-  getAll: (filter: LoanFilter) =>
+  getAll: ({ dateFrom, dateTo, ...filter }: LoanFilter) =>
     api.get<ApiResponse<PagedResult<LoanListItem>>>('/api/loans', {
       params: {
         ...filter,
+        // LoanFilterDto binds FromDate/ToDate — "dateFrom"/"dateTo" were never
+        // bound, so every date filter (Applications date chips, Export custom
+        // range, Reports export) was silently ignored by the server.
+        fromDate: dateFrom || undefined,
+        toDate: dateTo || undefined,
         // Gap 1 — sent as one comma-separated `statuses` value (matches
         // LoanFilterDto.Statuses' query binding) instead of axios' default
         // array param encoding (`statuses[]=`), which ASP.NET Core's
@@ -35,6 +41,19 @@ export const loansApi = {
         statuses: filter.statuses?.length ? filter.statuses.join(',') : undefined,
       },
     }),
+
+  // Every matching loan, paged at the server's real maximum (100). A single
+  // getAll with pageSize > 100 is clamped by the API to 10 rows — which is
+  // why exports used to contain only the 10 newest loans.
+  getAllPages: (filter: LoanFilter) =>
+    fetchAllPages<LoanListItem>(
+      (page, pageSize) => loansApi.getAll({ ...filter, page, pageSize }).then(r =>
+        r.data.data ?? { items: [], totalCount: 0, page, pageSize, totalPages: 0, hasNext: false, hasPrev: false }),
+      100,
+    ),
+
+  filterOptions: () =>
+    api.get<ApiResponse<LoanFilterOptions>>('/api/loans/filter-options'),
 
   getById: (id: number) =>
     api.get<ApiResponse<Loan>>(`/api/loans/${id}`),

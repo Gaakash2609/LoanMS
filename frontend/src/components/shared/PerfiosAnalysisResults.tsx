@@ -131,7 +131,7 @@ export default function PerfiosAnalysisResults({ result, onReset, loanId, readOn
             <div className="flex items-center gap-2 flex-wrap">
               <span className="info-pill" style={{ ['--pill-fg' as string]: 'var(--success)', ['--pill-bg' as string]: 'rgba(26,115,64,.1)' }}><CheckCircle2 size={12} /> {passCount} passed</span>
               <span className="info-pill" style={{ ['--pill-fg' as string]: 'var(--warn)', ['--pill-bg' as string]: 'rgba(230,126,0,.12)' }}><AlertTriangle size={12} /> {warnCount} warnings</span>
-              <span className="info-pill" style={{ ['--pill-fg' as string]: 'var(--danger)', ['--pill-bg' as string]: 'rgba(192,57,43,.1)' }}><XCircle size={12} /> {failCount} failed</span>
+              <span className="info-pill" style={{ ['--pill-fg' as string]: 'var(--danger)', ['--pill-bg' as string]: 'rgba(227,30,37,.1)' }}><XCircle size={12} /> {failCount} failed</span>
             </div>
             {!upload.valid && <p className="text-xs mt-2" style={{ color: 'var(--warn)' }}>Span or staleness rule did not pass — see Validation Checks below.</p>}
           </div>

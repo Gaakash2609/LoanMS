@@ -9,9 +9,13 @@ namespace LoanMS.API.Controllers;
 public class CustomersController : BaseController
 {
     private readonly ICustomerService _customerService;
+    private readonly ICustomerDeletionService _deletion;
 
-    public CustomersController(ICustomerService customerService) =>
+    public CustomersController(ICustomerService customerService, ICustomerDeletionService deletion)
+    {
         _customerService = customerService;
+        _deletion = deletion;
+    }
 
     /// <summary>Get all customers (paged + search)</summary>
     [HttpGet]
@@ -61,16 +65,29 @@ public class CustomersController : BaseController
             return BadRequest(ApiResponseDto<CustomerDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
 
+        // Same visibility rule as GET /api/customers/{id} — a customer outside
+        // the caller's scope must not be editable by guessing its id.
+        if (!(await _customerService.GetByIdAsync(id, CurrentUserId, CurrentUserRole)).Success)
+            return NotFound(ApiResponseDto<CustomerDto>.Fail("Customer not found."));
         var result = await _customerService.UpdateAsync(id, request);
         return ApiResult(result);
     }
 
-    /// <summary>Delete customer [Manager/Admin only]</summary>
+    /// <summary>
+    /// PERMANENT delete of a customer and everything linked to them — loans,
+    /// documents (DB rows + stored files), bureau data, payout claims, history,
+    /// notifications and audit entries (see CustomerDeletionService). Admin only
+    /// (owner decision 2026-09-23); Admin's scope is every customer, so no
+    /// per-customer scope check is needed. Customers with an active loan are
+    /// still refused (existing rule).
+    /// </summary>
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "Admin,Manager")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)
     {
-        var result = await _customerService.DeleteAsync(id);
+        var result = await _deletion.DeletePermanentlyAsync(id, HttpContext.RequestAborted);
+        if (!result.Success && result.Errors.Contains("Customer not found."))
+            return NotFound(result);
         return ApiResult(result);
     }
 

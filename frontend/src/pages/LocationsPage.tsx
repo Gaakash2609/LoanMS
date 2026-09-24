@@ -174,7 +174,7 @@ export default function LocationsPage() {
     { key: 'pinCode', label: 'PIN', sortable: true, render: l => l.pinCode ?? '—' },
     // Hierarchy — matches vanilla's Sales Teams / Login Teams / Users pill
     // columns (efin-app.js twRenderLocations, efin-app.js:24709-24711).
-    { key: 'salesTeams', label: 'Sales Teams', render: l => <PillCell items={l.salesTeams ?? []} bg="rgba(8,88,151,.1)" color="#085897" /> },
+    { key: 'salesTeams', label: 'Sales Teams', render: l => <PillCell items={l.salesTeams ?? []} bg="rgba(10,88,154,.1)" color="#0a589a" /> },
     { key: 'loginTeams', label: 'Login Teams', render: l => <PillCell items={l.loginTeams ?? []} bg="rgba(16,185,129,.1)" color="#10b981" /> },
     { key: 'users', label: 'Users', render: l => <PillCell items={l.users ?? []} bg="rgba(255,179,71,.12)" color="#b45309" /> },
     { key: 'isActive', label: 'Status', sortable: true, sortValue: l => (l.isActive ? 1 : 0), render: l => (

@@ -39,7 +39,7 @@ function TypePill({ type }: { type: 'CR' | 'DR' }) {
       className="inline-block rounded px-1.5 py-0.5 text-[10px] font-bold"
       style={type === 'CR'
         ? { background: 'rgba(26,115,64,.08)', color: 'var(--success)' }
-        : { background: 'rgba(192,57,43,.08)', color: 'var(--danger)' }}
+        : { background: 'rgba(227,30,37,.08)', color: 'var(--danger)' }}
     >{type}</span>
   )
 }

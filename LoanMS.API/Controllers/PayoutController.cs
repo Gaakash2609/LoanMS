@@ -32,7 +32,7 @@ public class PayoutController : BaseController
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] bool myOnly = false)
     {
-        var q = _db.PayoutClaims
+        var q = _db.PayoutClaims.IncludeDeletedUsers()
             .Include(p => p.Loan).ThenInclude(l => l.Customer)
             .Include(p => p.ClaimedBy)
             .Include(p => p.ProcessedBy)
@@ -103,6 +103,8 @@ public class PayoutController : BaseController
     [HttpGet("suggest/{loanId:int}")]
     public async Task<IActionResult> Suggest(int loanId)
     {
+        // Only for a loan the caller can see (same rule as the loan list/detail).
+        if (!await CanSeeLoanAsync(_db, loanId)) return NotFound(ApiResponseDto<object>.Fail("Loan not found."));
         var loan = await _db.Loans.FindAsync(loanId);
         if (loan == null) return NotFound(ApiResponseDto<object>.Fail("Loan not found."));
 
@@ -128,6 +130,9 @@ public class PayoutController : BaseController
     [HttpPost]
     public async Task<IActionResult> Submit([FromBody] ClaimCreateDto dto)
     {
+        // A commission claim may only be filed on a loan in the caller's own
+        // scope — previously any user could claim on any disbursed loan by id.
+        if (!await CanSeeLoanAsync(_db, dto.LoanId)) return BadRequest(ApiResponseDto<bool>.Fail("Loan not found."));
         var loan = await _db.Loans.FindAsync(dto.LoanId);
         if (loan == null) return BadRequest(ApiResponseDto<bool>.Fail("Loan not found."));
 

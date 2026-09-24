@@ -1,5 +1,7 @@
 using LoanMS.Application.AI;
 using LoanMS.Application.DTOs;
+using LoanMS.Application.Interfaces;
+using LoanMS.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,8 +16,17 @@ namespace LoanMS.API.Controllers;
 public class AIController : BaseController
 {
     private readonly IAIService _ai;
+    private readonly AppDbContext _db;
+    private readonly ICustomerService _customers;
 
-    public AIController(IAIService ai) => _ai = ai;
+    public AIController(IAIService ai, AppDbContext db, ICustomerService customers)
+    {
+        _ai = ai; _db = db; _customers = customers;
+    }
+
+    // The AI reads the whole loan/customer record and returns a summary of it,
+    // so it must never answer for a record the caller is not allowed to see.
+    private IActionResult Hidden() => NotFound(ApiResponseDto<object>.Fail("Not found."));
 
     /// <summary>AI status — check if AI is enabled and which provider</summary>
     [HttpGet("status")]
@@ -96,6 +107,7 @@ public class AIController : BaseController
     [HttpGet("customer/{customerId:int}/summary")]
     public async Task<IActionResult> CustomerSummary(int customerId)
     {
+        if (!(await _customers.GetByIdAsync(customerId, CurrentUserId, CurrentUserRole)).Success) return Hidden();
         var summary        = await _ai.GetCustomerSummaryAsync(customerId);
         var recommendation = await _ai.GetLoanRecommendationAsync(customerId);
 
@@ -112,6 +124,7 @@ public class AIController : BaseController
     [HttpGet("loan/{loanId:int}/insight")]
     public async Task<IActionResult> LoanInsight(int loanId)
     {
+        if (!await CanSeeLoanAsync(_db, loanId)) return Hidden();
         var insight = await _ai.GetLoanInsightAsync(loanId);
         return Ok(ApiResponseDto<AIInsightResponseDto>.Ok(new AIInsightResponseDto
         {
@@ -126,6 +139,7 @@ public class AIController : BaseController
     [Authorize(Roles = "Admin,Manager")]
     public async Task<IActionResult> UnderwritingSupport(int loanId)
     {
+        if (!await CanSeeLoanAsync(_db, loanId)) return Hidden();
         var insight = await _ai.GetUnderwritingSupportAsync(loanId);
         return Ok(ApiResponseDto<AIInsightResponseDto>.Ok(new AIInsightResponseDto
         {
@@ -139,6 +153,7 @@ public class AIController : BaseController
     [HttpGet("loan/{loanId:int}/case-insight")]
     public async Task<IActionResult> CaseInsight(int loanId, [FromQuery] string stage = "")
     {
+        if (!await CanSeeLoanAsync(_db, loanId)) return Hidden();
         var insight = await _ai.GetCaseInsightAsync(loanId, stage);
         return Ok(ApiResponseDto<AIInsightResponseDto>.Ok(new AIInsightResponseDto
         {
@@ -152,6 +167,7 @@ public class AIController : BaseController
     [HttpPost("loan/{loanId:int}/notes")]
     public async Task<IActionResult> GenerateNotes(int loanId, [FromBody] AIInsightRequestDto request)
     {
+        if (!await CanSeeLoanAsync(_db, loanId)) return Hidden();
         var notes = await _ai.GetAINotesAsync(loanId, request.Context ?? "general update");
         return Ok(ApiResponseDto<AIInsightResponseDto>.Ok(new AIInsightResponseDto
         {

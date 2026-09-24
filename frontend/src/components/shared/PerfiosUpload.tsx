@@ -104,7 +104,7 @@ export default function PerfiosUpload({ onComplete, onFilesSelected }: {
             onChange={e => handleFilesPicked(e.target.files)} />
 
           {status === 'error' && errorMessage && (
-            <div className="mt-4 flex items-start gap-2 p-3 rounded-lg" style={{ background: 'rgba(192,57,43,.08)', border: '1px solid rgba(192,57,43,.2)' }}>
+            <div className="mt-4 flex items-start gap-2 p-3 rounded-lg" style={{ background: 'rgba(227,30,37,.08)', border: '1px solid rgba(227,30,37,.2)' }}>
               <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: 'var(--danger)' }} />
               <p className="text-sm" style={{ color: 'var(--danger)' }}>{errorMessage}</p>
             </div>

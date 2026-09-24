@@ -124,7 +124,7 @@ export function AssignedBanksSection({ canEdit, productKey }: { canEdit: boolean
                 <p className="font-bold text-[13px] text-gray-900 truncate w-full">{b.bankName}</p>
                 <div className="flex gap-1 flex-wrap justify-center mt-1 min-h-[16px]">
                   {b.isIncred && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,.15)', color: '#d97706' }}>InCred</span>}
-                  {b.isElite && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(8,88,151,.12)', color: 'var(--accent)' }}>Elite</span>}
+                  {b.isElite && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(10,88,154,.12)', color: 'var(--accent)' }}>Elite</span>}
                 </div>
                 {canEdit && (
                   <div className="flex gap-1.5 mt-2 pt-2 border-t border-gray-100 w-full">

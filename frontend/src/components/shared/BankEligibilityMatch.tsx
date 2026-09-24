@@ -108,20 +108,20 @@ function deriveBankMeta(bank: BankConfig | undefined, reqLoanType: string): Bank
 
 // ── Look (matches the Vanilla cards) ─────────────────────────────────────
 const NAVY = '#0f2a5c'
-const LABEL_BLUE = '#085897'
+const LABEL_BLUE = '#0a589a'
 
 // Tag-pill colours — Vanilla's InCred (amber) / Elite (red) / Open-List (blue)
 // pill palette (efin-app.js tagPills).
 const TAG_STYLE: Record<string, { color: string; background: string }> = {
   'InCred':    { color: '#b45309', background: 'rgba(245,158,11,.13)' },
-  'Elite':     { color: '#b91c1c', background: 'rgba(212,43,43,.10)' },
+  'Elite':     { color: '#b91c1c', background: 'rgba(227,30,37,.10)' },
   'Open List': { color: '#0369a1', background: 'rgba(3,105,161,.10)' },
 }
 
 // Logo-tile tints — Vanilla colours each bank's initials tile; a stable hash of
 // the bank name picks one so a bank keeps its colour across renders.
 const BANK_TINTS = [
-  { fg: '#085897', bg: '#eaf1ff', bd: '#d3e2fb' },
+  { fg: '#0a589a', bg: '#eaf1ff', bd: '#d3e2fb' },
   { fg: '#c2570c', bg: '#fdf1e6', bd: '#f6dcc3' },
   { fg: '#0e9f6e', bg: '#e8f8f1', bd: '#c9efdf' },
   { fg: '#6d3fc4', bg: '#f1ecfc', bd: '#ddd0f6' },
@@ -256,7 +256,7 @@ export default function BankEligibilityMatch({
       {error && (
         <div
           className="text-xs rounded-lg px-3 py-2 flex items-center justify-between gap-3"
-          style={{ color: 'var(--danger)', background: 'rgba(192, 57, 43, .1)', border: '1px solid rgba(192, 57, 43, .25)' }}
+          style={{ color: 'var(--danger)', background: 'rgba(227, 30, 37, .1)', border: '1px solid rgba(227, 30, 37, .25)' }}
         >
           <span>{error}</span>
           <button type="button" className="font-semibold underline shrink-0" onClick={() => run.mutate()}>Try again</button>
@@ -338,22 +338,22 @@ export default function BankEligibilityMatch({
                         atLimit ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:-translate-y-px'
                       }`}
                       style={{
-                        border: on ? '2px solid #085897' : '2px solid #d5def0',
+                        border: on ? '2px solid #0a589a' : '2px solid #d5def0',
                         background: on ? 'linear-gradient(180deg, #f3f7ff 0%, #ffffff 70%)' : 'linear-gradient(180deg, #fafcff 0%, #ffffff 70%)',
-                        boxShadow: on ? '0 8px 24px rgba(8,88,151,.16)' : '0 2px 10px rgba(8,88,151,.06)',
+                        boxShadow: on ? '0 8px 24px rgba(10,88,154,.16)' : '0 2px 10px rgba(10,88,154,.06)',
                       }}
                     >
                       {on && (
                         <span
                           aria-hidden
                           className="absolute left-4 right-24 -top-px h-[3px] rounded-b"
-                          style={{ background: 'linear-gradient(90deg, #085897, #4f8bff)' }}
+                          style={{ background: 'linear-gradient(90deg, #0a589a, #4f8bff)' }}
                         />
                       )}
                       {idx === 0 && (
                         <span
                           className="absolute -top-px right-6 rounded-b-lg px-3 py-1 text-[10px] font-extrabold tracking-wider text-white"
-                          style={{ background: 'linear-gradient(135deg, #085897, #3b7bf0)' }}
+                          style={{ background: 'linear-gradient(135deg, #0a589a, #3b7bf0)' }}
                         >
                           BEST MATCH
                         </span>
@@ -389,7 +389,7 @@ export default function BankEligibilityMatch({
                           aria-hidden
                           className="mt-1 flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-white"
                           style={on
-                            ? { background: 'linear-gradient(135deg, #085897, #3b7bf0)', border: '2px solid #085897' }
+                            ? { background: 'linear-gradient(135deg, #0a589a, #3b7bf0)', border: '2px solid #0a589a' }
                             : { background: '#fff', border: '2px solid #c9d6ee' }}
                         >
                           {on && <Check size={14} strokeWidth={3.5} />}
@@ -401,7 +401,7 @@ export default function BankEligibilityMatch({
                           <span>Match Score</span><span style={{ color: NAVY }}>{pct}%</span>
                         </div>
                         <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full" style={{ background: '#e6edf9' }}>
-                          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #085897, #4f8bff)' }} />
+                          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #0a589a, #4f8bff)' }} />
                         </div>
                       </div>
 
@@ -437,7 +437,7 @@ export default function BankEligibilityMatch({
                           type="button"
                           onClick={e => { e.stopPropagation(); setOpenId(open ? null : b.bankId) }}
                           className="rounded-xl bg-white py-2.5 text-[13px] font-bold transition-colors hover:bg-efin-blue/5"
-                          style={{ color: LABEL_BLUE, border: '1.5px solid #085897' }}
+                          style={{ color: LABEL_BLUE, border: '1.5px solid #0a589a' }}
                         >
                           {open ? 'Hide Details' : 'Know More'}
                         </button>
@@ -447,8 +447,8 @@ export default function BankEligibilityMatch({
                           onClick={e => { e.stopPropagation(); toggle(b.bankId, b.bankName) }}
                           className="rounded-xl py-2.5 text-[13px] font-bold text-white transition-opacity hover:opacity-95 disabled:cursor-not-allowed"
                           style={{
-                            background: on ? 'linear-gradient(135deg, #0f2f6b, #085897)' : 'linear-gradient(135deg, #085897, #3b7bf0)',
-                            boxShadow: '0 4px 12px rgba(8,88,151,.28)',
+                            background: on ? 'linear-gradient(135deg, #0f2f6b, #0a589a)' : 'linear-gradient(135deg, #0a589a, #3b7bf0)',
+                            boxShadow: '0 4px 12px rgba(10,88,154,.28)',
                           }}
                         >
                           {on ? '✓ Selected' : 'Apply Now'}
@@ -487,7 +487,7 @@ export default function BankEligibilityMatch({
           {selected.length > 0 && (
             <div
               className="rounded-xl px-3.5 py-3"
-              style={{ background: 'rgba(192, 57, 43, .06)', border: '1px solid rgba(192, 57, 43, .25)' }}
+              style={{ background: 'rgba(227, 30, 37, .06)', border: '1px solid rgba(227, 30, 37, .25)' }}
             >
               <p className="flex items-center gap-1 text-[12px] font-semibold" style={{ color: 'var(--danger)' }}>
                 <CheckCircle2 size={13} /> Selected Banks
@@ -497,7 +497,7 @@ export default function BankEligibilityMatch({
                   <span
                     key={b.bankId}
                     className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium"
-                    style={{ color: 'var(--danger)', background: 'rgba(192, 57, 43, .10)' }}
+                    style={{ color: 'var(--danger)', background: 'rgba(227, 30, 37, .10)' }}
                   >
                     <Landmark size={12} /> {b.bankName}
                   </span>

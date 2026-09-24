@@ -57,6 +57,9 @@ public class LoanService : ILoanService
         return ApiResponseDto<LoanDto>.Ok(dto);
     }
 
+    public async Task<ApiResponseDto<LoanFilterOptionsDto>> GetFilterOptionsAsync(int userId, string role) =>
+        ApiResponseDto<LoanFilterOptionsDto>.Ok(await _uow.Loans.GetFilterOptionsAsync(userId, role));
+
     public async Task<ApiResponseDto<PagedResultDto<LoanListDto>>> GetAllAsync(LoanFilterDto filter, int currentUserId, string currentUserRole)
     {
         // Phase 1 fix: the Application List must always reflect the current
@@ -202,6 +205,11 @@ public class LoanService : ILoanService
         var allowed = GetAllowedTransitions(loan.Status);
         if (!allowed.Contains(request.NewStatus))
             return ApiResponseDto<LoanDto>.Fail($"Cannot move from {loan.Status} to {request.NewStatus}.");
+
+        // A zero/negative sanctioned amount was accepted and stored (with a
+        // negative EMI) — reject it before any state changes.
+        if (request.NewStatus == LoanStatus.Approved && request.ApprovedAmount is <= 0)
+            return ApiResponseDto<LoanDto>.Fail("Approved amount must be greater than 0.");
 
         // ── Underwriting-entry gate (Vanilla doUnderwriting/_hasCompleteBankDetails,
         // efin-app.js) — a loan cannot move into Under Review until at least one
@@ -894,6 +902,9 @@ public class LoanService : ILoanService
 
         var loan = await _uow.Loans.GetByIdAsync(id);
         if (loan == null) return ApiResponseDto<LoanDto>.Fail("Loan not found.");
+
+        if ((request.BankLines ?? new List<BankLineItemDto>()).Any(l => l.ApprovedLoan < 0))
+            return ApiResponseDto<LoanDto>.Fail("Approved loan amount cannot be negative.");
 
         var newLines = (request.BankLines ?? new List<BankLineItemDto>()).Select(l => new LoanBankLine
         {

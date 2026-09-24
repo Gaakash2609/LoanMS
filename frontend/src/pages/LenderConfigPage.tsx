@@ -20,19 +20,16 @@ import LenderQuickSetup from '@/components/shared/LenderQuickSetup'
 import ImportLinesModal from '@/components/shared/ImportLinesModal'
 import { MultiLineModal } from '@/components/shared/LineModals'
 import { NumberInput } from '@/components/ui/NumberInput'
+import { apiErrorMessage as errorMessage } from '@/utils/apiError'
 
 // Legacy nests Companies / Categories / Import-Lines under the Personal
 // product workspace (index.html #lc-general-config-section), not as top-level
 // tabs — so the page's own tabs are just the product workspace + Match.
 type Tab = 'quicksetup' | 'bankconfig' | 'match'
 
-function errorMessage(err: unknown, fallback: string): string {
-  const msg = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-  return msg?.message || msg?.errors?.join(' ') || fallback
-}
 
 // Reproduces ErrorBanner's (components/ui/States.tsx) exact computed colors
-// -- rgba(192,57,43,.1) bg / 1px rgba(192,57,43,.25) border / var(--danger)
+// -- rgba(227,30,37,.1) bg / 1px rgba(227,30,37,.25) border / var(--danger)
 // text -- for the plain-string error state these tabs already track locally,
 // replacing the raw text-red-600/bg-red-50/border-red-200 stock Tailwind
 // trio used at every one of these call sites.
@@ -41,7 +38,7 @@ function ErrorNotice({ message, className }: { message: string; className?: stri
     <div
       role="alert"
       className={`text-sm rounded-lg px-3 py-2 ${className ?? 'mb-4'}`}
-      style={{ color: 'var(--danger)', background: 'rgba(192, 57, 43, .1)', border: '1px solid rgba(192, 57, 43, .25)' }}
+      style={{ color: 'var(--danger)', background: 'rgba(227, 30, 37, .1)', border: '1px solid rgba(227, 30, 37, .25)' }}
     >
       {message}
     </div>

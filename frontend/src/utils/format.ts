@@ -62,7 +62,7 @@ export const formatRelativeDate = (d?: string | null) => {
 //   UnderReview->underwriting, Approved->approved, Disbursed->disbursed,
 //   Rejected->rejected. Closed has no clean legacy equivalent -- the
 //   nearest same-named class, badge-Complete/-COMPLETE, is a jarring red
-//   (rgba(212,43,43,...) + --accent2) that reads as an error/rejection, and
+//   (rgba(227,30,37,...) + --accent2) that reads as an error/rejection, and
 //   turns up in a context (role-badge/ticket markup) that looks unrelated
 //   to loan status -- using it for a plain "closed" loan seemed more likely
 //   to mislead than to help, so this instead reuses draft's neutral gray.
@@ -71,8 +71,11 @@ export const STATUS_COLORS: Record<string, CSSProperties> = {
   Draft:       { background: 'rgba(138, 150, 180, .15)', color: '#8a96b4' },
   Submitted:   { background: 'rgba(26, 79, 163, .12)',   color: 'var(--accent)' },
   UnderReview: { background: 'rgba(161, 89, 255, .15)',  color: '#a159ff' },
-  Approved:    { background: 'rgba(0, 212, 170, .15)',   color: 'var(--accent2)' },
-  Disbursed:   { background: 'rgba(26, 115, 64, .12)',   color: '#1a7340' },
+  // Owner's brand brief (2026-09-23): approved = green, disbursed = brand
+  // blue — same mapping the dashboard already uses (dashboardData.ts). Approved
+  // used --accent2 (a red) and Disbursed green before.
+  Approved:    { background: 'rgba(26, 115, 64, .12)',   color: 'var(--success)' },
+  Disbursed:   { background: 'rgba(10, 88, 154, .12)',   color: 'var(--accent)' },
   Rejected:    { background: 'rgba(255, 69, 96, .15)',   color: 'var(--danger)' },
   Closed:      { background: 'rgba(138, 150, 180, .15)', color: '#8a96b4' },
   // Held loans use the warn/amber treatment (legacy's hold color #e67e00).
@@ -142,7 +145,7 @@ export function cibilTierMeta(score?: number | null): { label: string; color: st
   switch (cibilTier(score)) {
     case 'excellent': return { label: 'Excellent',           color: 'var(--success)', tint: 'rgba(26, 115, 64, .12)' }
     case 'good':       return { label: 'Good',                color: 'var(--warn)',    tint: 'rgba(230, 126, 0, .12)' }
-    case 'poor':       return { label: 'Needs Improvement',   color: 'var(--danger)',  tint: 'rgba(192, 57, 43, .1)' }
+    case 'poor':       return { label: 'Needs Improvement',   color: 'var(--danger)',  tint: 'rgba(227, 30, 37, .1)' }
     default:           return { label: 'Not Available',       color: 'var(--text3)',  tint: 'var(--surface2)' }
   }
 }

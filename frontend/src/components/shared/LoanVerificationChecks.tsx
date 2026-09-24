@@ -16,6 +16,7 @@ import { parseSalarySlip, SALARY_SLIP_VISION_PROMPT } from '@/utils/salarySlipEx
 import { computeBundledAmount, flatRateFromReducing, emiReducing } from '@/utils/emi'
 import { Wallet, Banknote, RotateCcw, Mail, Plus, Trash2, ShieldCheck, FileSearch, FileSignature, FileCheck, Repeat, Upload, Search, BadgeIndianRupee, AlertTriangle, SkipForward, CheckCircle2 } from 'lucide-react'
 import { NumberInput } from '@/components/ui/NumberInput'
+import { apiErrorMessage } from '@/utils/apiError'
 
 // ── Loan Verification Checks ───────────────────────────────────────────────
 // Server-backed React equivalents of legacy efin-app.js's client-side (localStorage
@@ -583,7 +584,13 @@ function DealConfirmModal({ loanId, customerName, customerEmail, onClose }: { lo
 
   const send = useMutation({
     mutationFn: async () => {
-      await api.post('/api/email/send', { to: to.trim(), toName: customerName ?? '', subject: subject.trim(), html: body.replace(/\n/g, '<br>') })
+      // EmailController answers an SMTP failure with HTTP 200 + success:false.
+      // Stop here in that case — otherwise the tracking entry below would
+      // record "Deal confirmation sent" and the loan would move to Acceptance
+      // although the customer never received the email. Same check
+      // LenderEmailCard / useLoans already apply to this endpoint.
+      const sendRes = await api.post<{ success: boolean; message?: string }>('/api/email/send', { to: to.trim(), toName: customerName ?? '', subject: subject.trim(), html: body.replace(/\n/g, '<br>') })
+      if (!sendRes.data?.success) throw new Error(sendRes.data?.message || 'The deal confirmation email could not be sent.')
       // Tracking entry name/comment/subNote matches Vanilla's
       // _dcFinaliseAcceptance exactly (efin-app.js:34586-34589) — other parts
       // of the app (e.g. the generic tracking status-map) key off the exact
@@ -602,7 +609,7 @@ function DealConfirmModal({ loanId, customerName, customerEmail, onClose }: { lo
       qc.invalidateQueries({ queryKey: LOAN_KEYS.detail(loanId) })
       onClose()
     },
-    onError: () => setError('Could not send the deal confirmation email.'),
+    onError: (err: unknown) => setError(apiErrorMessage(err, 'Could not send the deal confirmation email.')),
   })
 
   function confirm() {
@@ -937,8 +944,8 @@ function ApproveWithDetailsModal({
     <button type="button" onClick={onClick}
       className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold whitespace-nowrap transition-colors"
       style={{
-        background: on ? 'rgba(8,88,151,.11)' : 'rgba(122,138,170,.10)',
-        borderColor: on ? 'rgba(8,88,151,.35)' : 'rgba(122,138,170,.3)',
+        background: on ? 'rgba(10,88,154,.11)' : 'rgba(122,138,170,.10)',
+        borderColor: on ? 'rgba(10,88,154,.35)' : 'rgba(122,138,170,.3)',
         color: on ? 'var(--accent)' : 'var(--text3, #7a8aaa)',
       }}>
       <span className="inline-block h-[7px] w-[7px] rounded-full" style={{ background: on ? 'var(--accent)' : 'var(--text3, #7a8aaa)' }} />

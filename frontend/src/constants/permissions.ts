@@ -151,7 +151,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
   },
   login_team: {
     label: 'Login Team', key: 'group_login_team_user',
-    icon: '📋', color: 'rgba(212,43,43,.1)', textColor: 'var(--accent2)',
+    icon: '📋', color: 'rgba(227,30,37,.1)', textColor: 'var(--accent2)',
     badgeClass: 'role-badge-login', dept: 'Login Dep',
     canCreateApp: true, canChangeStatus: true,
     canRejectApp: true, canHoldApp: true, canDisburse: true, canDeviation: false,
@@ -782,7 +782,7 @@ export const SECURITY_GROUPS: SecurityGroup[] = [
   { id: 'group_location_user', name: 'Location Head', cat: 'Location Team', color: '#1a4fa3', implied: ['base.group_user'], desc: 'Sees apps in own locations: location_id in user.location_id.ids' },
   { id: 'group_location_manager', name: 'Admin', cat: 'Location Team', color: '#1a4fa3', implied: ['group_location_user'], desc: 'Sees ALL records: (1=1). Highest in Location Team.' },
   { id: 'group_sales_partner_user', name: 'Partner', cat: 'Manager Team', color: '#a159ff', implied: ['base.group_user'], desc: 'Sees own: partner_id = user.partner_id.id' },
-  { id: 'group_sales_executive_manager', name: 'Sales Person', cat: 'Manager Team', color: '#d42b2b', implied: ['group_sales_partner_user'], desc: 'Sees own assigned: assigned_user_id = user.id' },
+  { id: 'group_sales_executive_manager', name: 'Sales Person', cat: 'Manager Team', color: '#e31e25', implied: ['group_sales_partner_user'], desc: 'Sees own assigned: assigned_user_id = user.id' },
   { id: 'group_team_leader_manager', name: 'Team Leader', cat: 'Manager Team', color: '#ffb347', implied: ['group_sales_executive_manager'], desc: "Sees team's: salles_id in user.team_sales_ids.ids" },
   { id: 'group_sales_manager_manager', name: 'Manager', cat: 'Manager Team', color: '#ffb347', implied: ['group_team_leader_manager'], desc: 'Same rule as Team Leader. Highest in Manager Team.' },
   { id: 'group_login_team_user', name: 'Login Team', cat: 'Operation Team', color: '#10b981', implied: ['base.group_user'], desc: 'Sees assigned: login_user_id = user.id' },

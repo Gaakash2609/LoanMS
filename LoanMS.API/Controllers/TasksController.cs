@@ -20,7 +20,7 @@ public class TasksController : BaseController
         if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canViewTasks"))
             return Forbid();
 
-        var q = _db.Tasks
+        var q = _db.Tasks.IncludeDeletedUsers()
             .Include(t => t.AssignedTo)
             .Include(t => t.CreatedBy)
             .AsQueryable();
@@ -78,7 +78,7 @@ public class TasksController : BaseController
     [HttpPatch("{id:int}/reassign")]
     public async Task<IActionResult> Reassign(int id, [FromBody] TaskReassignDto dto)
     {
-        var task = await _db.Tasks.Include(t => t.AssignedTo).FirstOrDefaultAsync(t => t.Id == id);
+        var task = await _db.Tasks.IncludeDeletedUsers().Include(t => t.AssignedTo).FirstOrDefaultAsync(t => t.Id == id);
         if (task == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
 
         // Parity with legacy confirmTaskTransfer (efin-app.js:23099): only the
@@ -110,6 +110,11 @@ public class TasksController : BaseController
     {
         var task = await _db.Tasks.FindAsync(id);
         if (task == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+        // Same visibility rule as GetAll: outside Admin/Manager a user only sees
+        // (and so may only complete/reopen) tasks assigned to or created by them.
+        if (CurrentUserRole != "Admin" && CurrentUserRole != "Manager"
+            && task.AssignedToUserId != CurrentUserId && task.CreatedByUserId != CurrentUserId)
+            return NotFound(ApiResponseDto<bool>.Fail("Not found."));
         task.IsCompleted = !task.IsCompleted;
         task.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();

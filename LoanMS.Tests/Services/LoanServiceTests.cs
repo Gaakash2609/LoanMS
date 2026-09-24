@@ -272,6 +272,25 @@ public class LoanServiceTests
         result.Errors.Should().Contain(e => e.Contains("Cannot move"));
     }
 
+    [Theory]
+    [InlineData(-5000)]
+    [InlineData(0)]
+    public async Task UpdateStatusAsync_ApproveWithNonPositiveAmount_ReturnsFail_AndLeavesLoanUntouched(int amount)
+    {
+        // Regression: -5000 was stored as ApprovedAmount with a negative EMI.
+        var loan = CreateTestLoan();
+        loan.Status = LoanStatus.UnderReview;
+        _loanRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(loan);
+        _loanRepoMock.Setup(r => r.HasAccessAsync(1, It.IsAny<int>(), It.IsAny<string?>())).ReturnsAsync(true);
+
+        var result = await CreateService().UpdateStatusAsync(1,
+            new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Approved, ApprovedAmount = amount }, 1, "Admin");
+
+        result.Success.Should().BeFalse();
+        loan.Status.Should().Be(LoanStatus.UnderReview);
+        loan.ApprovedAmount.Should().BeNull();
+    }
+
     [Fact]
     public async Task UpdateStatusAsync_ValidTransition_ReturnsSuccess()
     {

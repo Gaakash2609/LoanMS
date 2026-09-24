@@ -10,6 +10,7 @@ import {
   camAutoLabel, type CamBand,
 } from '@/constants/cam'
 import { NumberInput } from '@/components/ui/NumberInput'
+import { apiErrorMessage as errorMessage } from '@/utils/apiError'
 
 // ── CAM Matrix admin editor ─────────────────────────────────────────────
 // Ports legacy's #admin-cam-matrix-panel (index.html:4979) and its handlers
@@ -24,10 +25,6 @@ import { NumberInput } from '@/components/ui/NumberInput'
 // Legacy regenerates every label from its salary range on save so a label can
 // never drift from the numbers it describes; that is reproduced here.
 
-function errorMessage(err: unknown, fallback: string): string {
-  const d = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-  return d?.message || d?.errors?.join(' ') || fallback
-}
 
 const BLANK: CamBand = {
   label: '', salaryMin: 0, salaryMax: 0, rateMin: 0, rateMax: 0,

@@ -12,6 +12,7 @@ import { formatDate } from '@/utils/format'
 import { Plus, X } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import TicketDetailModal from '@/components/shared/TicketDetailModal'
+import { apiErrorMessage as errorMessage } from '@/utils/apiError'
 
 const STATUS_VARIANT: Record<string, 'warning'|'info'|'success'|'danger'> = {
   Open: 'warning', 'In Progress': 'info', Resolved: 'success', Closed: 'danger',
@@ -20,10 +21,6 @@ const STATUS_VARIANT: Record<string, 'warning'|'info'|'success'|'danger'> = {
 const PAGE_SIZE = 20
 const PRIORITIES = ['Low', 'Medium', 'High']
 
-function errorMessage(err: unknown, fallback: string): string {
-  const msg = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-  return msg?.message || msg?.errors?.join(' ') || fallback
-}
 
 // ── Phase 17: Create Ticket modal ───────────────────────────────────────
 // Uses the existing GET /api/users/lookup endpoint for the optional
@@ -154,7 +151,7 @@ export default function TicketsPage() {
   const pageItems = (allTickets ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const priorityMeta = (p: string) => p === 'High'
-    ? { accent: 'var(--danger)', tint: 'rgba(192,57,43,.1)' }
+    ? { accent: 'var(--danger)', tint: 'rgba(227,30,37,.1)' }
     : p === 'Medium' ? { accent: 'var(--warn)', tint: 'rgba(230,126,0,.12)' }
     : { accent: 'var(--success)', tint: 'rgba(26,115,64,.1)' }
   const FILTERS = ['', 'Open', 'In Progress', 'Resolved', 'Closed']
@@ -235,9 +232,9 @@ export default function TicketsPage() {
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                           <Button size="sm" variant="ghost" onClick={() => setDetailTicket(t)}>💬 Notes</Button>
                           {closedOrResolved
-                            ? <Button size="sm" variant="ghost" disabled={reopenM.isPending} onClick={() => reopenM.mutate(t.id)}>↩ Reopen</Button>
+                            ? <Button size="sm" variant="ghost" disabled={reopenM.isPending} onClick={() => { if (confirm(`Reopen ticket #${t.id}?`)) reopenM.mutate(t.id) }}>↩ Reopen</Button>
                             : <Button size="sm" variant="success" disabled={resolveM.isPending} onClick={() => resolveM.mutate(t.id)}>✓ Resolve</Button>}
-                          {t.status !== 'Closed' && <Button size="sm" variant="danger" disabled={closeM.isPending} onClick={() => closeM.mutate(t.id)}>✕</Button>}
+                          {t.status !== 'Closed' && <Button size="sm" variant="danger" disabled={closeM.isPending} onClick={() => { if (confirm(`Close ticket #${t.id}? This cannot be undone.`)) closeM.mutate(t.id) }}>✕</Button>}
                         </div>
                       </td>
                     </tr>

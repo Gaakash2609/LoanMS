@@ -15,7 +15,7 @@ export function Card({ children, className, padding = true, hoverLift = false }:
     <div
       className={cn(
         'efin-card',
-        hoverLift && 'hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-16px_rgba(8,88,151,.3)]',
+        hoverLift && 'hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-16px_rgba(10,88,154,.3)]',
         // legacy .card-body is 22px, not Tailwind's 24px p-6.
         padding && 'p-[22px]',
         className

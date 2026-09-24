@@ -10,7 +10,17 @@ export function useLogin() {
   const qc       = useQueryClient()
 
   return useMutation({
-    mutationFn: authApi.login,
+    // Account lockout (AuthController: 5 failures in the window) answers
+    // HTTP 200 with success:false + "Too many failed attempts. Try again in
+    // N minutes." — throw it so LoginPage's error box shows that message
+    // instead of the Sign In click silently doing nothing.
+    mutationFn: async (req: Parameters<typeof authApi.login>[0]) => {
+      const res = await authApi.login(req)
+      if (!res.data.success) throw new Error(res.data.message || 'Sign-in failed. Please try again.')
+      return res
+    },
+    // LoginPage renders its own error box — no duplicate toast.
+    meta: { errorToast: false, successToast: false },
     onSuccess: ({ data }) => {
       if (data.success && data.data) {
         const { user, accessToken, refreshToken } = data.data
@@ -38,6 +48,7 @@ export function useLogout() {
 
   return useMutation({
     mutationFn: authApi.logout,
+    meta: { silent: true },
     onSettled: () => {
       logout()
       qc.clear()

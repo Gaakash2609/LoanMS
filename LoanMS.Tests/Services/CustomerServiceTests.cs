@@ -46,7 +46,7 @@ public class CustomerServiceTests
     [Fact]
     public async Task CreateAsync_DuplicateEmail_ReturnsFail()
     {
-        _repoMock.Setup(r => r.EmailExistsAsync("existing@test.com", null)).ReturnsAsync(true);
+        _repoMock.Setup(r => r.EmailTakenIncludingDeletedAsync("existing@test.com", null)).ReturnsAsync(true);
         var svc = CreateService();
         var result = await svc.CreateAsync(new CreateCustomerRequestDto
         {
@@ -59,8 +59,8 @@ public class CustomerServiceTests
     [Fact]
     public async Task CreateAsync_DuplicatePan_ReturnsFail()
     {
-        _repoMock.Setup(r => r.EmailExistsAsync(It.IsAny<string>(), null)).ReturnsAsync(false);
-        _repoMock.Setup(r => r.PanExistsAsync("ABCDE1234F", null)).ReturnsAsync(true);
+        _repoMock.Setup(r => r.EmailTakenIncludingDeletedAsync(It.IsAny<string>(), null)).ReturnsAsync(false);
+        _repoMock.Setup(r => r.PanTakenIncludingDeletedAsync("ABCDE1234F", null)).ReturnsAsync(true);
         var svc = CreateService();
         var result = await svc.CreateAsync(new CreateCustomerRequestDto
         {
@@ -125,22 +125,5 @@ public class CustomerServiceTests
         _cacheMock.Verify(c => c.GetAsync<PagedResultDto<CustomerDto>>(It.IsAny<string>()), Times.Never);
         _cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<PagedResultDto<CustomerDto>>(), It.IsAny<TimeSpan?>()), Times.Never);
         _cacheMock.Verify(c => c.RemoveByPrefixAsync(It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task DeleteAsync_WithActiveLoans_ReturnsFail()
-    {
-        var customer = new Customer { Id = 1, FullName = "Test", Email = "t@t.com", Phone = "9999999999" };
-        _repoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(customer);
-        _loanMock.Setup(r => r.GetLoansByCustomerAsync(1)).ReturnsAsync(new List<LoanMS.Domain.Entities.Loan>
-        {
-            new() { Id = 1, Status = LoanStatus.Submitted, LoanNumber = "X", Customer = customer,
-                    CreatedBy = new User { Id=1, FullName="Admin", Email="a@a.com" } }
-        });
-
-        var svc = CreateService();
-        var result = await svc.DeleteAsync(1);
-        result.Success.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("active loans"));
     }
 }

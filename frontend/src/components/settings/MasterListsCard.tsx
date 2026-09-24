@@ -10,6 +10,7 @@ import {
 } from '@/api/masterListsApi'
 import { MASTER_LIST_DEFS, SOURCE_SCREEN } from '@/constants/masterLists'
 import { useAuthStore } from '@/store/authStore'
+import { apiErrorMessage as errorMessage } from '@/utils/apiError'
 
 // ── Loan Form Dropdown Lists ────────────────────────────────────────────
 // Ports legacy's Settings → System & Data "Loan Form Dropdown Lists" folder
@@ -24,10 +25,6 @@ import { useAuthStore } from '@/store/authStore'
 // owns those records. Making them editable here would recreate the duplicate
 // source of truth legacy removed.
 
-function errorMessage(err: unknown, fallback: string): string {
-  const d = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-  return d?.message || d?.errors?.join(' ') || fallback
-}
 
 export default function MasterListsCard() {
   const qc = useQueryClient()

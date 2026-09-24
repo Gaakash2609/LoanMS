@@ -1,4 +1,4 @@
-import type { LoanListItem, LoanStatus } from '@/types'
+import type { LoanFilter, LoanStatus } from '@/types'
 
 // ── Applications → Advanced Filter ──────────────────────────────────────
 // Ports legacy's advFilter surface (efin-app.js:35119-35630): the filter
@@ -54,8 +54,8 @@ export const EXPORT_SCOPES: { scope: ExportScope; label: string }[] = [
  * column, no DTO field and no capture of it in the React wizard either, so a
  * Lead Source control would have nothing to filter on.
  *
- * Everything else here is backed by a real column. status / loanType / the
- * date range go to the server; the rest are evaluated on the returned rows.
+ * Everything else here is backed by a real column, and every key is sent to
+ * the server (see advToServerFilter) — none is evaluated on one page only.
  */
 export interface AdvFilter {
   status: string
@@ -163,59 +163,32 @@ export function resolveDateRange(f: AdvFilter): { from: string | null; to: strin
 }
 
 /**
- * Everything the API cannot express. Status / loan type / dates / search go
- * to the server instead, so they are intentionally absent here.
- *
- * Legacy compares the sales person by exact string against a single `sales`
- * field. This list carries two names — the assignee and the creator — so a
- * row matches when either does, which is what "applications for this person"
- * means to the user in both apps.
+ * Maps the Advanced Filter onto the server's LoanFilterDto. Every predicate
+ * runs on the server, so pagination, totals and export see the whole
+ * result set (these used to be evaluated in the browser on the current page
+ * only, silently missing matches on other pages). Empty values clear the key.
  */
-export function applyClientSideFilters(rows: LoanListItem[], f: AdvFilter): LoanListItem[] {
-  let out = rows
-  if (f.amountMin) out = out.filter(r => Number(r.requestedAmount) >= Number(f.amountMin))
-  if (f.amountMax) out = out.filter(r => Number(r.requestedAmount) <= Number(f.amountMax))
-  if (f.cibilMin)  out = out.filter(r => r.customerCibilScore != null && r.customerCibilScore >= Number(f.cibilMin))
-  if (f.cibilMax)  out = out.filter(r => r.customerCibilScore != null && r.customerCibilScore <= Number(f.cibilMax))
-  if (f.salesPerson) {
-    const want = f.salesPerson.toLowerCase()
-    out = out.filter(r =>
-      (r.assignedToName ?? '').toLowerCase() === want ||
-      (r.createdByName ?? '').toLowerCase() === want)
+export function advToServerFilter(f: AdvFilter): Partial<LoanFilter> {
+  const num = (v: string) => (v.trim() === '' ? undefined : Number(v))
+  const txt = (v: string) => (v.trim() === '' ? undefined : v.trim())
+  const { from, to } = resolveDateRange(f)
+  return {
+    status: (f.status || undefined) as LoanStatus | undefined,
+    loanType: f.loanType || undefined,
+    dateFrom: from ?? undefined, dateTo: to ?? undefined,
+    minAmount: num(f.amountMin), maxAmount: num(f.amountMax),
+    minCibil: num(f.cibilMin), maxCibil: num(f.cibilMax),
+    minSalary: num(f.salaryMin), maxSalary: num(f.salaryMax),
+    salesPerson: txt(f.salesPerson), location: txt(f.location), channel: txt(f.channel),
+    bank: txt(f.bank), purpose: txt(f.purpose), empType: txt(f.empType),
+    city: txt(f.city), state: txt(f.state), gender: txt(f.gender),
+    dsaName: txt(f.dsaName), partnerName: txt(f.linkedPartner), companyName: txt(f.companyName),
   }
-
-  // Legacy compares these with exact equality, case-insensitively for the
-  // free-text ones (dsaName / linkedPartner / companyName) — reproduced.
-  const eq = (v: string | null | undefined, want: string) =>
-    (v ?? '').toLowerCase() === want.toLowerCase()
-
-  if (f.location)      out = out.filter(r => eq(r.locationName, f.location))
-  if (f.purpose)       out = out.filter(r => eq(r.purpose, f.purpose))
-  if (f.bank)          out = out.filter(r => eq(r.selectedLenderNames, f.bank))
-  if (f.empType)       out = out.filter(r => eq(r.customerEmploymentType, f.empType))
-  if (f.city)          out = out.filter(r => eq(r.customerCity, f.city))
-  if (f.state)         out = out.filter(r => eq(r.customerState, f.state))
-  if (f.gender)        out = out.filter(r => eq(r.customerGender, f.gender))
-  if (f.dsaName)       out = out.filter(r => eq(r.dsaName, f.dsaName))
-  if (f.linkedPartner) out = out.filter(r => eq(r.partnerName, f.linkedPartner))
-  if (f.companyName)   out = out.filter(r => eq(r.customerCompanyName, f.companyName))
-  if (f.channel)       out = out.filter(r => eq(fromRemarks(r.remarks, 'Channel'), f.channel))
-
-  if (f.salaryMin) out = out.filter(r => r.customerMonthlyIncome != null && Number(r.customerMonthlyIncome) >= Number(f.salaryMin))
-  if (f.salaryMax) out = out.filter(r => r.customerMonthlyIncome != null && Number(r.customerMonthlyIncome) <= Number(f.salaryMax))
-
-  return out
 }
 
 /** Distinct non-empty values for a dropdown, sorted. */
 export function distinct(values: (string | null | undefined)[]): string[] {
   return Array.from(new Set(values.filter((v): v is string => !!v && v.trim() !== ''))).sort()
-}
-
-/** True when a filter needs the whole result set rather than one page. */
-export function needsFullFetch(f: AdvFilter): boolean {
-  const serverSide: (keyof AdvFilter)[] = ['status', 'loanType', 'dateMode', 'dateFrom', 'dateTo']
-  return (Object.keys(f) as (keyof AdvFilter)[]).some(k => !serverSide.includes(k) && !!f[k])
 }
 
 /** Maps an export scope onto the status the server should filter by. */

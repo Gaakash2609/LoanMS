@@ -54,7 +54,7 @@ export function Panel({ title, action, children }: { title: string; action?: Rea
     <div className="bg-surface rounded-[18px] border border-token shadow-token overflow-hidden">
       <div
         className="flex items-center gap-3 px-[22px] py-[18px] border-b border-token"
-        style={{ background: 'linear-gradient(90deg, rgba(8,88,151,.03), transparent)' }}
+        style={{ background: 'linear-gradient(90deg, rgba(10,88,154,.03), transparent)' }}
       >
         <p className="flex-1 text-[14.5px] font-bold" style={{ fontFamily: 'var(--font-head)', letterSpacing: '-.2px' }}>
           {title}
@@ -133,7 +133,7 @@ export function MonthlyDisbursalsChart({ loans }: { loans: LoanListItem[] }) {
             <div className="chart-bar-track">
               <div
                 className="chart-bar-inner"
-                style={{ height: `${Math.max(6, (m.applications / max) * 130)}px`, background: i === currentIdx ? 'rgba(8,88,151,.32)' : 'rgba(8,88,151,.22)', borderColor: 'var(--accent)' }}
+                style={{ height: `${Math.max(6, (m.applications / max) * 130)}px`, background: i === currentIdx ? 'rgba(10,88,154,.32)' : 'rgba(10,88,154,.22)', borderColor: 'var(--accent)' }}
                 title={`${m.applications} applications in ${m.label}`}
               />
               <div

@@ -143,7 +143,7 @@ export default function ProductOfferMatrixCard() {
             // Legacy (product-offer-matrix.js ppRenderProductMatrixCards) renders
             // each of these as its own 16px-radius card with a 40x40 gradient
             // icon box (per-product `p.color` pair) and an ADMIN ONLY chip at
-            // rgba(212,43,43,.1) bg / var(--accent2) text -- React had the
+            // rgba(227,30,37,.1) bg / var(--accent2) text -- React had the
             // right radius on the table below but a plain `rounded-xl` (12px)
             // card, a bare emoji with no icon box at all (the gradient `color`
             // field already exists on PP_PRODUCTS/ProductInfo and was simply
@@ -166,7 +166,7 @@ export default function ProductOfferMatrixCard() {
                   </div>
                   <span
                     className="text-[10.5px] font-bold px-2.5 py-[3px] rounded-full tracking-[.3px]"
-                    style={{ background: 'rgba(212, 43, 43, .1)', color: 'var(--accent2)' }}
+                    style={{ background: 'rgba(227, 30, 37, .1)', color: 'var(--accent2)' }}
                   >
                     ADMIN ONLY
                   </span>

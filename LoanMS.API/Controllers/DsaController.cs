@@ -54,6 +54,33 @@ public class DsaController : BaseController
     }
 
     /// <summary>
+    /// Partners/DSAs this caller may see — the one rule shared by the list and
+    /// by partner documents (KYC files). Null when neither the DSA nor the
+    /// Partner management menu is allowed for this role. A Partner sees only
+    /// its own record; a DSA its own plus the partners mapped under it.
+    /// </summary>
+    private async Task<IQueryable<DsaPartner>?> ScopedPartnersAsync()
+    {
+        var dsaOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "dsa-mgmt");
+        var partnerOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "partner-mgmt");
+        if (!dsaOk && !partnerOk) return null;
+
+        var query = _db.DsaPartners.AsQueryable();
+
+        if (string.Equals(CurrentUserRole, "Partner", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(d => d.LinkedUserId == CurrentUserId);
+        }
+        else if (string.Equals(CurrentUserRole, "Dsa", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(d =>
+                d.LinkedUserId == CurrentUserId ||
+                (d.MappedDsa != null && d.MappedDsa.LinkedUserId == CurrentUserId));
+        }
+        return query;
+    }
+
+    /// <summary>
     /// Phase 4 — role-scoped: Admin/Manager/Sales keep the existing full-list
     /// behavior (unchanged). Partner now only sees their OWN Partner record
     /// (LinkedUserId == CurrentUserId) — a Partner login must never be able
@@ -73,22 +100,8 @@ public class DsaController : BaseController
         // Management and Partner Management pages (frontend filters by
         // PartnerType client-side), so access is allowed if EITHER menu
         // permission is on for this role, not both.
-        var dsaOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "dsa-mgmt");
-        var partnerOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "partner-mgmt");
-        if (!dsaOk && !partnerOk) return Forbid();
-
-        var query = _db.DsaPartners.AsQueryable();
-
-        if (string.Equals(CurrentUserRole, "Partner", StringComparison.OrdinalIgnoreCase))
-        {
-            query = query.Where(d => d.LinkedUserId == CurrentUserId);
-        }
-        else if (string.Equals(CurrentUserRole, "Dsa", StringComparison.OrdinalIgnoreCase))
-        {
-            query = query.Where(d =>
-                d.LinkedUserId == CurrentUserId ||
-                (d.MappedDsa != null && d.MappedDsa.LinkedUserId == CurrentUserId));
-        }
+        var query = await ScopedPartnersAsync();
+        if (query == null) return Forbid();
 
         var dsa = await query
             .Include(d => d.MappedSalesUser)
@@ -341,7 +354,10 @@ public class DsaController : BaseController
         if (fileName.Contains("..") || fileName.Contains('/') || fileName.Contains('\\'))
             return BadRequest(ApiResponseDto<object>.Fail("Invalid file reference."));
 
-        var dsa = await _db.DsaPartners.FindAsync(id);
+        // Partner KYC files: same visibility as the partner list (was unchecked).
+        var scoped = await ScopedPartnersAsync();
+        if (scoped == null) return Forbid();
+        var dsa = await scoped.FirstOrDefaultAsync(d => d.Id == id);
         if (dsa == null) return NotFound(ApiResponseDto<object>.Fail("DSA/Partner not found."));
 
         var storageKey = $"dsa/{id}/{fileName}";
@@ -367,7 +383,10 @@ public class DsaController : BaseController
     [HttpGet("{id:int}/documents")]
     public async Task<IActionResult> GetDocuments(int id)
     {
-        var dsa = await _db.DsaPartners.FindAsync(id);
+        // Partner KYC files: same visibility as the partner list (was unchecked).
+        var scoped = await ScopedPartnersAsync();
+        if (scoped == null) return Forbid();
+        var dsa = await scoped.FirstOrDefaultAsync(d => d.Id == id);
         if (dsa == null) return NotFound(ApiResponseDto<object>.Fail("DSA/Partner not found."));
 
         var docs = await _db.DsaDocuments

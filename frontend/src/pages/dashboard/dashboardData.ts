@@ -85,10 +85,10 @@ export const LOAN_TYPE_META: Record<LoanType, { label: string; color: string }> 
 // number is legacy's red --accent2, and "orange" is --accent3, exactly as
 // legacy renders them (kept even though it reads quirky, per Vanilla parity).
 export const VARIANTS = {
-  blue:   { accent: 'var(--accent)',  num: 'var(--accent)',  tint: 'rgba(8, 88, 151, .1)',  shadow: 'rgba(8, 88, 151, .3)',  emoji: '📋' },
-  green:  { accent: 'var(--success)', num: 'var(--accent2)', tint: 'rgba(212, 43, 43, .1)',  shadow: 'rgba(26, 115, 64, .3)',  emoji: '✅' },
+  blue:   { accent: 'var(--accent)',  num: 'var(--accent)',  tint: 'rgba(10, 88, 154, .1)',  shadow: 'rgba(10, 88, 154, .3)',  emoji: '📋' },
+  green:  { accent: 'var(--success)', num: 'var(--accent2)', tint: 'rgba(227, 30, 37, .1)',  shadow: 'rgba(26, 115, 64, .3)',  emoji: '✅' },
   orange: { accent: 'var(--warn)',    num: 'var(--accent3)', tint: 'rgba(230, 126, 0, .1)',  shadow: 'rgba(230, 126, 0, .3)',  emoji: '⚡' },
-  red:    { accent: 'var(--danger)',  num: 'var(--danger)',  tint: 'rgba(192, 57, 43, .1)',  shadow: 'rgba(192, 57, 43, .3)',  emoji: '🚫' },
+  red:    { accent: 'var(--danger)',  num: 'var(--danger)',  tint: 'rgba(227, 30, 37, .1)',  shadow: 'rgba(227, 30, 37, .3)',  emoji: '🚫' },
 } as const
 
 export type VariantKey = keyof typeof VARIANTS

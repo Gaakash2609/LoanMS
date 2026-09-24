@@ -38,11 +38,15 @@ public class SearchController : BaseController
 
         var term = q.Trim();
 
-        var loansTask = _loanService.GetAllAsync(
+        // Sequential on purpose: all three share the request's single scoped
+        // DbContext, and EF Core forbids concurrent operations on one context —
+        // running them with Task.WhenAll failed with "A second operation was
+        // started on this context instance" (500 on the header search).
+        var loansResult = await _loanService.GetAllAsync(
             new LoanFilterDto { Page = 1, PageSize = 10, Search = term, SortBy = "CreatedAt", SortDir = "desc" },
             CurrentUserId, CurrentUserRole);
 
-        var customersTask = _customerService.GetAllAsync(1, 10, term, CurrentUserId, CurrentUserRole);
+        var customersResult = await _customerService.GetAllAsync(1, 10, term, CurrentUserId, CurrentUserRole);
 
         // DSA/Partner — same role-scoping DsaController.GetAll already applies.
         var dsaQuery = _db.DsaPartners.AsQueryable();
@@ -50,25 +54,23 @@ public class SearchController : BaseController
             dsaQuery = dsaQuery.Where(d => d.LinkedUserId == CurrentUserId);
         else if (string.Equals(CurrentUserRole, "Dsa", StringComparison.OrdinalIgnoreCase))
             dsaQuery = dsaQuery.Where(d => d.LinkedUserId == CurrentUserId || (d.MappedDsa != null && d.MappedDsa.LinkedUserId == CurrentUserId));
-        var dsaPartnersTask = dsaQuery
+        var dsaPartners = await dsaQuery
             .Where(d => d.Name.Contains(term) || (d.Code != null && d.Code.Contains(term)) || (d.Phone != null && d.Phone.Contains(term)))
             .OrderBy(d => d.Name)
             .Select(d => new { d.Id, d.Name, d.Code, PartnerType = d.PartnerType.ToString() })
             .Take(10)
             .ToListAsync();
 
-        await Task.WhenAll(loansTask, customersTask, dsaPartnersTask);
-
-        var loans = (loansTask.Result.Data?.Items ?? new List<LoanListDto>())
+        var loans = (loansResult.Data?.Items ?? new List<LoanListDto>())
             .Select(l => new { l.Id, l.LoanNumber, l.CustomerName, l.Status, l.RequestedAmount });
-        var customers = (customersTask.Result.Data?.Items ?? new List<CustomerDto>())
+        var customers = (customersResult.Data?.Items ?? new List<CustomerDto>())
             .Select(c => new { c.Id, c.FullName, c.Phone });
 
         return Ok(ApiResponseDto<object>.Ok(new
         {
             loans,
             customers,
-            dsaPartners = dsaPartnersTask.Result
+            dsaPartners
         }));
     }
 }

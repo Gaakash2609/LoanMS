@@ -42,6 +42,18 @@ public abstract class BaseController : ControllerBase
     protected string CurrentUserEmail =>
         User.FindFirst(ClaimTypes.Email)?.Value ?? string.Empty;
 
+    /// <summary>
+    /// "May this caller see this loan application?" — the same
+    /// LoanRepository.ApplyVisibilityScope rule the loan list/detail, reports
+    /// and dashboard use (single source of truth). Endpoints that take a loan id
+    /// must check this server-side; a hidden button is not authorization.
+    /// Callers answer NotFound when false, exactly like GET /api/loans/{id}.
+    /// </summary>
+    protected Task<bool> CanSeeLoanAsync(AppDbContext db, int loanId) =>
+        LoanMS.Infrastructure.Repositories.LoanRepository
+            .ApplyVisibilityScope(db, db.Loans, CurrentUserId, CurrentUserRole)
+            .AnyAsync(l => l.Id == loanId);
+
     protected IActionResult ApiResult<T>(ApiResponseDto<T> response)
     {
         if (!response.Success) return BadRequest(response);

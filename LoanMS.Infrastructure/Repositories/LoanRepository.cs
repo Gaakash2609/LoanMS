@@ -14,7 +14,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
 
     public async Task<Loan?> GetWithDetailsAsync(int id, int? currentUserId = null, string? currentUserRole = null)
     {
-        var query = _set
+        var query = _set.IncludeDeletedUsers()
             .Include(l => l.Customer)
             .Include(l => l.CreatedBy)
             .Include(l => l.AssignedTo)
@@ -529,7 +529,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
 
     public async Task<PagedResultDto<LoanListDto>> GetPagedAsync(LoanFilterDto filter, int? currentUserId = null, string? currentUserRole = null)
     {
-        var query = _set
+        var query = _set.IncludeDeletedUsers()
             .Include(l => l.Customer)
             .Include(l => l.CreatedBy)
             .Include(l => l.AssignedTo)
@@ -600,7 +600,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
     /// </summary>
     public async Task<List<LoanListDto>> GetForExportAsync(LoanFilterDto filter, int? currentUserId = null, string? currentUserRole = null, int maxRows = 5000)
     {
-        var query = _set
+        var query = _set.IncludeDeletedUsers()
             .Include(l => l.Customer)
             .Include(l => l.CreatedBy)
             .Include(l => l.AssignedTo)
@@ -733,6 +733,8 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
         if (filter.FromDate.HasValue) query = query.Where(l => l.CreatedAt >= filter.FromDate.Value);
         if (filter.ToDate.HasValue)   query = query.Where(l => l.CreatedAt <= filter.ToDate.Value.AddDays(1));
 
+        query = ApplyAdvancedFilters(query, filter);
+
         return filter.SortBy.ToLower() switch
         {
             "amount"     => filter.SortDir == "asc" ? query.OrderBy(l => l.RequestedAmount)  : query.OrderByDescending(l => l.RequestedAmount),
@@ -757,6 +759,87 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
     /// matches, which the caller treats as "this scope contributes no rows"
     /// rather than "match everything".
     /// </summary>
+    public async Task<LoanFilterOptionsDto> GetFilterOptionsAsync(int userId, string? role)
+    {
+        var scope = ApplyVisibilityScope(_ctx, _set.IncludeDeletedUsers(), userId, role);
+
+        async Task<List<string>> Distinct(IQueryable<string?> values) =>
+            (await values.Where(v => v != null && v != "").Distinct().ToListAsync())
+                .Select(v => v!.Trim()).Where(v => v.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v).ToList();
+
+        var sales = await Distinct(scope.Select(l => (string?)l.CreatedBy.FullName));
+        var assigned = await Distinct(scope.Where(l => l.AssignedTo != null).Select(l => (string?)l.AssignedTo!.FullName));
+
+        // Channel lives inside Remarks ("Source: X | Channel: Y") — parse it the
+        // same way WizardController.GetDraft does.
+        var remarks = await scope.Where(l => l.Remarks != null && l.Remarks.Contains("Channel:"))
+            .Select(l => l.Remarks!).Distinct().ToListAsync();
+        var channels = remarks
+            .Select(r => System.Text.RegularExpressions.Regex.Match(r, @"Channel:\s*([^|]+?)\s*(\||$)").Groups[1].Value)
+            .Where(v => v.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v).ToList();
+
+        return new LoanFilterOptionsDto
+        {
+            SalesPeople = sales.Union(assigned, StringComparer.OrdinalIgnoreCase).OrderBy(v => v).ToList(),
+            Locations   = await Distinct(scope.Where(l => l.Location != null).Select(l => (string?)l.Location!.Name)),
+            Channels    = channels,
+            Banks       = await Distinct(scope.Select(l => l.SelectedLenderNames)),
+            Purposes    = await Distinct(scope.Select(l => l.Purpose)),
+            EmpTypes    = await Distinct(scope.Select(l => l.Customer.EmploymentType)),
+            Cities      = await Distinct(scope.Select(l => l.Customer.City)),
+            States      = await Distinct(scope.Select(l => l.Customer.State)),
+            Genders     = await Distinct(scope.Select(l => l.Customer.Gender)),
+            DsaNames    = await Distinct(scope.Where(l => l.Dsa != null).Select(l => (string?)l.Dsa!.Name)),
+            Partners    = await Distinct(scope.Where(l => l.Partner != null).Select(l => (string?)l.Partner!.Name)),
+            Companies   = await Distinct(scope.Select(l => l.Customer.CompanyName)),
+        };
+    }
+
+    /// <summary>
+    /// Applications "Advanced Filter" predicates. They used to run in the
+    /// browser on the current page only, so matches on other pages were never
+    /// shown and totals/pagination ignored them. Same semantics as before:
+    /// exact, case-insensitive text matches; inclusive numeric bounds; rows
+    /// without a value never match a bound on that value.
+    /// </summary>
+    private static IQueryable<Loan> ApplyAdvancedFilters(IQueryable<Loan> query, LoanFilterDto f)
+    {
+        static string? Norm(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim().ToLower();
+
+        if (f.MinAmount.HasValue) query = query.Where(l => l.RequestedAmount >= f.MinAmount.Value);
+        if (f.MaxAmount.HasValue) query = query.Where(l => l.RequestedAmount <= f.MaxAmount.Value);
+        if (f.MinCibil.HasValue)  query = query.Where(l => l.Customer.CibilScore != null && l.Customer.CibilScore >= f.MinCibil.Value);
+        if (f.MaxCibil.HasValue)  query = query.Where(l => l.Customer.CibilScore != null && l.Customer.CibilScore <= f.MaxCibil.Value);
+        if (f.MinSalary.HasValue) query = query.Where(l => l.Customer.MonthlyIncome != null && l.Customer.MonthlyIncome >= f.MinSalary.Value);
+        if (f.MaxSalary.HasValue) query = query.Where(l => l.Customer.MonthlyIncome != null && l.Customer.MonthlyIncome <= f.MaxSalary.Value);
+
+        if (Norm(f.SalesPerson) is { } sales)
+            query = query.Where(l => l.CreatedBy.FullName.ToLower() == sales
+                                  || (l.AssignedTo != null && l.AssignedTo.FullName.ToLower() == sales));
+        if (Norm(f.Location) is { } loc)      query = query.Where(l => l.Location != null && l.Location.Name.ToLower() == loc);
+        if (Norm(f.Bank) is { } bank)         query = query.Where(l => l.SelectedLenderNames != null && l.SelectedLenderNames.ToLower() == bank);
+        if (Norm(f.Purpose) is { } purpose)   query = query.Where(l => l.Purpose != null && l.Purpose.ToLower() == purpose);
+        if (Norm(f.EmpType) is { } emp)       query = query.Where(l => l.Customer.EmploymentType != null && l.Customer.EmploymentType.ToLower() == emp);
+        if (Norm(f.City) is { } city)         query = query.Where(l => l.Customer.City != null && l.Customer.City.ToLower() == city);
+        if (Norm(f.State) is { } state)       query = query.Where(l => l.Customer.State != null && l.Customer.State.ToLower() == state);
+        if (Norm(f.Gender) is { } gender)     query = query.Where(l => l.Customer.Gender != null && l.Customer.Gender.ToLower() == gender);
+        if (Norm(f.DsaName) is { } dsa)       query = query.Where(l => l.Dsa != null && l.Dsa.Name.ToLower() == dsa);
+        if (Norm(f.PartnerName) is { } ptn)   query = query.Where(l => l.Partner != null && l.Partner.Name.ToLower() == ptn);
+        if (Norm(f.CompanyName) is { } comp)  query = query.Where(l => l.Customer.CompanyName != null && l.Customer.CompanyName.ToLower() == comp);
+
+        // The wizard writes Remarks as "Source: X | Channel: Y" (Channel last),
+        // so the channel is either followed by " |" or ends the string.
+        if (Norm(f.Channel) is { } channel)
+        {
+            var mid = "channel: " + channel + " |";
+            var end = "channel: " + channel;
+            query = query.Where(l => l.Remarks != null &&
+                (l.Remarks.ToLower().Contains(mid) || l.Remarks.ToLower().EndsWith(end)));
+        }
+        return query;
+    }
+
     private static LoanType? ParseLoanTypeToken(string term)
         => MatchEnumLabel<LoanType>(term, v => v switch
         {
@@ -824,7 +907,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
         // Phase 2B — dashboard/recent-loans uses the same visibility scope as
         // the list and detail endpoints, so a Sales/Dsa/Partner/Manager user
         // never sees totals or "recent loans" that include loans outside their scope.
-        var baseQuery = _set.AsQueryable();
+        var baseQuery = _set.IncludeDeletedUsers();
         if (userId.HasValue)
             baseQuery = ApplyVisibilityScope(_ctx, baseQuery, userId.Value, role);
 
@@ -955,7 +1038,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
     /// </summary>
     private async Task<List<RecentActivityDto>> GetRecentActivityAsync(int? userId, string? role, int take)
     {
-        var loanScope = _set.AsQueryable();
+        var loanScope = _set.IncludeDeletedUsers();
         if (userId.HasValue)
             loanScope = ApplyVisibilityScope(_ctx, loanScope, userId.Value, role);
 

@@ -1,16 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { loansApi } from '@/api/loansApi'
-import type { CreateLoanRequest, LoanFilter, LoanListItem } from '@/types'
+import type { CreateLoanRequest, LoanFilter } from '@/types'
 import api from '@/api/axios'
 import type { ApiResponse } from '@/types'
 import { emailApi, lenderEmailThreadsApi } from '@/api/lenderEmailApi'
 import { buildSubjectAndBody, STATUS_TO_STAGE_KEY, AUTO_EMAIL_TRIGGER_STAGES } from '@/utils/lenderEmailTemplates'
-import { fetchAllPages } from '@/utils/fetchAllPages'
+import { useAuthStore } from '@/store/authStore'
 
 export const LOAN_KEYS = {
   all:       ['loans'] as const,
   list:      (filter: LoanFilter) => ['loans', 'list', filter] as const,
-  detail:    (id: number)  => ['loans', 'detail', id] as const,
+  // userId included so switching accounts never serves one user's role-filtered
+  // loan detail to another user in the same browser session.
+  detail:    (id: number, userId?: number) => ['loans', 'detail', id, userId ?? 0] as const,
   dashboard: ['loans', 'dashboard'] as const,
 }
 
@@ -27,10 +29,13 @@ export function useLoans(filter: LoanFilter) {
 }
 
 export function useLoan(id: number) {
+  const userId = useAuthStore(s => s.user?.id)
   return useQuery({
-    queryKey: LOAN_KEYS.detail(id),
+    queryKey: LOAN_KEYS.detail(id, userId),
     queryFn:  () => loansApi.getById(id).then((r) => r.data.data),
-    enabled:  !!id,
+    enabled:  !!id && !!userId,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 }
 
@@ -67,12 +72,7 @@ export function useDashboard() {
 export function useDashboardBreakdown() {
   return useQuery({
     queryKey: ['loans', 'dashboard-breakdown'],
-    queryFn:  () =>
-      fetchAllPages<LoanListItem>(
-        (page, pageSize) => loansApi.getAll({ page, pageSize }).then((r) =>
-          r.data.data ?? { items: [], totalCount: 0, page, pageSize, totalPages: 0, hasNext: false, hasPrev: false }),
-        100,
-      ),
+    queryFn:  () => loansApi.getAllPages({}),
     staleTime: 60_000,
   })
 }

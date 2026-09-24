@@ -390,7 +390,7 @@ function NewClaimModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
             <div className="mb-4 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-500">⏳ Calculating suggested payout…</div>
           )}
           {!suggestLoading && suggestion && (
-            <div className="mb-4 rounded-lg border px-3 py-2 text-xs" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(8,88,151,.2)', color: 'var(--text2)' }}>
+            <div className="mb-4 rounded-lg border px-3 py-2 text-xs" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(10,88,154,.2)', color: 'var(--text2)' }}>
               {suggestion.ruleConfigured
                 ? <>💰 <strong>Suggested payout: {formatCurrency(suggestion.suggestedAmount)}</strong> — calculated automatically from the configured payout rule.</>
                 : <>⚠ No payout rule configured for this loan type yet.{!canOverrideAmount && ' A claim cannot be submitted until an Admin sets one.'}</>}
@@ -399,7 +399,7 @@ function NewClaimModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
                   this (PayoutController.Submit); this field is what actually
                   reaches it. */}
               {canOverrideAmount && (
-                <div className="mt-2 pt-2 border-t" style={{ borderColor: 'rgba(8,88,151,.15)' }}>
+                <div className="mt-2 pt-2 border-t" style={{ borderColor: 'rgba(10,88,154,.15)' }}>
                   <label className="text-[11px] font-semibold text-gray-600 block mb-1">
                     Payout Amount (₹) {!suggestion.ruleConfigured && <span className="text-red-500">*</span>}
                   </label>
@@ -784,7 +784,7 @@ export default function PayoutPage() {
             <Button size="sm" variant="success" onClick={() => update.mutate({ id: r.id, newStatus: 'Verified' })} className="text-xs">
               Approve
             </Button>
-            <Button size="sm" variant="danger" onClick={() => update.mutate({ id: r.id, newStatus: 'Rejected' })} className="text-xs">
+            <Button size="sm" variant="danger" onClick={() => { if (confirm(`Reject claim for ${r.customerName || r.loanNumber}?`)) update.mutate({ id: r.id, newStatus: 'Rejected' }) }} className="text-xs">
               Reject
             </Button>
           </>

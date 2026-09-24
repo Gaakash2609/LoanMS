@@ -1,0 +1,1 @@
+import{a}from"./axios-BNKwlvki.js";const p={getAll:t=>a.get("/api/tasks",{params:t}),create:t=>a.post("/api/tasks",t),reassign:(t,s)=>a.patch(`/api/tasks/${t}/reassign`,{assignedToUserId:s}),toggleComplete:t=>a.patch(`/api/tasks/${t}/complete`),delete:t=>a.delete(`/api/tasks/${t}`)};export{p as t};

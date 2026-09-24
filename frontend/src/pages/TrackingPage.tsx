@@ -160,14 +160,14 @@ function TrackingTable({
                     {canEdit && (
                       <button title="Edit entry" onClick={() => onEdit(e)}
                         className="p-1.5 rounded-md border text-[color:var(--accent)] hover:bg-[color:var(--accent-subtle)]"
-                        style={{ borderColor: 'rgba(8,88,151,.25)' }}>
+                        style={{ borderColor: 'rgba(10,88,154,.25)' }}>
                         <Pencil size={13} />
                       </button>
                     )}
                     {canDelete && (
                       <button title="Delete entry" onClick={() => onDelete(e.id)}
-                        className="p-1.5 rounded-md border text-[color:var(--danger)] hover:bg-[rgba(192,57,43,.08)] ml-1"
-                        style={{ borderColor: 'rgba(192,57,43,.25)' }}>
+                        className="p-1.5 rounded-md border text-[color:var(--danger)] hover:bg-[rgba(227,30,37,.08)] ml-1"
+                        style={{ borderColor: 'rgba(227,30,37,.25)' }}>
                         <Trash2 size={13} />
                       </button>
                     )}
@@ -315,7 +315,7 @@ export default function TrackingPage({ embeddedLoanId, status, checks, actionsSl
         className="rounded-2xl border p-4 md:p-5 mb-4 flex items-center gap-3.5"
         style={{
           background: 'linear-gradient(135deg, var(--accent-subtle), var(--surface2))',
-          borderColor: 'rgba(8,88,151,.2)',
+          borderColor: 'rgba(10,88,154,.2)',
         }}
       >
         <div

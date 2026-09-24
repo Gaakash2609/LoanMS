@@ -46,7 +46,8 @@ public class IncredControllerTests
     private const string TestEncSecret = "dGVzdC1zZWNyZXQ";
     private const string TestDecryptedSecret = "test-incred-secret";
 
-    private static (IncredController controller, QueuedHttpMessageHandler handler, FakeCacheService cache, AppDbContext db) CreateController()
+    private static (IncredController controller, QueuedHttpMessageHandler handler, FakeCacheService cache, AppDbContext db) CreateController(
+        int currentUserId = 1, string currentUserRole = "Admin")
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -83,10 +84,23 @@ public class IncredControllerTests
         rolePerm.Setup(r => r.GetDeniedPermissionsAsync(It.IsAny<string?>(), It.IsAny<IEnumerable<string>>()))
                 .ReturnsAsync(new HashSet<string>());
 
+        // Defaults to Admin (unrestricted LoanRepository.ApplyVisibilityScope) so
+        // every pre-existing test in this file — none of which cares about
+        // per-role loan visibility — keeps seeing every loan it seeds, exactly
+        // as before this controller started scoping GetApplications() by role.
+        var claims = new System.Security.Claims.ClaimsIdentity(new[]
+        {
+            new System.Security.Claims.Claim("userId", currentUserId.ToString()),
+            new System.Security.Claims.Claim("role", currentUserRole)
+        }, "TestAuth");
+
         var controller = new IncredController(db, httpFactory.Object, dpProvider.Object,
             NullLogger<IncredController>.Instance, cache, rolePerm.Object)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(claims) }
+            }
         };
 
         return (controller, handler, cache, db);
@@ -119,6 +133,32 @@ public class IncredControllerTests
             TenureMonths = 12,
             CustomerId = customer.Id,
             CreatedByUserId = 1,
+        };
+        db.Loans.Add(loan);
+        db.SaveChanges();
+        return loan;
+    }
+
+    private static Loan SeedIncredLoan(AppDbContext db, int createdByUserId, string incredAppId)
+    {
+        var customer = new Customer
+        {
+            FullName = $"Incred Cust {incredAppId}",
+            Phone = "9888888888",
+            Email = $"incred-{incredAppId}@t.com",
+        };
+        db.Customers.Add(customer);
+        db.SaveChanges();
+
+        var loan = new Loan
+        {
+            LoanNumber = $"LN-{incredAppId}",
+            LoanType = LoanType.Personal,
+            RequestedAmount = 200000,
+            TenureMonths = 12,
+            CustomerId = customer.Id,
+            CreatedByUserId = createdByUserId,
+            IncredApplicationId = incredAppId,
         };
         db.Loans.Add(loan);
         db.SaveChanges();
@@ -418,5 +458,69 @@ public class IncredControllerTests
         // returned as-is and parsed as JSON — InCred's body has no "status":true, so this
         // hits the business-failure branch (not the catch block) with its own message.
         body.Message.Should().Contain("boom");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GET /api/incred/applications — visibility scope
+    //
+    // BUGFIX regression guard: GetApplications previously read straight off
+    // _db.Loans with zero role-based scoping, so any authenticated user could
+    // see every InCred application in the system. It now reuses the exact
+    // same LoanRepository.ApplyVisibilityScope every other loan-read surface
+    // (Loans, Dashboard, Reports) already uses.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task GetApplications_NonInternalRole_OnlySeesOwnLoans()
+    {
+        var (controller, _, _, db) = CreateController(currentUserId: 1, currentUserRole: "Sales");
+        var own     = SeedIncredLoan(db, createdByUserId: 1, incredAppId: "APP-OWN-1");
+        var foreign = SeedIncredLoan(db, createdByUserId: 2, incredAppId: "APP-FOREIGN-1");
+
+        var result = await controller.GetApplications();
+
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        var response = (ApiResponseDto<object>)ok.Value!;
+        var json = JsonSerializer.Serialize(response.Data);
+        var data = JsonDocument.Parse(json).RootElement;
+
+        data.GetArrayLength().Should().Be(1,
+            "a Sales user must only see InCred applications for loans they created (or are assigned to)");
+        data[0].GetProperty("IncredAppId").GetString().Should().Be("APP-OWN-1");
+    }
+
+    [Fact]
+    public async Task GetApplications_AdminRole_SeesEveryLoan()
+    {
+        var (controller, _, _, db) = CreateController(currentUserId: 99, currentUserRole: "Admin");
+        SeedIncredLoan(db, createdByUserId: 1, incredAppId: "APP-A");
+        SeedIncredLoan(db, createdByUserId: 2, incredAppId: "APP-B");
+
+        var result = await controller.GetApplications();
+
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        var response = (ApiResponseDto<object>)ok.Value!;
+        var json = JsonSerializer.Serialize(response.Data);
+        var data = JsonDocument.Parse(json).RootElement;
+
+        data.GetArrayLength().Should().Be(2, "Admin is unrestricted by ApplyVisibilityScope");
+    }
+
+    [Fact]
+    public async Task GetApplications_NonInternalRole_ExcludesLoansWithoutIncredApplicationId()
+    {
+        var (controller, _, _, db) = CreateController(currentUserId: 1, currentUserRole: "Sales");
+        SeedLoanWithCustomer(db); // CreatedByUserId = 1, no IncredApplicationId set
+        var own = SeedIncredLoan(db, createdByUserId: 1, incredAppId: "APP-OWN-2");
+
+        var result = await controller.GetApplications();
+
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        var response = (ApiResponseDto<object>)ok.Value!;
+        var json = JsonSerializer.Serialize(response.Data);
+        var data = JsonDocument.Parse(json).RootElement;
+
+        data.GetArrayLength().Should().Be(1);
+        data[0].GetProperty("IncredAppId").GetString().Should().Be("APP-OWN-2");
     }
 }

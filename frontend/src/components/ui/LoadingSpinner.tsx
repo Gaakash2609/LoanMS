@@ -203,11 +203,11 @@ export function LoanMSBadge({ size = 120 }: { size?: number }) {
           style={{
             width: logoSize, height: logoSize,
             borderRadius: '50%',
-            // MudraHub "Mudra" blue (#085897), matching <BrandMark/> so every
+            // MudraHub "Mudra" blue (#0a589a), matching <BrandMark/> so every
             // brand monogram across the app is one colour.
-            background: '#085897',
+            background: '#0a589a',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 2px 12px rgba(8,88,151,.30)',
+            boxShadow: '0 2px 12px rgba(10,88,154,.30)',
             animation: 'lms-logoPulse 2.1s ease-in-out infinite',
           }}
         >

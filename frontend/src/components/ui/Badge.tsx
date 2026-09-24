@@ -38,7 +38,7 @@ export function StatusBadge({ status }: { status: string }) {
 // Status-color semantics (this is the generic, non-loan Badge used across
 // Users/Teams/Tickets/Tasks/Payout/etc.): each variant reads as its meaning.
 // Legacy's own .badge-approved paired a teal-tinted background with --accent2
-// (#d42b2b — RED) text, so a "success" badge rendered red ink on teal — a
+// (#e31e25 — RED) text, so a "success" badge rendered red ink on teal — a
 // legacy authoring inconsistency. For the MudraHub polish pass, status colours
 // must be semantically consistent, so `success` now uses the green --success
 // token for both its tint and its text (the loan StatusBadge above is
@@ -48,7 +48,7 @@ const BADGE_VARIANTS: Record<'default' | 'success' | 'warning' | 'danger' | 'inf
   success: { background: 'rgba(26, 115, 64, .13)',   color: 'var(--success)' },
   warning: { background: 'rgba(255, 179, 71, .15)',  color: 'var(--warn)' },
   danger:  { background: 'rgba(255, 69, 96, .15)',   color: 'var(--danger)' },
-  info:    { background: 'rgba(8, 88, 151, .12)',   color: 'var(--accent)' },
+  info:    { background: 'rgba(10, 88, 154, .12)',   color: 'var(--accent)' },
 }
 
 export function Badge({ children, variant = 'default' }: { children: React.ReactNode; variant?: 'default' | 'success' | 'warning' | 'danger' | 'info' }) {

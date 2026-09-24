@@ -268,7 +268,7 @@ Extract exactly what is on the card. Be accurate.`,
   const fixBtn = (fieldId: string) => (
     <button type="button" tabIndex={-1} onClick={() => document.getElementById(fieldId)?.focus()}
       className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-[1px] rounded-full normal-case shrink-0"
-      style={{ background: 'rgba(8,88,151,.08)', color: 'var(--accent)', border: '1px solid rgba(8,88,151,.22)' }}>
+      style={{ background: 'rgba(10,88,154,.08)', color: 'var(--accent)', border: '1px solid rgba(10,88,154,.22)' }}>
       <Check size={9} /> Auto
     </button>
   )
@@ -428,13 +428,13 @@ Extract exactly what is on the card. Be accurate.`,
         {/* PAN Card */}
         <div className="rounded-2xl p-4" style={{ background: 'var(--surface)', border: `1.5px solid ${panImages.length > 0 ? 'var(--success)' : 'var(--border2)'}` }}>
           <div className="flex items-start gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(212,43,43,.08)' }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(227,30,37,.08)' }}>
               <IdCard size={18} style={{ color: 'var(--accent2)' }} />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-[13px] font-bold" style={{ color: 'var(--text)' }}>PAN Card</span>
-                <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ background: 'rgba(212,43,43,.08)', color: 'var(--accent2)' }}>Required</span>
+                <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ background: 'rgba(227,30,37,.08)', color: 'var(--accent2)' }}>Required</span>
               </div>
               <div className="text-[10.5px] leading-snug" style={{ color: 'var(--text3)' }}>Permanent Account Number · JPG / PNG / PDF</div>
             </div>
@@ -462,14 +462,14 @@ Extract exactly what is on the card. Be accurate.`,
               <div className="text-[10.5px] mt-1.5 truncate" style={{ color: 'var(--text3)' }}>✓ {panImages[0].name}</div>
             </>
           ) : (
-            docTile({ heading: 'Upload PAN card', sub: 'JPG, PNG or PDF', files: panImages, onSelect: handlePanFilesSelect, onClear: () => { setPanImages([]); setExtractionStatus(s => ({ ...s, pan: undefined })) }, accent: 'var(--accent2)', accentSoft: 'rgba(212,43,43,.06)' })
+            docTile({ heading: 'Upload PAN card', sub: 'JPG, PNG or PDF', files: panImages, onSelect: handlePanFilesSelect, onClear: () => { setPanImages([]); setExtractionStatus(s => ({ ...s, pan: undefined })) }, accent: 'var(--accent2)', accentSoft: 'rgba(227,30,37,.06)' })
           )}
         </div>
 
         {/* Aadhaar Card — front + back */}
         <div className="rounded-2xl p-4" style={{ background: 'var(--surface)', border: `1.5px solid ${aadhaarBothSides ? 'var(--success)' : 'var(--border2)'}` }}>
           <div className="flex items-start gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(8,88,151,.08)' }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(10,88,154,.08)' }}>
               <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
             </div>
             <div className="flex-1 min-w-0">
@@ -506,7 +506,7 @@ Extract exactly what is on the card. Be accurate.`,
             </>
           ) : (
             <div className="mb-3">
-              {docTile({ heading: 'Upload front side', sub: 'JPG, PNG or PDF', files: aadhaarImages, onSelect: handleAadhaarFilesSelect, onClear: () => { setAadhaarImages([]); setExtractionStatus(s => ({ ...s, aadhaar: undefined })) }, accent: 'var(--accent)', accentSoft: 'rgba(8,88,151,.06)' })}
+              {docTile({ heading: 'Upload front side', sub: 'JPG, PNG or PDF', files: aadhaarImages, onSelect: handleAadhaarFilesSelect, onClear: () => { setAadhaarImages([]); setExtractionStatus(s => ({ ...s, aadhaar: undefined })) }, accent: 'var(--accent)', accentSoft: 'rgba(10,88,154,.06)' })}
             </div>
           )}
 
@@ -534,7 +534,7 @@ Extract exactly what is on the card. Be accurate.`,
               <div className="text-[10.5px] mt-1.5 truncate" style={{ color: 'var(--text3)' }}>✓ {aadhaarBackImages[0].name}</div>
             </>
           ) : (
-            docTile({ heading: 'Upload back side', sub: 'JPG, PNG or PDF', files: aadhaarBackImages, onSelect: handleAadhaarBackFilesSelect, onClear: () => { setAadhaarBackImages([]); setExtractionStatus(s => ({ ...s, aadhaar: undefined })) }, accent: 'var(--accent)', accentSoft: 'rgba(8,88,151,.06)' })
+            docTile({ heading: 'Upload back side', sub: 'JPG, PNG or PDF', files: aadhaarBackImages, onSelect: handleAadhaarBackFilesSelect, onClear: () => { setAadhaarBackImages([]); setExtractionStatus(s => ({ ...s, aadhaar: undefined })) }, accent: 'var(--accent)', accentSoft: 'rgba(10,88,154,.06)' })
           )}
         </div>
       </div>
@@ -560,13 +560,13 @@ Extract exactly what is on the card. Be accurate.`,
 
       {extractionStatus.pan?.message && (
         <div className="mt-4 px-3 py-2 rounded-lg text-xs font-semibold"
-          style={extractionStatus.pan.status === 'success' ? { background: 'rgba(26,115,64,.1)', color: 'var(--success)' } : extractionStatus.pan.status === 'error' ? { background: 'rgba(192,57,43,.1)', color: 'var(--danger)' } : { background: 'rgba(8,88,151,.1)', color: 'var(--accent)' }}>
+          style={extractionStatus.pan.status === 'success' ? { background: 'rgba(26,115,64,.1)', color: 'var(--success)' } : extractionStatus.pan.status === 'error' ? { background: 'rgba(227,30,37,.1)', color: 'var(--danger)' } : { background: 'rgba(10,88,154,.1)', color: 'var(--accent)' }}>
           PAN: {extractionStatus.pan.message}
         </div>
       )}
       {extractionStatus.aadhaar?.message && (
         <div className="mt-2 px-3 py-2 rounded-lg text-xs font-semibold"
-          style={extractionStatus.aadhaar.status === 'success' ? { background: 'rgba(26,115,64,.1)', color: 'var(--success)' } : extractionStatus.aadhaar.status === 'error' ? { background: 'rgba(192,57,43,.1)', color: 'var(--danger)' } : { background: 'rgba(8,88,151,.1)', color: 'var(--accent)' }}>
+          style={extractionStatus.aadhaar.status === 'success' ? { background: 'rgba(26,115,64,.1)', color: 'var(--success)' } : extractionStatus.aadhaar.status === 'error' ? { background: 'rgba(227,30,37,.1)', color: 'var(--danger)' } : { background: 'rgba(10,88,154,.1)', color: 'var(--accent)' }}>
           Aadhaar: {extractionStatus.aadhaar.message}
         </div>
       )}

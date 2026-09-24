@@ -66,10 +66,10 @@ export function ErrorState({
   return (
     <div className={cn('flex flex-col items-center justify-center text-center px-5 py-[60px]', className)} role="alert">
       {/* Legacy's error surface (app.css:8591 `.err` / :8610 `.kyc-badge-err`)
-          is rgba(192,57,43,.1) over --danger text -- a different red family
+          is rgba(227,30,37,.1) over --danger text -- a different red family
           from Tailwind's stock red-50/500/600, and the one thing in this
           file that was never actually mapped to a legacy value. */}
-      <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: 'rgba(192, 57, 43, .1)' }}>
+      <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: 'rgba(227, 30, 37, .1)' }}>
         <AlertTriangle size={22} style={{ color: 'var(--danger)' }} />
       </div>
       <p className="text-sm font-semibold text-[color:var(--text)]">Couldn't load this</p>
@@ -90,7 +90,7 @@ export function ErrorBanner({ error, fallback, className }: { error?: unknown; f
     <div
       role="alert"
       className={cn('text-sm rounded-lg px-3 py-2', className)}
-      style={{ color: 'var(--danger)', background: 'rgba(192, 57, 43, .1)', border: '1px solid rgba(192, 57, 43, .25)' }}
+      style={{ color: 'var(--danger)', background: 'rgba(227, 30, 37, .1)', border: '1px solid rgba(227, 30, 37, .25)' }}
     >
       {errorText(error, fallback)}
     </div>

@@ -57,12 +57,12 @@ public class EmailService : IEmailService
         var subject  = "Reset Your LoanMS Password";
         var htmlBody = $"""
             <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-              <h2 style="color:#6366f1">Password Reset Request</h2>
+              <h2 style="color:#0a589a">Password Reset Request</h2>
               <p>Hi {toName},</p>
               <p>We received a request to reset your LoanMS password. Click the button below to set a new password:</p>
               <p style="text-align:center;margin:32px 0">
                 <a href="{resetLink}"
-                   style="background:#6366f1;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600">
+                   style="background:#0a589a;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600">
                   Reset Password
                 </a>
               </p>
@@ -106,7 +106,7 @@ public class EmailService : IEmailService
         {
             var html = """
                 <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto">
-                  <h2 style="color:#1a4fa3">EFIN — Test Email ✓</h2>
+                  <h2 style="color:#0a589a">EFIN — Test Email ✓</h2>
                   <p>This is a test email from LoanMS Settings → Mail &amp; Email.</p>
                   <p style="color:#6b7280;font-size:13px">If you received this, your email configuration is working correctly.</p>
                 </div>

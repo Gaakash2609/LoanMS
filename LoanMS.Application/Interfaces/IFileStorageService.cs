@@ -14,10 +14,18 @@ namespace LoanMS.Application.Interfaces;
 /// local disk as a zero-config fallback for local dev) be swapped without
 /// touching the controllers.
 ///
-/// The `key` parameter is the SAME opaque "{entityId}/{fileName}" value
-/// already stored in LoanDocument.FilePath / DsaDocument.FilePath — no
-/// database schema change was needed to introduce this abstraction.
+/// The `key` is NOT the raw DB value: LoanDocument.FilePath / DsaDocument.FilePath
+/// store "{entityId}/{fileName}", and the storage key adds an entity prefix
+/// ("loans/" or "dsa/") so the two can never collide in one bucket. Always
+/// build a loan document's key with <see cref="DocumentStorageKeys.ForLoanDocument"/>
+/// — passing FilePath straight through reads a key that does not exist.
 /// </summary>
+public static class DocumentStorageKeys
+{
+    /// <summary>Storage key for a LoanDocument, from its DB FilePath ("{loanId}/{fileName}").</summary>
+    public static string ForLoanDocument(string filePath) => $"loans/{filePath}";
+}
+
 public interface IFileStorageService
 {
     Task SaveAsync(string key, Stream content, string contentType, CancellationToken ct = default);

@@ -27,6 +27,11 @@ public class LoansController : BaseController
     }
 
     /// <summary>Get dashboard statistics</summary>
+    /// <summary>Distinct values for the Applications Advanced Filter dropdowns (caller's scope).</summary>
+    [HttpGet("filter-options")]
+    public async Task<IActionResult> GetFilterOptions() =>
+        Ok(await _loanService.GetFilterOptionsAsync(CurrentUserId, CurrentUserRole));
+
     [HttpGet("dashboard")]
     public async Task<IActionResult> GetDashboard()
     {
@@ -64,6 +69,88 @@ public class LoansController : BaseController
         var result = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole, deniedTabs);
         if (!result.Success) return NotFound(result);
         return Ok(result);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // TEMPORARY DEBUG ENDPOINT — remove after the Tab Data Access masking
+    // issue is diagnosed. Not gated behind [Authorize(Roles="Admin")] on
+    // purpose: it must be hit by the SAME session/role that is seeing the
+    // bug (e.g. Sales), so it needs to run under that role's own token.
+    // Returns, in one response:
+    //   1. backendRole   — exactly what CurrentUserRole resolves to for
+    //                       this session (the JWT claim value)
+    //   2. roleKey       — the frontend-vocabulary key RolePermissionService
+    //                       maps backendRole to (duplicated here from
+    //                       RolePermissionService.RoleKeyMap — keep in sync;
+    //                       this whole block is deleted once done anyway)
+    //   3. rawSettingValue — the exact "efin_role_permissions" JSON string
+    //                       currently in AppSettings (UserId == null row),
+    //                       or null if no such row exists
+    //   4. roleObjectFoundInJson — whether rawSettingValue actually has a
+    //                       top-level property matching roleKey
+    //   5. deniedTabs    — the live output of GetDeniedPermissionsAsync for
+    //                       this role, for the same 4 keys GetById checks
+    // ═══════════════════════════════════════════════════════════════════
+    [HttpGet("{id:int}/debug-permissions")]
+    public async Task<IActionResult> DebugPermissions(int id)
+    {
+        var backendRole = CurrentUserRole;
+
+        // Exact copy of RolePermissionService.RoleKeyMap — DO NOT let this
+        // drift from that file while this debug endpoint is in use.
+        var roleKeyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Admin"] = "admin", ["Manager"] = "manager", ["Sales"] = "sales_executive",
+            ["Dsa"] = "dsa_user", ["Partner"] = "partner", ["LoginTeam"] = "login_team",
+            ["TeamLeader"] = "team_leader", ["Accounts"] = "accounts",
+            ["LocationHead"] = "location_head", ["OperationManager"] = "operation_manager",
+            ["ProductTeam"] = "product_team",
+        };
+        roleKeyMap.TryGetValue(backendRole ?? string.Empty, out var roleKey);
+
+        var setting = await _db.AppSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Key == "efin_role_permissions" && s.UserId == null);
+
+        bool? roleObjectFoundInJson = null;
+        System.Text.Json.JsonElement? roleObjectRaw = null;
+        if (setting != null && !string.IsNullOrWhiteSpace(setting.Value) && roleKey != null)
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(setting.Value);
+                roleObjectFoundInJson = doc.RootElement.TryGetProperty(roleKey, out var roleObj);
+                if (roleObjectFoundInJson == true)
+                    roleObjectRaw = System.Text.Json.JsonDocument.Parse(roleObj.GetRawText()).RootElement;
+            }
+            catch (Exception ex)
+            {
+                roleObjectFoundInJson = false;
+                roleObjectRaw = null;
+                return Ok(new
+                {
+                    backendRole,
+                    roleKey,
+                    rawSettingValue = setting.Value,
+                    jsonParseError = ex.Message
+                });
+            }
+        }
+
+        var deniedTabs = await _rolePerm.GetDeniedPermissionsAsync(backendRole,
+            new[] { "canViewPersonal", "canViewAddress", "canViewEmployment", "canViewReferences" });
+
+        return Ok(new
+        {
+            backendRole,
+            roleKey,
+            settingRowExists = setting != null,
+            settingRowUserId = setting?.UserId,
+            rawSettingValue = setting?.Value,
+            roleObjectFoundInJson,
+            roleObjectRaw,
+            deniedTabs
+        });
     }
 
     /// <summary>Create new loan application</summary>
@@ -569,6 +656,12 @@ public class LoansController : BaseController
         if (!canRecordSanction)
             return BadRequest(ApiResponseDto<bool>.Fail("Sanction details can only be recorded once the loan has reached the review/approval stage."));
 
+        // Money fields must never be negative (same rule ObligationService
+        // applies to EMI/sanction/outstanding) — the API previously stored them.
+        if (request.SanctionLoanAmt < 0 || request.SanctionTenureMonths < 0 || request.SanctionRoi < 0 ||
+            request.SanctionEmi < 0 || request.Gst < 0 || request.Insurance < 0 || request.PfPercent < 0 || request.FlatRate < 0)
+            return BadRequest(ApiResponseDto<bool>.Fail("Sanction amounts, tenure and rates cannot be negative."));
+
         var detail = await _db.Set<LoanSanctionDetail>().FirstOrDefaultAsync(s => s.LoanId == id);
         if (detail == null)
         {
@@ -997,7 +1090,7 @@ public class LoansController : BaseController
         // side exactly — "loans/" + the opaque FilePath ("{id}/{fileName}").
         try
         {
-            await _fileStorage.DeleteAsync($"loans/{doc.FilePath}");
+            await _fileStorage.DeleteAsync(DocumentStorageKeys.ForLoanDocument(doc.FilePath));
         }
         catch
         {
@@ -1131,6 +1224,12 @@ public class LoansController : BaseController
             LoanId           = id,
             DocumentName     = Path.GetFileNameWithoutExtension(file.FileName),
             DocumentType     = oldDoc.DocumentType,   // carry the classification forward
+            // Gap-2 applicant identity must survive a replace — otherwise a
+            // replaced co-applicant document silently became the PRIMARY
+            // applicant's (role defaulted to Applicant, key dropped) and
+            // income verification picked it up for the wrong person.
+            ApplicantRole    = oldDoc.ApplicantRole,
+            ApplicantKey     = oldDoc.ApplicantKey,
             FilePath         = $"{id}/{fileName}",
             FileSizeBytes    = file.Length,
             UploadedByUserId = CurrentUserId.ToString(),

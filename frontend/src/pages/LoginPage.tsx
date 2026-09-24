@@ -23,7 +23,11 @@ function loginErrorMessage(err: unknown): string {
   const status = (err as { response?: { status?: number } })?.response?.status
   if (status === 429) return 'Too many sign-in attempts. Please wait a minute and try again.'
   if ((err as { code?: string })?.code === 'ERR_NETWORK') return 'Could not reach the server. Check your connection and try again.'
+  if ((err as { code?: string })?.code === 'ECONNABORTED') return 'The server took too long to respond. Please try again.'
   if (status != null && status >= 500) return 'The server had a problem signing you in. Please try again shortly.'
+  // Server-reported refusal with HTTP 200 (account lockout) — useLogin throws
+  // it as a plain Error carrying the server's own message.
+  if (status == null && err instanceof Error && err.message) return err.message
   return 'Invalid email or password. Please try again.'
 }
 

@@ -89,7 +89,12 @@ public class EmailConfigStore : IEmailConfigStore
         var json = System.Text.Json.JsonSerializer.Serialize(cfg);
         var encrypted = _protector.Protect(json);
 
-        var existing = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == Key);
+        // IgnoreQueryFilters: after "Clear" the row is soft-deleted but still owns
+        // the org-wide unique Key index, so it must be found and reactivated
+        // (IsDeleted = false below) — inserting a new row failed with a
+        // duplicate-key 500 on every save after a clear.
+        var existing = await _db.AppSettings.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Key == Key && s.UserId == null);
         if (existing != null)
         {
             existing.Value = encrypted;

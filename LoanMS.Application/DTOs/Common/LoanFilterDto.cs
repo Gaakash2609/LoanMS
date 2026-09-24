@@ -42,6 +42,31 @@ public class LoanFilterDto
     public int? PartnerId { get; set; }
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
+    // ── Applications "Advanced Filter" — evaluated server-side so pagination,
+    // totals and export see the whole result set, not just one page.
+    // Text values are exact, case-insensitive matches (same as the old
+    // client-side predicates); amounts/scores/salary are inclusive bounds.
+    public decimal? MinAmount { get; set; }
+    public decimal? MaxAmount { get; set; }
+    public int? MinCibil { get; set; }
+    public int? MaxCibil { get; set; }
+    public decimal? MinSalary { get; set; }
+    public decimal? MaxSalary { get; set; }
+    /// <summary>Matches the assigned-to OR the created-by user's full name.</summary>
+    public string? SalesPerson { get; set; }
+    public string? Location { get; set; }
+    /// <summary>The "Channel: x" value the wizard writes into Loan.Remarks.</summary>
+    public string? Channel { get; set; }
+    public string? Bank { get; set; }
+    public string? Purpose { get; set; }
+    public string? EmpType { get; set; }
+    public string? City { get; set; }
+    public string? State { get; set; }
+    public string? Gender { get; set; }
+    public string? DsaName { get; set; }
+    public string? PartnerName { get; set; }
+    public string? CompanyName { get; set; }
+
     public string SortBy { get; set; } = "CreatedAt";
     public string SortDir { get; set; } = "desc";
 }

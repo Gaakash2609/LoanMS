@@ -10,6 +10,7 @@ import {
   type IncredRm, type IncredRmUpsertRequest,
 } from '@/api/incredRmApi'
 import { useAuthStore } from '@/store/authStore'
+import { apiErrorMessage as errorMessage } from '@/utils/apiError'
 
 // ── InCred RM Emails tab ────────────────────────────────────────────────
 // Ports legacy's RM panel (incred-rm.js injects the tab + shell;
@@ -24,10 +25,6 @@ import { useAuthStore } from '@/store/authStore'
 // Writes are Admin-only server-side, so the buttons are hidden for everyone
 // else rather than shown and left to 403.
 
-function errorMessage(err: unknown, fallback: string): string {
-  const d = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-  return d?.message || d?.errors?.join(' ') || fallback
-}
 
 function RmFormModal({
   rm, onClose, onSaved,

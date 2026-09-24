@@ -48,7 +48,7 @@ export const PAGE_SIZE = 20
 // Row avatar — legacy renders a coloured initials circle in the Name column of
 // the Users table. Colour is deterministic from the name so a user keeps the
 // same badge colour across renders.
-export const AVATAR_COLORS = ['#1a4fa3', '#7c3aed', '#1a7340', '#c0392b', '#d97706', '#0284c7', '#be185d', '#0f766e']
+export const AVATAR_COLORS = ['#1a4fa3', '#7c3aed', '#1a7340', '#e31e25', '#d97706', '#0284c7', '#be185d', '#0f766e']
 export function avatarColor(name: string): string {
   let h = 0
   for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h)

@@ -10,6 +10,7 @@ import { settingsApi } from '@/api/settingsApi'
 import { formatCurrency } from '@/utils/format'
 import { useAuthStore } from '@/store/authStore'
 import { NumberInput } from '@/components/ui/NumberInput'
+import { apiErrorMessage as errorMessage } from '@/utils/apiError'
 
 // ── Payout Rules engine editor ──────────────────────────────────────────
 const RULE_KEYS: { key: string; label: string; via: 'Claims + Wizard' | 'Claims' | 'Wizard' }[] = [
@@ -28,10 +29,6 @@ const RULE_KEYS: { key: string; label: string; via: 'Claims + Wizard' | 'Claims'
 
 const KEY_LABEL: Record<string, string> = Object.fromEntries(RULE_KEYS.map(r => [r.key, r.label]))
 
-function errorMessage(err: unknown, fallback: string): string {
-  const d = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-  return d?.message || d?.errors?.join(' ') || fallback
-}
 
 function toNumberOrNull(v: string): number | null {
   const t = v.trim()

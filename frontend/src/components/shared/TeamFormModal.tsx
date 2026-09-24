@@ -9,7 +9,7 @@ import type { LocationOption, User } from '@/types'
 
 // Per-name avatar colour + initials — same port of legacy twAvi/twInitials the
 // Teams list uses, for the read-only "View Details" panel (twViewTeamDetail).
-const TW_AVATARS = ['#1a4fa3', '#d42b2b', '#ffb347', '#a159ff', '#f472b6', '#10b981', '#ff4560', '#0ea5e9']
+const TW_AVATARS = ['#1a4fa3', '#e31e25', '#ffb347', '#a159ff', '#f472b6', '#10b981', '#ff4560', '#0ea5e9']
 function avatarColor(name: string) {
   const n = name || ''
   return TW_AVATARS[Math.abs((n.charCodeAt(0) || 0) + (n.charCodeAt(n.length - 1) || 0)) % TW_AVATARS.length]

@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLoans } from '@/hooks/useLoans'
 import AdvancedFilterModal from '@/components/shared/AdvancedFilterModal'
 import {
-  EMPTY_ADV_FILTER, activeFilterCount, applyClientSideFilters, resolveDateRange,
-  needsFullFetch, FIELD_LABELS, distinct, fromRemarks, type AdvFilter,
+  EMPTY_ADV_FILTER, activeFilterCount, advToServerFilter, FIELD_LABELS, type AdvFilter,
 } from '@/constants/advFilter'
 import { useLoanStore } from '@/store/loanStore'
 import { Card } from '@/components/ui/Card'
@@ -65,6 +64,11 @@ function initials(name?: string | null): string {
   return parts[0][0] + parts[parts.length - 1][0]
 }
 
+const NO_FILTER_OPTIONS = {
+  salesPeople: [], locations: [], channels: [], banks: [], purposes: [], empTypes: [],
+  cities: [], states: [], genders: [], dsaNames: [], partners: [], companies: [],
+}
+
 export default function LoansPage() {
   const { filter, setFilter } = useLoanStore()
   const { data, isLoading, refetch } = useLoans(filter)
@@ -80,9 +84,8 @@ export default function LoansPage() {
 
   // ── Advanced filter ───────────────────────────────────────────────────
   // Legacy keeps one `advFilter` object and re-renders the table from it.
-  // Here the API-backed parts (status / type / date range) are pushed into
-  // the shared loan filter so the server does that work, and only the parts
-  // it cannot express are evaluated on the rows that come back.
+  // Here every part is pushed into the shared loan filter and evaluated by
+  // the server, so paging, totals and export all reflect it.
   const [adv, setAdv] = useState<AdvFilter>(EMPTY_ADV_FILTER)
   const [showAdv, setShowAdv] = useState(false)
   const advCount = activeFilterCount(adv)
@@ -90,19 +93,9 @@ export default function LoansPage() {
   function applyAdv(next: AdvFilter) {
     setAdv(next)
     setShowAdv(false)
-    const { from, to } = resolveDateRange(next)
     setFilter({
-      status: (next.status || undefined) as typeof filter.status,
-      loanType: next.loanType || undefined,
-      dateFrom: from ?? undefined,
-      dateTo: to ?? undefined,
-      // Client-side predicates can only judge rows that were fetched, so a
-      // filter the API cannot express asks for the largest page the endpoint
-      // allows (LoansController caps PageSize at 100) instead of judging one
-      // 20-row slice and calling it a filtered result.
-      // Keep the user's chosen "Show Result" size unless a client-side-only
-      // predicate needs the largest page the API allows to judge against.
-      pageSize: needsFullFetch(next) ? 100 : (filter.pageSize && filter.pageSize <= 100 ? filter.pageSize : 25),
+      ...advToServerFilter(next),
+      pageSize: filter.pageSize && filter.pageSize <= 100 ? filter.pageSize : 25,
       page: 1,
     })
   }
@@ -116,7 +109,7 @@ export default function LoansPage() {
 
   function resetAdv() {
     setAdv(EMPTY_ADV_FILTER)
-    setFilter({ status: undefined, loanType: undefined, dateFrom: undefined, dateTo: undefined, pageSize: 25, page: 1 })
+    setFilter({ ...advToServerFilter(EMPTY_ADV_FILTER), pageSize: 25, page: 1 })
   }
 
   // Matches PATCH /api/loans/bulk-status's [Authorize(Roles=...)] exactly.
@@ -130,12 +123,11 @@ export default function LoansPage() {
 
   const deleteLoan = useMutation({
     mutationFn: (id: number) => loansApi.delete(id),
+    // Success ("Loan deleted.") and the server's refusal reason ("Only Draft
+    // loans can be deleted.") are both raised by the app-wide toast handler.
+    meta: { errorMessage: 'Delete failed.' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] })
-    },
-    onError: (err: unknown) => {
-      const d = (err as { response?: { data?: { message?: string } } })?.response?.data
-      alert(d?.message || 'Delete failed.')
     },
   })
 
@@ -156,26 +148,15 @@ export default function LoansPage() {
     },
   })
 
-  // Rows actually shown = server-filtered page, narrowed by the predicates
-  // the API cannot express (amount / CIBIL / sales person).
-  const rows = applyClientSideFilters(data?.items ?? [], adv)
-  // Every dropdown is populated from the rows actually loaded, so an option
-  // can never be offered that matches nothing.
-  const src = data?.items ?? []
-  const filterOptions = {
-    salesPeople: distinct(src.flatMap(l => [l.assignedToName, l.createdByName])),
-    locations:   distinct(src.map(l => l.locationName)),
-    channels:    distinct(src.map(l => fromRemarks(l.remarks, 'Channel'))),
-    banks:       distinct(src.map(l => l.selectedLenderNames)),
-    purposes:    distinct(src.map(l => l.purpose)),
-    empTypes:    distinct(src.map(l => l.customerEmploymentType)),
-    cities:      distinct(src.map(l => l.customerCity)),
-    states:      distinct(src.map(l => l.customerState)),
-    genders:     distinct(src.map(l => l.customerGender)),
-    dsaNames:    distinct(src.map(l => l.dsaName)),
-    partners:    distinct(src.map(l => l.partnerName)),
-    companies:   distinct(src.map(l => l.customerCompanyName)),
-  }
+  // The server applies every filter, so the page it returns is the result.
+  const rows = data?.items ?? []
+  // Dropdown options come from ALL loans the user can see (not just this
+  // page), so any existing value can be chosen.
+  const { data: filterOptions } = useQuery({
+    queryKey: ['loan-filter-options'],
+    queryFn: () => loansApi.filterOptions().then(r => r.data.data),
+    staleTime: 5 * 60_000,
+  })
 
   const pageIds = rows.map(l => l.id)
   const allSelected = pageIds.length > 0 && pageIds.every(id => selected.includes(id))
@@ -220,8 +201,8 @@ export default function LoansPage() {
   const resetEverything = () => {
     setAdv(EMPTY_ADV_FILTER)
     setFilter({
-      search: undefined, searchField: undefined, status: undefined, loanType: undefined,
-      dateFrom: undefined, dateTo: undefined, pageSize: 25, page: 1,
+      ...advToServerFilter(EMPTY_ADV_FILTER),
+      search: undefined, searchField: undefined, pageSize: 25, page: 1,
     })
   }
 
@@ -359,6 +340,17 @@ export default function LoansPage() {
               <>
                 <div className="ap-table-wrap">
                   <table className="ap-table">
+                    <colgroup>
+                      {canBulk && <col style={{ width: 40 }} />}
+                      <col style={{ width: 160 }} />{/* Application ID */}
+                      <col style={{ width: 220 }} />{/* Applicant */}
+                      <col style={{ width: 110 }} />{/* Loan Type */}
+                      <col style={{ width: 120 }} />{/* Amount */}
+                      <col style={{ width: 150 }} />{/* Status */}
+                      <col style={{ width: 140 }} />{/* Sales Person */}
+                      <col style={{ width: 110 }} />{/* Created */}
+                      <col style={{ width: 120 }} />{/* Actions */}
+                    </colgroup>
                     <thead>
                       <tr>
                         {canBulk && (
@@ -417,10 +409,10 @@ export default function LoansPage() {
                           <td><span className="efin-mono-id">{loan.loanNumber}</span></td>
                           <td>
                             <div className="ap-person">
-                              <span className="ap-avatar" aria-hidden>{initials(loan.customerName)}</span>
+                              <span className="ap-avatar" aria-hidden>{initials(loan.customerName || loan.customerPhone)}</span>
                               <div className="min-w-0">
                                 <p className="ap-person-name">
-                                  {loan.customerName}
+                                  {loan.customerName || <span className="ap-muted">—</span>}
                                   {/* Bureau risk-grade chip — legacy filterTable renders
                                       this beside the name (efin-app.js:2266). The value
                                       was already on the list payload (LoanListDto.RiskGrade,
@@ -613,7 +605,7 @@ export default function LoansPage() {
       {showAdv && (
         <AdvancedFilterModal
           current={adv}
-          options={filterOptions}
+          options={filterOptions ?? NO_FILTER_OPTIONS}
           onApply={applyAdv}
           onClose={() => setShowAdv(false)}
         />

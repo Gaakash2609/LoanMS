@@ -135,7 +135,7 @@ export default function MyApplicationsTab({ mode }: { mode: 'created' | 'assigne
               <button
                 key={l.id}
                 onClick={() => navigate(`/loans/${l.id}`)}
-                className="w-full text-left bg-surface border border-token rounded-[14px] px-[18px] py-4 transition-shadow hover:shadow-[0_4px_20px_rgba(8,88,151,.1)] hover:border-[color:var(--accent)]"
+                className="w-full text-left bg-surface border border-token rounded-[14px] px-[18px] py-4 transition-shadow hover:shadow-[0_4px_20px_rgba(10,88,154,.1)] hover:border-[color:var(--accent)]"
               >
                 <div className="flex items-start gap-3 flex-wrap">
                   <span

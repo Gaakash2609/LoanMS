@@ -44,7 +44,7 @@ export function UserActionsMenu({ isActive, onView, onEdit, onMap, onToggle, onR
       </Button>
       {open && (
         <div className="absolute right-0 top-9 z-[var(--z-dropdown)] w-56 bg-white border border-gray-200 rounded-xl py-1.5"
-          style={{ boxShadow: '0 12px 40px rgba(8,88,151,.14)' }}>
+          style={{ boxShadow: '0 12px 40px rgba(10,88,154,.14)' }}>
           <button className={item} onClick={() => { setOpen(false); onView() }}><Eye size={14} className="text-gray-500" /> View Details</button>
           <button className={item} onClick={() => { setOpen(false); onEdit() }}><Pencil size={14} className="text-orange-500" /> Edit User</button>
           <button className={item} onClick={() => { setOpen(false); onMap() }}><MapPin size={14} className="text-pink-500" /> Manage Locations &amp; Teams</button>

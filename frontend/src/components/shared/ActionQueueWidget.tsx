@@ -18,9 +18,9 @@ import { formatCurrency } from '@/utils/format'
 // Row tints reuse the legacy rgba() washes, which map onto the MudraHub
 // status palette: red = overdue, amber = missing, blue = idle, green = money.
 const ROW_TINT = {
-  sla:     'rgba(212,43,43,.06)',
+  sla:     'rgba(227,30,37,.06)',
   docs:    'rgba(230,126,0,.06)',
-  draft:   'rgba(8,88,151,.06)',
+  draft:   'rgba(10,88,154,.06)',
   payout:  'rgba(26,115,64,.06)',
 } as const
 
@@ -85,7 +85,7 @@ export default function ActionQueueWidget() {
   return (
     <div
       className="mb-6 bg-surface px-5 py-[18px]"
-      style={{ border: '1.5px solid var(--border)', borderRadius: 16, boxShadow: '0 2px 10px rgba(8,88,151,.07)' }}
+      style={{ border: '1.5px solid var(--border)', borderRadius: 16, boxShadow: '0 2px 10px rgba(10,88,154,.07)' }}
     >
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm font-bold" style={{ fontFamily: 'var(--font-head)', color: 'var(--text)' }}>

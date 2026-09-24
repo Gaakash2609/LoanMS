@@ -1,11 +1,12 @@
 node_modules/
 bin/
 obj/
-logs/
+dist/
 dist-node/
+.vite/
 *.db
 *.db-shm
 *.db-wal
-dataprotection-keys/
-LoanMS.API/wwwroot/react/
-frontend/tsconfig.tsbuildinfo
+LoanMS.API/dataprotection-keys/
+LoanMS.API/logs/
+*.tsbuildinfo

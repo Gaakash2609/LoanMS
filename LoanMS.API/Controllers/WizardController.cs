@@ -614,6 +614,20 @@ public class WizardController : BaseController
                     return BadRequest(ApiResponseDto<WizardSubmitResponseDto>.Fail(
                         "This application has already been submitted."));
                 }
+
+                // BUGFIX (confirmed real IDOR — Submit had no ownership check on
+                // dto.LoanId): without this, any authenticated user could pass
+                // another user's draft id and have Submit resume/finalize it as
+                // their own — same visibility rule GetDraft already enforces
+                // (only the draft's own creator, or Admin/Manager, may act on
+                // it), and the same 404-not-2xx-error shape so a foreign draft
+                // id doesn't leak its existence either.
+                var isInternalSubmit = CurrentUserRole is "Admin" or "Manager";
+                if (!isInternalSubmit && existingLoan.CreatedByUserId != CurrentUserId)
+                {
+                    await tx.RollbackAsync();
+                    return NotFound(ApiResponseDto<WizardSubmitResponseDto>.Fail("Draft application not found."));
+                }
             }
 
             // ── 1. Find or create customer ────────────────────────────────────
@@ -987,7 +1001,7 @@ public class WizardController : BaseController
     {
         var isInternal = CurrentUserRole is "Admin" or "Manager";
 
-        var q = _db.Loans
+        var q = _db.Loans.IncludeDeletedUsers()
             .Include(l => l.Customer)
             .Where(l => !l.IsDeleted && l.Status == LoanStatus.Draft);
 
@@ -1088,6 +1102,22 @@ public class WizardController : BaseController
                 // stale/late autosave call.
                 if (existingLoan != null && existingLoan.Status != LoanStatus.Draft)
                     existingLoan = null;
+
+                // BUGFIX (confirmed real IDOR — SaveDraft had no ownership check
+                // on dto.LoanId): without this, any authenticated user could pass
+                // another user's draft id and have their own autosave overwrite
+                // that foreign draft's data. Same visibility rule GetDraft/Submit
+                // already enforce (only the draft's own creator, or Admin/
+                // Manager, may write into it). Unlike Submit/GetDraft this is a
+                // silent background autosave, so a mismatch does not surface an
+                // error — it just falls back to starting a brand-new draft,
+                // exactly like the status-mismatch branch immediately above.
+                if (existingLoan != null)
+                {
+                    var isInternalSaveDraft = CurrentUserRole is "Admin" or "Manager";
+                    if (!isInternalSaveDraft && existingLoan.CreatedByUserId != CurrentUserId)
+                        existingLoan = null;
+                }
             }
 
             var customer = await FindOrCreateCustomerAsync(dto, existingLoan);

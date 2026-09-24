@@ -16,6 +16,7 @@ import { loansApi } from '@/api/loansApi'
 import { useAuthStore } from '@/store/authStore'
 import { formatDate } from '@/utils/format'
 import { CheckCircle, Circle, Plus, X, Trash2, ArrowLeftRight } from 'lucide-react'
+import { apiErrorMessage as errorMessage } from '@/utils/apiError'
 
 const PAGE_SIZE = 20
 const PRIORITIES = ['Low', 'Medium', 'High']
@@ -28,10 +29,6 @@ function isOverdue(due: string): boolean {
   return d < today
 }
 
-function errorMessage(err: unknown, fallback: string): string {
-  const msg = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-  return msg?.message || msg?.errors?.join(' ') || fallback
-}
 
 // ── Phase 17: Create Task modal ─────────────────────────────────────────
 // Uses the existing GET /api/users/lookup endpoint (non-Admin-accessible —

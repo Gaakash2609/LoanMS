@@ -48,7 +48,17 @@ public class AuditMiddleware
     // JSON field names whose values must be masked in audit records
     private static readonly HashSet<string> _piiFields = new(StringComparer.OrdinalIgnoreCase)
         { "pan", "aadhar", "aadhaar", "aadhaarnumber", "pannumber", "mobile", "phone",
-          "password", "currentpassword", "newpassword", "dob", "dateofbirth", "refreshtoken" };
+          "password", "currentpassword", "newpassword", "dob", "dateofbirth", "refreshtoken",
+          // Credentials that are stored ENCRYPTED in settings must not land in
+          // the audit table in plain text (verified leaking before this).
+          "confirmpassword", "clientsecret", "apikey", "smtppass", "token", "secret", "webhooksecret" };
+
+    // Generic settings writes ({ "key": "...", "value": "..." }) can carry a
+    // secret too (e.g. incred_webhook_secret) — mask "value" for such keys.
+    private static readonly Regex _secretSettingKey =
+        new(@"""key""\s*:\s*""[^""]*(secret|password|token|apikey|api_key)[^""]*""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex _settingValue =
+        new(@"""value""\s*:\s*""(?:[^""\\]|\\.)*""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public AuditMiddleware(RequestDelegate next, IServiceScopeFactory scopeFactory, ILogger<AuditMiddleware> logger)
     {
@@ -79,7 +89,20 @@ public class AuditMiddleware
         using var memStream = new MemoryStream();
         ctx.Response.Body = memStream;
 
-        await _next(ctx);
+        try
+        {
+            await _next(ctx);
+        }
+        catch
+        {
+            // Restore the real response stream before the exception reaches
+            // ExceptionMiddleware (registered outside this one). Otherwise it
+            // wrote its JSON into memStream after `using` had disposed it →
+            // "Cannot access a closed Stream" → every mapped error (400/404/409)
+            // on an audited write request reached the client as a bodiless 500.
+            ctx.Response.Body = origBody;
+            throw;
+        }
 
         memStream.Position = 0;
         var responseBody = await new StreamReader(memStream).ReadToEndAsync();
@@ -171,6 +194,9 @@ public class AuditMiddleware
         if (string.IsNullOrWhiteSpace(json)) return json;
         try
         {
+            if (_secretSettingKey.IsMatch(json))
+                json = _settingValue.Replace(json, "\"value\": \"[REDACTED]\"");
+
             // Regex: match "fieldName": "value" and replace value with [REDACTED]
             // Also handles numeric values (e.g. mobile stored as number)
             return Regex.Replace(

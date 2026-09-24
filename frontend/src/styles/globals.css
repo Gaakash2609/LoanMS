@@ -14,30 +14,30 @@
   --border: #dde3f0;
   --border2: #c4cfe6;
   /* MudraHub brand pass (2026-09-20): the global accent is the TRUE logo blue
-     (#085897 "Mudra" blue, sampled from assets/logo-004.png), not the legacy
+     (#0a589a "Mudra" blue, sampled from assets/logo-004.png), not the legacy
      EFIN blue #1a4fa3 this used to carry. This unifies every var(--accent)
      surface (buttons, links, active nav, focus rings, filter chips, KPI
      accents…) with the logo and with the Applications page, which already used
      this family via --brand-blue*. Flat-colour alignment only — no new
-     gradients. --accent2 stays the legacy red #d42b2b (see the note below). */
-  --accent: #085897;
+     gradients. --accent2 stays the legacy red #e31e25 (see the note below). */
+  --accent: #0a589a;
   --accent-dark: #064377;
   --accent-light: #1a72b8;
-  --accent-glow: rgba(8, 88, 151, .2);
-  --accent-subtle: rgba(8, 88, 151, .08);
-  /* Restored to legacy app.css :root verbatim (--accent2: #d42b2b). A prior
+  --accent-glow: rgba(10, 88, 154, .2);
+  --accent-subtle: rgba(10, 88, 154, .08);
+  /* Restored to legacy app.css :root verbatim (--accent2: #e31e25). A prior
      "MudraHub brand" pass had swapped this whole family to the logo's orange
      (#f5921e), which is what made the sidebar active state, nav icons, notif
      dot, .efin-btn secondary/ghost hovers, and every var(--accent2) consumer
      across the shell and primitives read as an orange redesign instead of
      the real vanilla red. Legacy itself never uses orange here — orange is
      only ever --warn / --accent3 in app.css. */
-  --accent2: #d42b2b;
+  --accent2: #e31e25;
   --accent2-dark: #a81e1e;
   --accent2-light: #e94040;
   --warn: #e67e00;
   --accent3: #ff6b35;
-  --danger: #c0392b;
+  --danger: #e31e25;
   --success: #1a7340;
   --text: #0c1733;
   --text2: #3a4d6e;
@@ -47,9 +47,9 @@
   --r: 16px;
   --r-sm: 10px;
   --r-xs: 6px;
-  --shadow: 0 4px 24px rgba(8, 88, 151, .1);
-  --shadow-md: 0 8px 40px rgba(8, 88, 151, .14);
-  --shadow-lg: 0 20px 60px rgba(8, 88, 151, .18);
+  --shadow: 0 4px 24px rgba(10, 88, 154, .1);
+  --shadow-md: 0 8px 40px rgba(10, 88, 154, .14);
+  --shadow-lg: 0 20px 60px rgba(10, 88, 154, .18);
   --sidebar-w: 260px;
   --sidebar-collapsed-w: 64px;
 
@@ -60,9 +60,9 @@
      hoc with Tailwind values instead. */
   --topbar-h: 68px;
   --transition: 0.24s cubic-bezier(.4, 0, .2, 1);
-  --accent2-subtle: rgba(212, 43, 43, .07);
-  --accent2-glow: rgba(212, 43, 43, .18);
-  --shadow-accent: 0 4px 24px rgba(8, 88, 151, .28);
+  --accent2-subtle: rgba(227, 30, 37, .07);
+  --accent2-glow: rgba(227, 30, 37, .18);
+  --shadow-accent: 0 4px 24px rgba(10, 88, 154, .28);
 
   /* Legacy's stacking order. Keeping the real numbers matters: a dropdown
      (300) must clear the topbar (100), and the modal (9998) must clear both. */
@@ -102,8 +102,8 @@
     color: var(--text);
     /* Same two ambient radial washes as the legacy body. */
     background-image:
-      radial-gradient(ellipse 80% 50% at 20% -10%, rgba(8, 88, 151, .06) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 40% at 80% 110%, rgba(212, 43, 43, .04) 0%, transparent 50%);
+      radial-gradient(ellipse 80% 50% at 20% -10%, rgba(10, 88, 154, .06) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 110%, rgba(227, 30, 37, .04) 0%, transparent 50%);
     background-attachment: fixed;
   }
   * {
@@ -115,14 +115,14 @@
 }
 
 @layer utilities {
-  /* MudraHub brand blue (#085897) — was the legacy EFIN #1a4fa3. Kept in sync
+  /* MudraHub brand blue (#0a589a) — was the legacy EFIN #1a4fa3. Kept in sync
      with the --accent family and tailwind.config's efin.blue so every accent
      path renders the one logo blue. */
-  .bg-efin-blue      { background-color: #085897; }
+  .bg-efin-blue      { background-color: #0a589a; }
   .bg-efin-blue-dark { background-color: #064377; }
-  .text-efin-blue    { color: #085897; }
-  .ring-efin-blue    { --tw-ring-color: #085897; }
-  .focus\:ring-efin-blue:focus { --tw-ring-color: #085897; }
+  .text-efin-blue    { color: #0a589a; }
+  .ring-efin-blue    { --tw-ring-color: #0a589a; }
+  .focus\:ring-efin-blue:focus { --tw-ring-color: #0a589a; }
   .hover\:bg-efin-blue-dark:hover { background-color: #064377; }
 
   /* Surface/border helpers mapped to the legacy tokens, so cards and
@@ -165,7 +165,7 @@
     border: 1.5px solid var(--border);
     padding: 22px;
     overflow: hidden;
-    box-shadow: 0 2px 12px rgba(8,88,151,.06);
+    box-shadow: 0 2px 12px rgba(10,88,154,.06);
     transition: transform .25s cubic-bezier(.34,1.3,.64,1), box-shadow .22s, border-color .22s;
   }
   .kpi-card::before {
@@ -181,7 +181,7 @@
   .kpi-card:hover::before { opacity: 1; }
   .kpi-card:hover {
     transform: translateY(-5px);
-    box-shadow: 0 16px 40px -12px var(--kpi-shadow, rgba(8,88,151,.28));
+    box-shadow: 0 16px 40px -12px var(--kpi-shadow, rgba(10,88,154,.28));
     border-color: var(--border2);
   }
   .kpi-card::after {
@@ -219,8 +219,8 @@
      gradient-bordered panel (index.html:5104), not three separate tinted
      cards. */
   .payout-kpi-panel {
-    background: linear-gradient(135deg, rgba(8,88,151,.08) 0%, rgba(8,88,151,.03) 100%);
-    border: 1.5px solid rgba(8,88,151,.2);
+    background: linear-gradient(135deg, rgba(10,88,154,.08) 0%, rgba(10,88,154,.03) 100%);
+    border: 1.5px solid rgba(10,88,154,.2);
     border-radius: 16px; padding: 22px 24px; margin-bottom: 0;
     display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 24px;
   }
@@ -238,12 +238,12 @@
   }
   .stg-provider-card.selected {
     border-color: var(--accent);
-    background: rgba(8,88,151,.04);
-    box-shadow: 0 0 0 3px rgba(8,88,151,.08);
+    background: rgba(10,88,154,.04);
+    box-shadow: 0 0 0 3px rgba(10,88,154,.08);
   }
   .stg-badge { font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 99px; letter-spacing: .6px; flex-shrink: 0; }
   .stg-badge-auto { background: rgba(26,115,64,.1); color: var(--success); }
-  .stg-provider-chip { font-size: 10.5px; background: rgba(8,88,151,.07); color: var(--accent); padding: 2px 8px; border-radius: 8px; font-weight: 600; }
+  .stg-provider-chip { font-size: 10.5px; background: rgba(10,88,154,.07); color: var(--accent); padding: 2px 8px; border-radius: 8px; font-weight: 600; }
   .stg-provider-chip-warn { background: rgba(230,126,0,.08); color: var(--warn); }
 
   /* ── Pipeline stage bars — legacy .pipeline-stage / .stage-bar ────────── */
@@ -350,7 +350,7 @@
     background: var(--accent);
     border-color: var(--accent);
     color: #fff;
-    box-shadow: 0 4px 12px rgba(8,88,151,.28);
+    box-shadow: 0 4px 12px rgba(10,88,154,.28);
   }
 
   /* ── Vanilla data table — scoped port of Vanilla "Design System v2"
@@ -376,7 +376,7 @@
     vertical-align: middle; color: var(--text2);
   }
   .v-table tbody tr { transition: background .15s; }
-  .v-table tbody tr:hover td { background: rgba(8,88,151,.035); }
+  .v-table tbody tr:hover td { background: rgba(10,88,154,.035); }
   .v-table tbody tr:last-child td { border-bottom: none; }
 
   /* ── Loan-detail field grid — verbatim port of Vanilla's fieldGrid()
@@ -398,14 +398,14 @@
     display: flex; align-items: center; line-height: 1.4;
     transition: all .15s; word-break: break-word;
   }
-  .field-val:hover { border-color: #7aaef8; background: #fff; box-shadow: 0 0 0 3px rgba(8,88,151,.06); }
+  .field-val:hover { border-color: #7aaef8; background: #fff; box-shadow: 0 0 0 3px rgba(10,88,154,.06); }
   .field-val.empty { color: #b0bcd8; font-style: italic; background: #f8faff; }
   /* Verbatim port of Vanilla's .check-badge / .check-done / .check-pending
      (app.css:4618-4636): squared 4px pill, done = red tint on --accent2,
      pending = amber on --warn. Vanilla uses the identical class in both the
      Overview and the Timeline "Checks:" row, so this matches it 1:1 in both. */
   .check-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-  .check-done { background: rgba(212,43,43,.12); color: var(--accent2); }
+  .check-done { background: rgba(227,30,37,.12); color: var(--accent2); }
   .check-pending { background: rgba(255,179,71,.15); color: var(--warn); }
 
   /* ── Wizard step indicator — legacy .wizard-step/.step-num (app.css
@@ -502,10 +502,10 @@
   .wiz-progress-bar-wrap { width: 100%; background: var(--surface3); border-radius: 99px; height: 6px; overflow: hidden; position: relative; }
   .wiz-progress-bar-fill {
     height: 100%; border-radius: 99px;
-    background: linear-gradient(90deg, #a78bfa, #085897, #059669);
+    background: linear-gradient(90deg, #a78bfa, #0a589a, #059669);
     background-size: 200% 100%;
     transition: width .5s cubic-bezier(.4,0,.2,1);
-    box-shadow: 0 0 8px rgba(8,88,151,.3);
+    box-shadow: 0 0 8px rgba(10,88,154,.3);
     animation: wiz-bar-shimmer 2.5s linear infinite;
   }
   @keyframes wiz-bar-shimmer { 0% { background-position: 0% 0%; } 100% { background-position: 200% 0%; } }
@@ -566,14 +566,14 @@
   .lp-card:hover {
     border-color: var(--accent);
     transform: translateY(-4px);
-    box-shadow: 0 12px 32px rgba(8,88,151,.15);
+    box-shadow: 0 12px 32px rgba(10,88,154,.15);
     background: var(--surface);
   }
   .lp-card:hover::before { opacity: 1; }
   .lp-card.selected {
     border-color: var(--accent);
     background: var(--surface);
-    box-shadow: 0 0 0 4px rgba(8,88,151,.12), 0 12px 32px rgba(8,88,151,.18);
+    box-shadow: 0 0 0 4px rgba(10,88,154,.12), 0 12px 32px rgba(10,88,154,.18);
   }
   .lp-card.selected::before { opacity: 1; }
   .lp-card-icon {
@@ -700,7 +700,7 @@
   }
   .kpi-mini:hover {
     transform: translateY(-2px);
-    box-shadow: 0 10px 26px -14px var(--kpi-shadow, rgba(8,88,151,.3));
+    box-shadow: 0 10px 26px -14px var(--kpi-shadow, rgba(10,88,154,.3));
     border-color: var(--border2);
   }
   .kpi-mini-icon {
@@ -732,7 +732,7 @@
   }
   .doc-card:hover {
     transform: translateY(-3px);
-    box-shadow: 0 14px 32px -16px rgba(8,88,151,.28);
+    box-shadow: 0 14px 32px -16px rgba(10,88,154,.28);
     border-color: var(--border2);
   }
   .doc-card-preview {
@@ -747,7 +747,7 @@
     background: var(--surface);
     border: 1px solid var(--border2);
     color: var(--accent);
-    box-shadow: 0 4px 10px rgba(8,88,151,.12);
+    box-shadow: 0 4px 10px rgba(10,88,154,.12);
   }
 
   /* -- CTA buttons: success variant (Approve / Disburse-style positive
@@ -792,14 +792,14 @@
     font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
     white-space: nowrap;
   }
-  .stage-PAR_DEP { background: rgba(8, 88, 151, .12); color: var(--accent); }
-  .stage-CPA_Dep, .stage-CPA_DOCS { background: rgba(212, 43, 43, .12); color: var(--accent2); }
+  .stage-PAR_DEP { background: rgba(10, 88, 154, .12); color: var(--accent); }
+  .stage-CPA_Dep, .stage-CPA_DOCS { background: rgba(227, 30, 37, .12); color: var(--accent2); }
   .stage-Admin { background: rgba(161, 89, 255, .15); color: #a159ff; }
   .stage-Login { background: rgba(255, 107, 53, .15); color: var(--accent3); }
   .stage-Team, .stage-Assign { background: rgba(255, 179, 71, .15); color: var(--warn); }
   .stage-System, .stage-System-Comment, .stage-System-Comments, .stage-system { background: rgba(138, 150, 180, .15); color: #8a96b4; }
-  .stage-Sales { background: rgba(0, 200, 255, .15); color: #085897; }
-  .stage-default { background: rgba(8, 88, 151, .08); color: var(--accent); }
+  .stage-Sales { background: rgba(0, 200, 255, .15); color: #0a589a; }
+  .stage-default { background: rgba(10, 88, 154, .08); color: var(--accent); }
 
   /* Comment-type badges inside the timeline (legacy .trk-type-*) */
   .trk-type-tag {
@@ -807,8 +807,8 @@
     font-size: 9.5px; font-weight: 700; padding: 1px 7px;
     border-radius: 20px; margin-bottom: 4px; letter-spacing: .3px;
   }
-  .trk-type-general { background: rgba(8, 88, 151, .1);  color: #085897; }
-  .trk-type-query   { background: rgba(212, 43, 43, .1);  color: #c0392b; }
+  .trk-type-general { background: rgba(10, 88, 154, .1);  color: #0a589a; }
+  .trk-type-query   { background: rgba(227, 30, 37, .1);  color: #e31e25; }
   .trk-type-pending { background: rgba(245, 158, 11, .12); color: #92400e; }
   .trk-type-task    { background: rgba(26, 115, 64, .1);  color: #1a7340; }
 
@@ -817,7 +817,7 @@
      Complete/COMPLETE red, Pending amber, SKIP grey, anything else the plain
      base badge. Deliberately NOT the app's design-system Badge variants. */
   .trk-status { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10.5px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; color: var(--text2); }
-  .trk-status-complete { background: rgba(212, 43, 43, .1);  color: var(--accent2); border: 1px solid rgba(212, 43, 43, .2); }
+  .trk-status-complete { background: rgba(227, 30, 37, .1);  color: var(--accent2); border: 1px solid rgba(227, 30, 37, .2); }
   .trk-status-pending  { background: rgba(255, 179, 71, .15); color: var(--warn); }
   .trk-status-skip     { background: rgba(138, 150, 180, .15); color: #8a96b4; }
 
@@ -877,19 +877,19 @@
     .efin-card {
       border-width: 1.5px;
       border-radius: 18px;
-      box-shadow: 0 2px 12px rgba(8, 88, 151, .05);
+      box-shadow: 0 2px 12px rgba(10, 88, 154, .05);
       transition: all .22s;
     }
     .efin-card:hover {
-      border-color: rgba(8, 88, 151, .18);
-      box-shadow: 0 6px 28px rgba(8, 88, 151, .09);
+      border-color: rgba(10, 88, 154, .18);
+      box-shadow: 0 6px 28px rgba(10, 88, 154, .09);
     }
   }
 
   .efin-card-head {
     padding: 18px 22px;
     border-bottom: 1px solid var(--border);
-    background: linear-gradient(90deg, rgba(8, 88, 151, .02), transparent);
+    background: linear-gradient(90deg, rgba(10, 88, 154, .02), transparent);
   }
   .efin-card-title {
     font-family: var(--font-head);
@@ -901,7 +901,7 @@
     .efin-card-head {
       padding: 18px 24px;
       border-bottom-width: 1.5px;
-      background: linear-gradient(90deg, rgba(8, 88, 151, .025) 0%, transparent 60%);
+      background: linear-gradient(90deg, rgba(10, 88, 154, .025) 0%, transparent 60%);
     }
     .efin-card-title { font-size: 15px; font-weight: 800; }
   }
@@ -926,10 +926,10 @@
   }
   .efin-input:disabled { opacity: .6; cursor: not-allowed; }
   /* Error state keeps the legacy geometry, swapping only the signal colour. */
-  .efin-input--error { border-color: var(--danger); background: rgba(192, 57, 43, .04); }
+  .efin-input--error { border-color: var(--danger); background: rgba(227, 30, 37, .04); }
   .efin-input--error:focus {
     border-color: var(--danger);
-    box-shadow: 0 0 0 3px rgba(192, 57, 43, .18);
+    box-shadow: 0 0 0 3px rgba(227, 30, 37, .18);
   }
 
   /* Native <select> needs the same skin plus its own chevron, since
@@ -969,30 +969,30 @@
   .efin-btn--primary {
     background: linear-gradient(135deg, #2563c7 0%, #1b4fa0 50%, #143d82 100%);
     color: #fff;
-    box-shadow: 0 8px 24px rgba(8, 88, 151, .4), 0 1px 0 rgba(255, 255, 255, .2) inset;
+    box-shadow: 0 8px 24px rgba(10, 88, 154, .4), 0 1px 0 rgba(255, 255, 255, .2) inset;
   }
   .efin-btn--primary:not(:disabled):hover {
     background: #1a5bc7;
     transform: translateY(-1px);
-    box-shadow: 0 8px 28px rgba(8, 88, 151, .4);
+    box-shadow: 0 8px 28px rgba(10, 88, 154, .4);
   }
 
   .efin-btn--danger {
-    background: linear-gradient(135deg, #e94040 0%, #d42b2b 50%, #a81e1e 100%);
+    background: linear-gradient(135deg, #e94040 0%, #e31e25 50%, #a81e1e 100%);
     color: #fff;
-    box-shadow: 0 8px 24px rgba(212, 43, 43, .35), 0 1px 0 rgba(255, 255, 255, .2) inset;
+    box-shadow: 0 8px 24px rgba(227, 30, 37, .35), 0 1px 0 rgba(255, 255, 255, .2) inset;
   }
   .efin-btn--danger:not(:disabled):hover {
     background: #c62828;
     transform: translateY(-1px);
-    box-shadow: 0 8px 28px rgba(212, 43, 43, .4);
+    box-shadow: 0 8px 28px rgba(227, 30, 37, .4);
   }
 
   .efin-btn--secondary {
     background: var(--surface);
     color: var(--text2);
     border: 1px solid var(--border);
-    box-shadow: 0 1px 2px rgba(8, 88, 151, .06);
+    box-shadow: 0 1px 2px rgba(10, 88, 154, .06);
   }
   .efin-btn--secondary:not(:disabled):hover {
     background: var(--surface2);
@@ -1184,8 +1184,8 @@
     font-size: 12px;
     font-weight: 700;
     color: var(--accent);
-    background: rgba(8, 88, 151, .08);
-    border: 1px solid rgba(8, 88, 151, .18);
+    background: rgba(10, 88, 154, .08);
+    border: 1px solid rgba(10, 88, 154, .18);
     border-radius: 5px;
     padding: 2px 7px;
     display: inline-block;
@@ -1221,13 +1221,13 @@
     border-radius: 8px;
     font-size: 12px;
     font-weight: 600;
-    background: rgba(192, 57, 43, .08);
-    border: 1px solid rgba(192, 57, 43, .25);
+    background: rgba(227, 30, 37, .08);
+    border: 1px solid rgba(227, 30, 37, .25);
     color: var(--danger);
     cursor: pointer;
     transition: background .18s;
   }
-  .app-row-btn-danger:hover { background: rgba(192, 57, 43, .14); }
+  .app-row-btn-danger:hover { background: rgba(227, 30, 37, .14); }
 
   /* ── Topbar search (legacy `.topbar-search`) ──────────────────────────
      --surface2 fill, 1px --border (React had --border2, a shade too dark),
@@ -1246,7 +1246,7 @@
     outline: none;
     background: var(--surface);
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(8, 88, 151, .12);
+    box-shadow: 0 0 0 3px rgba(10, 88, 154, .12);
   }
 
   /* ── Tables ──────────────────────────────────────────────────────────────
@@ -1279,13 +1279,13 @@
     color: var(--text2);
   }
   /* Legacy hover is on the cells, not the row, so it survives sticky columns. */
-  .efin-table tbody tr:hover td { background: rgba(8, 88, 151, .035); }
+  .efin-table tbody tr:hover td { background: rgba(10, 88, 154, .035); }
   .efin-table tbody tr:last-child td { border-bottom: none; }
 
   /* ── Sidebar nav item (legacy app.css:1624 `.nav-item` / :1638 `.nav-icon`) ─
      The sidebar highlight uses the brand secondary accent (--accent2), not
      blue. That accent is now the MudraHub logo's "Hub" ORANGE (formerly red
-     #d42b2b); see the token block at the top of this file. React had every
+     #e31e25); see the token block at the top of this file. React had every
      nav state -- hover, active, the icon recolor -- on `text-efin-blue` /
      `--accent-subtle`, which is a plausible-looking brand color but not
      the one this app actually uses here. There are also two visual signals
@@ -1380,7 +1380,7 @@
     position: absolute;
     width: 36px;
     height: 32px;
-    background: rgba(212, 43, 43, .1);
+    background: rgba(227, 30, 37, .1);
     border-radius: 8px;
     z-index: -1;
   }
@@ -1568,7 +1568,7 @@
   .calc-mode-tab.active {
     background: var(--surface);
     color: var(--accent);
-    box-shadow: 0 2px 10px rgba(8, 88, 151, .12);
+    box-shadow: 0 2px 10px rgba(10, 88, 154, .12);
   }
 
   /* .calc-loan-type button / .calc-amort-toggle button (app.css:8796-8797,
@@ -1614,7 +1614,7 @@
     height: 18px;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 2px 8px rgba(8, 88, 151, .35);
+    box-shadow: 0 2px 8px rgba(10, 88, 154, .35);
     cursor: pointer;
     transition: transform .15s;
   }
@@ -1625,7 +1625,7 @@
     border: none;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 2px 8px rgba(8, 88, 151, .35);
+    box-shadow: 0 2px 8px rgba(10, 88, 154, .35);
     cursor: pointer;
   }
 }
@@ -1673,7 +1673,7 @@
   .customer-row:hover {
     transform: translateY(-2px);
     border-color: var(--border2);
-    box-shadow: 0 14px 32px -18px rgba(8,88,151,.28);
+    box-shadow: 0 14px 32px -18px rgba(10,88,154,.28);
   }
   .customer-row-actions {
     display: flex; align-items: center; gap: 4px;
@@ -1766,7 +1766,7 @@
   .linked-loan-card:hover {
     transform: translateY(-2px);
     border-color: var(--border2);
-    box-shadow: 0 14px 32px -18px rgba(8,88,151,.28);
+    box-shadow: 0 14px 32px -18px rgba(10,88,154,.28);
   }
   .linked-loan-card-icon {
     width: 38px; height: 38px; border-radius: 11px;
@@ -1798,15 +1798,15 @@
     background: var(--surface);
     border: 1.5px solid var(--border);
     overflow: hidden;
-    box-shadow: 0 2px 12px rgba(8,88,151,.05);
+    box-shadow: 0 2px 12px rgba(10,88,154,.05);
     transition: border-color .2s, box-shadow .2s;
   }
-  .chart-card:hover { border-color: rgba(8,88,151,.18); box-shadow: 0 6px 28px rgba(8,88,151,.09); }
+  .chart-card:hover { border-color: rgba(10,88,154,.18); box-shadow: 0 6px 28px rgba(10,88,154,.09); }
   .chart-card-head {
     display: flex; align-items: center; gap: 11px;
     padding: 18px 24px;
     border-bottom: 1.5px solid var(--border);
-    background: linear-gradient(90deg, rgba(8,88,151,.025) 0%, transparent 60%);
+    background: linear-gradient(90deg, rgba(10,88,154,.025) 0%, transparent 60%);
   }
   .chart-card-body { padding: 24px; }
 
@@ -1886,7 +1886,7 @@
     padding: 13px 15px;
     transition: border-color .18s, box-shadow .18s, transform .18s;
   }
-  .perfios-stat:hover { border-color: var(--border2); transform: translateY(-2px); box-shadow: 0 10px 26px -16px rgba(8,88,151,.28); }
+  .perfios-stat:hover { border-color: var(--border2); transform: translateY(-2px); box-shadow: 0 10px 26px -16px rgba(10,88,154,.28); }
   .perfios-stat::before {
     content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; border-radius: 3px 0 0 3px;
     background: var(--stat-accent, var(--accent));
@@ -1899,7 +1899,7 @@
     border-left: 3px solid var(--check-accent, var(--border2));
     transition: box-shadow .16s, transform .16s;
   }
-  .check-card:hover { box-shadow: 0 8px 22px -16px rgba(8,88,151,.28); transform: translateX(2px); }
+  .check-card:hover { box-shadow: 0 8px 22px -16px rgba(10,88,154,.28); transform: translateX(2px); }
 }
 
 /* ── Lender Configuration — premium redesign (Page 7) ─────────────────────
@@ -1913,7 +1913,7 @@
     padding: 15px 16px;
     transition: transform .18s cubic-bezier(.4,0,.2,1), box-shadow .18s, border-color .18s;
   }
-  .entity-card:hover { transform: translateY(-2px); border-color: var(--border2); box-shadow: 0 14px 32px -18px rgba(8,88,151,.26); }
+  .entity-card:hover { transform: translateY(-2px); border-color: var(--border2); box-shadow: 0 14px 32px -18px rgba(10,88,154,.26); }
   .entity-card-icon {
     width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
@@ -1926,7 +1926,7 @@
     background: var(--surface); border: 1px solid var(--border);
     transition: border-color .2s, box-shadow .2s;
   }
-  .lender-card:hover { border-color: var(--border2); box-shadow: 0 12px 30px -20px rgba(8,88,151,.24); }
+  .lender-card:hover { border-color: var(--border2); box-shadow: 0 12px 30px -20px rgba(10,88,154,.24); }
   .lender-card-head {
     display: flex; align-items: center; gap: 12px;
     padding: 13px 16px;
@@ -1956,7 +1956,7 @@
     border-left: 4px solid var(--match-accent, var(--border2));
     transition: transform .16s, box-shadow .16s;
   }
-  .match-card:hover { transform: translateX(2px); box-shadow: 0 10px 26px -18px rgba(8,88,151,.26); }
+  .match-card:hover { transform: translateX(2px); box-shadow: 0 10px 26px -18px rgba(10,88,154,.26); }
 }
 
 /* ── Tickets — premium redesign (Page 8) ──────────────────────────────────
@@ -1973,7 +1973,7 @@
     content: ''; position: absolute; inset: 8px auto 8px 0; width: 4px; border-radius: 3px;
     background: var(--tk-accent, var(--accent));
   }
-  .ticket-card:hover { transform: translateY(-2px); border-color: var(--border2); box-shadow: 0 14px 32px -18px rgba(8,88,151,.26); }
+  .ticket-card:hover { transform: translateY(-2px); border-color: var(--border2); box-shadow: 0 14px 32px -18px rgba(10,88,154,.26); }
   .ticket-card-icon {
     width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
@@ -2020,7 +2020,7 @@
      .calc-breakdown-* (app.css): a light-gradient EMI hero (red 48px figure)
      over a value-above-label breakdown grid, all in one bordered card. */
   .calc-result-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: 18px; overflow: hidden; }
-  .calc-result-top { background: linear-gradient(135deg, rgba(8,88,151,.06) 0%, rgba(212,43,43,.04) 100%); padding: 28px 24px 20px; text-align: center; border-bottom: 1px solid var(--border); }
+  .calc-result-top { background: linear-gradient(135deg, rgba(10,88,154,.06) 0%, rgba(227,30,37,.04) 100%); padding: 28px 24px 20px; text-align: center; border-bottom: 1px solid var(--border); }
   .calc-emi-big { font-family: var(--font-head); font-size: 48px; font-weight: 900; color: var(--accent2); line-height: 1; }
   .calc-breakdown-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; }
   .calc-bk-item { padding: 16px 12px; text-align: center; border-right: 1px solid var(--border); }
@@ -2032,7 +2032,7 @@
     background: var(--surface); border: 1px solid var(--border);
     transition: transform .16s, box-shadow .16s;
   }
-  .calc-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -16px rgba(8,88,151,.28); }
+  .calc-stat:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -16px rgba(10,88,154,.28); }
 }
 
 /* ── Notifications — premium redesign (Page 10) ───────────────────────────
@@ -2108,7 +2108,7 @@
     background: var(--surface); border: 1px solid var(--border);
     transition: transform .16s, box-shadow .16s, border-color .16s;
   }
-  .audit-node:hover { transform: translateX(2px); border-color: var(--border2); box-shadow: 0 10px 26px -18px rgba(8,88,151,.24); }
+  .audit-node:hover { transform: translateX(2px); border-color: var(--border2); box-shadow: 0 10px 26px -18px rgba(10,88,154,.24); }
   .audit-node::before {
     content: ''; position: absolute; top: 18px; left: -25px;
     width: 12px; height: 12px; border-radius: 50%;
@@ -2143,7 +2143,7 @@
        radial orbs (blue + red). No grid, no animated drifting orbs. */
     background:
       radial-gradient(ellipse 80% 60% at 20% 20%, rgba(45,99,199,.4) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 50% at 80% 80%, rgba(212,43,43,.25) 0%, transparent 55%),
+      radial-gradient(ellipse 60% 50% at 80% 80%, rgba(227,30,37,.25) 0%, transparent 55%),
       linear-gradient(135deg, #0d2a6e 0%, #1b4fa0 45%, #0f2060 75%, #0a1844 100%);
   }
 
@@ -2260,7 +2260,7 @@
 
   .lp-error-box {
     font-size: 12.5px; margin-bottom: 14px; text-align: center;
-    background: rgba(192,57,43,.08); border: 1px solid rgba(192,57,43,.25);
+    background: rgba(227,30,37,.08); border: 1px solid rgba(227,30,37,.25);
     color: var(--danger); padding: 10px 14px; border-radius: 10px;
   }
   .lp-success-box {
@@ -2277,13 +2277,13 @@
     padding: 14px;
     font-family: var(--font-body); font-size: 15px; font-weight: 800;
     cursor: pointer;
-    box-shadow: 0 8px 24px rgba(8,88,151,.4), inset 0 1px 0 rgba(255,255,255,.2);
+    box-shadow: 0 8px 24px rgba(10,88,154,.4), inset 0 1px 0 rgba(255,255,255,.2);
     transition: all .2s;
     display: flex; align-items: center; justify-content: center; gap: 8px;
     letter-spacing: .3px;
   }
   .login-btn:hover:not(:disabled) {
-    box-shadow: 0 12px 32px rgba(8,88,151,.5);
+    box-shadow: 0 12px 32px rgba(10,88,154,.5);
     transform: translateY(-2px);
   }
   .login-btn:active:not(:disabled) { transform: translateY(0); }
@@ -2337,7 +2337,7 @@
     background: linear-gradient(160deg, #ffffff 0%, #f4f7ff 100%);
     border-radius: 32px; padding: 24px 40px 32px;
     max-width: 400px; width: 92%; text-align: center;
-    box-shadow: 0 40px 100px rgba(10, 25, 80, .32), 0 0 0 1px rgba(8, 88, 151, .1);
+    box-shadow: 0 40px 100px rgba(10, 25, 80, .32), 0 0 0 1px rgba(10, 88, 154, .1);
     position: relative; overflow: hidden;
     animation: oi-rise .42s cubic-bezier(.34, 1.46, .64, 1) both;
   }
@@ -2350,7 +2350,7 @@
   .oi-title { font-family: var(--font-head); font-size: 20px; font-weight: 800; color: var(--text); margin-bottom: 7px; letter-spacing: -.3px; }
   .oi-sub   { font-size: 12.5px; color: var(--text3); line-height: 1.65; margin-bottom: 20px; font-weight: 500; }
 
-  .oi-bar-track { height: 3px; border-radius: 3px; background: rgba(8, 88, 151, .08); overflow: hidden; margin-bottom: 14px; }
+  .oi-bar-track { height: 3px; border-radius: 3px; background: rgba(10, 88, 154, .08); overflow: hidden; margin-bottom: 14px; }
   .oi-bar-fill {
     height: 100%; border-radius: 3px;
     background: linear-gradient(90deg, var(--accent), #2c6fff, #6fa3ff);
@@ -2394,13 +2394,13 @@
   .kyc-card {
     position: relative; width: 148px; height: 96px; border-radius: 10px;
     background: linear-gradient(145deg, #fff 0%, #f0f4ff 100%);
-    border: 1.5px solid rgba(8,88,151,.22);
-    box-shadow: 0 8px 32px rgba(8,88,151,.18), 0 2px 6px rgba(8,88,151,.1);
+    border: 1.5px solid rgba(10,88,154,.22);
+    box-shadow: 0 8px 32px rgba(10,88,154,.18), 0 2px 6px rgba(10,88,154,.1);
     overflow: hidden; z-index: 3;
   }
   .kyc-card::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0; height: 22px;
-    background: linear-gradient(90deg, #085897, #1a72b8);
+    background: linear-gradient(90deg, #0a589a, #1a72b8);
   }
   .kyc-card-chip {
     position: absolute; top: 5px; left: 10px; width: 22px; height: 16px; border-radius: 3px;
@@ -2409,26 +2409,26 @@
   }
   .kyc-card-photo {
     position: absolute; top: 28px; left: 10px; width: 28px; height: 34px; border-radius: 4px;
-    background: linear-gradient(145deg, #dce8ff, #c8d8f4); border: 1px solid rgba(8,88,151,.2);
+    background: linear-gradient(145deg, #dce8ff, #c8d8f4); border: 1px solid rgba(10,88,154,.2);
     overflow: hidden; display: flex; align-items: center; justify-content: center;
   }
   .kyc-card-photo::after {
     content: ''; width: 14px; height: 14px; border-radius: 50%;
-    background: rgba(8,88,151,.25); box-shadow: 0 8px 0 rgba(8,88,151,.15);
+    background: rgba(10,88,154,.25); box-shadow: 0 8px 0 rgba(10,88,154,.15);
   }
   .kyc-card-lines {
     position: absolute; top: 30px; left: 46px; right: 10px;
     display: flex; flex-direction: column; gap: 7px;
   }
   .kyc-line {
-    height: 5px; border-radius: 3px; background: rgba(8,88,151,.12);
+    height: 5px; border-radius: 3px; background: rgba(10,88,154,.12);
     transform-origin: left; transform: scaleX(0);
     animation: kyc-line-fill 0.5s ease-out forwards;
   }
   .kyc-line-1 { width: 82%; animation-delay: 0.2s; }
-  .kyc-line-2 { width: 64%; animation-delay: 0.5s; background: rgba(8,88,151,.18); }
+  .kyc-line-2 { width: 64%; animation-delay: 0.5s; background: rgba(10,88,154,.18); }
   .kyc-line-3 { width: 74%; animation-delay: 0.8s; }
-  .kyc-line-4 { width: 50%; animation-delay: 1.1s; background: rgba(8,88,151,.14); }
+  .kyc-line-4 { width: 50%; animation-delay: 1.1s; background: rgba(10,88,154,.14); }
   @keyframes kyc-line-fill { from { transform: scaleX(0); opacity: 0; } to { transform: scaleX(1); opacity: 1; } }
   .kyc-scan-beam {
     position: absolute; left: 0; right: 0; height: 3px;
@@ -2443,11 +2443,11 @@
   }
   @keyframes kyc-beam-travel { 0% { top: 0; opacity: 0; } 5% { opacity: 1; } 95% { opacity: 1; } 100% { top: calc(100% - 3px); opacity: 0; } }
   .kyc-corner { position: absolute; width: 14px; height: 14px; z-index: 5; animation: kyc-corner-pulse 2s ease-in-out infinite; }
-  .kyc-corner-tl { top: -2px; left: -2px; border-top: 2.5px solid #085897; border-left: 2.5px solid #085897; border-radius: 3px 0 0 0; }
-  .kyc-corner-tr { top: -2px; right: -2px; border-top: 2.5px solid #085897; border-right: 2.5px solid #085897; border-radius: 0 3px 0 0; }
-  .kyc-corner-bl { bottom: -2px; left: -2px; border-bottom: 2.5px solid #085897; border-left: 2.5px solid #085897; border-radius: 0 0 0 3px; }
-  .kyc-corner-br { bottom: -2px; right: -2px; border-bottom: 2.5px solid #085897; border-right: 2.5px solid #085897; border-radius: 0 0 3px 0; }
-  @keyframes kyc-corner-pulse { 0%,100% { opacity: .7; } 50% { opacity: 1; filter: drop-shadow(0 0 3px rgba(8,88,151,.6)); } }
+  .kyc-corner-tl { top: -2px; left: -2px; border-top: 2.5px solid #0a589a; border-left: 2.5px solid #0a589a; border-radius: 3px 0 0 0; }
+  .kyc-corner-tr { top: -2px; right: -2px; border-top: 2.5px solid #0a589a; border-right: 2.5px solid #0a589a; border-radius: 0 3px 0 0; }
+  .kyc-corner-bl { bottom: -2px; left: -2px; border-bottom: 2.5px solid #0a589a; border-left: 2.5px solid #0a589a; border-radius: 0 0 0 3px; }
+  .kyc-corner-br { bottom: -2px; right: -2px; border-bottom: 2.5px solid #0a589a; border-right: 2.5px solid #0a589a; border-radius: 0 0 3px 0; }
+  @keyframes kyc-corner-pulse { 0%,100% { opacity: .7; } 50% { opacity: 1; filter: drop-shadow(0 0 3px rgba(10,88,154,.6)); } }
   .kyc-verified-mark {
     position: absolute; top: -12px; right: -12px; width: 26px; height: 26px; border-radius: 50%;
     background: linear-gradient(135deg, #16a34a, #1a7340); border: 2.5px solid #fff;
@@ -2460,10 +2460,10 @@
   .kyc-stage-label {
     position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
     display: inline-flex; align-items: center; gap: 5px;
-    background: linear-gradient(135deg, #085897 0%, #064377 100%); color: #fff;
+    background: linear-gradient(135deg, #0a589a 0%, #064377 100%); color: #fff;
     font-size: 10px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase;
     padding: 4px 12px 4px 9px; border-radius: 20px; white-space: nowrap;
-    box-shadow: 0 3px 12px rgba(8,88,151,.45); z-index: 10;
+    box-shadow: 0 3px 12px rgba(10,88,154,.45); z-index: 10;
     animation: kyc-label-slide .5s cubic-bezier(.34,1.46,.64,1) .3s both;
   }
   .kyc-stage-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,.9); flex-shrink: 0; animation: kyc-dot-glow 1.2s ease-in-out infinite; }
@@ -2545,7 +2545,7 @@
    ──────────────────────────────────────────────────────────────────────
    Additive and page-scoped: every rule below hangs off `.apps-page` (or a
    new `ap-*` class), so no other screen changes. The palette is sampled
-   straight from the logo (assets/logo-004.png): "Mudra" is #085897 and
+   straight from the logo (assets/logo-004.png): "Mudra" is #0a589a and
    "Hub" + the "Driven by Elitetru" tagline are #f58730.
 
    Blue carries structure and primary actions; orange is the accent — used
@@ -2554,10 +2554,10 @@
    is only ~2.6:1 against white, so it is paired with dark ink instead.
    ══════════════════════════════════════════════════════════════════════ */
 :root {
-  --brand-blue: #085897;
+  --brand-blue: #0a589a;
   --brand-blue-dark: #064377;
   --brand-blue-light: #1a72b8;
-  --brand-blue-soft: rgba(8, 88, 151, .08);
+  --brand-blue-soft: rgba(10, 88, 154, .08);
   --brand-orange: #f58730;
   --brand-orange-ink: #b85a0a;      /* orange that is still readable as text on a light tint */
   --brand-orange-soft: rgba(245, 135, 48, .13);
@@ -2574,7 +2574,7 @@
   --accent-dark: var(--brand-blue-dark);
   --accent-light: var(--brand-blue-light);
   --accent-subtle: var(--brand-blue-soft);
-  --accent-glow: rgba(8, 88, 151, .22);
+  --accent-glow: rgba(10, 88, 154, .22);
 }
 
 .apps-page input[type="checkbox"] {
@@ -2594,7 +2594,7 @@
   display: flex; align-items: center; justify-content: center;
   color: #fff;
   background: linear-gradient(135deg, var(--brand-blue-light) 0%, var(--brand-blue) 55%, var(--brand-blue-dark) 100%);
-  box-shadow: 0 10px 22px -8px rgba(8, 88, 151, .55), 0 1px 0 rgba(255, 255, 255, .25) inset;
+  box-shadow: 0 10px 22px -8px rgba(10, 88, 154, .55), 0 1px 0 rgba(255, 255, 255, .25) inset;
 }
 .apps-page .ap-head-icon::after {
   content: ''; position: absolute; top: -4px; right: -4px;
@@ -2615,23 +2615,23 @@
   font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
   color: var(--brand-blue-dark);
   background: var(--brand-blue-soft);
-  border: 1px solid rgba(8, 88, 151, .16);
+  border: 1px solid rgba(10, 88, 154, .16);
 }
 .apps-page .ap-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* Buttons on this page: logo blue for primary, blue-tinted outline for secondary. */
 .apps-page .efin-btn--primary {
   background: linear-gradient(135deg, var(--brand-blue-light) 0%, var(--brand-blue) 55%, var(--brand-blue-dark) 100%);
-  box-shadow: 0 8px 22px rgba(8, 88, 151, .34), 0 1px 0 rgba(255, 255, 255, .22) inset;
+  box-shadow: 0 8px 22px rgba(10, 88, 154, .34), 0 1px 0 rgba(255, 255, 255, .22) inset;
 }
 .apps-page .efin-btn--primary:not(:disabled):hover {
   background: linear-gradient(135deg, #2380c8 0%, #0a66ad 55%, var(--brand-blue) 100%);
-  box-shadow: 0 10px 26px rgba(8, 88, 151, .4);
+  box-shadow: 0 10px 26px rgba(10, 88, 154, .4);
 }
 .apps-page .efin-btn--secondary {
   border-color: var(--ap-line);
   color: var(--brand-blue-dark);
-  box-shadow: 0 1px 2px rgba(8, 88, 151, .06);
+  box-shadow: 0 1px 2px rgba(10, 88, 154, .06);
 }
 .apps-page .efin-btn--secondary:not(:disabled):hover {
   background: var(--brand-blue-soft);
@@ -2649,7 +2649,7 @@
   display: inline-flex; gap: 2px; padding: 4px;
   border-radius: 14px; background: var(--surface);
   border: 1px solid var(--ap-line);
-  box-shadow: 0 1px 2px rgba(8, 88, 151, .05);
+  box-shadow: 0 1px 2px rgba(10, 88, 154, .05);
 }
 .apps-page .ap-seg-btn {
   display: inline-flex; align-items: center; gap: 7px;
@@ -2662,7 +2662,7 @@
 .apps-page .ap-seg-btn.is-active {
   color: #fff;
   background: linear-gradient(135deg, var(--brand-blue-light), var(--brand-blue-dark));
-  box-shadow: 0 4px 12px rgba(8, 88, 151, .3);
+  box-shadow: 0 4px 12px rgba(10, 88, 154, .3);
 }
 .apps-page .ap-seg-btn:focus-visible,
 .apps-page .filter-chip:focus-visible,
@@ -2688,7 +2688,7 @@
 .apps-page .filter-chip.active {
   color: #fff; border-color: var(--brand-blue-dark);
   background: linear-gradient(135deg, var(--brand-blue-light), var(--brand-blue-dark));
-  box-shadow: 0 5px 14px rgba(8, 88, 151, .3);
+  box-shadow: 0 5px 14px rgba(10, 88, 154, .3);
 }
 /* Orange pip under the selected chip — absolutely positioned so selecting a
    chip never changes its width or reflows the row. */
@@ -2705,7 +2705,7 @@
   position: relative;
   border-radius: 20px;
   border: 1px solid var(--ap-line);
-  box-shadow: 0 1px 2px rgba(8, 88, 151, .05), 0 14px 32px -18px rgba(8, 88, 151, .22);
+  box-shadow: 0 1px 2px rgba(10, 88, 154, .05), 0 14px 32px -18px rgba(10, 88, 154, .22);
   padding: 18px;
   container: apcard / inline-size;
 }
@@ -2722,7 +2722,7 @@
   margin-bottom: 14px; padding: 9px 12px; border-radius: 12px;
   font-size: 12.5px; color: var(--brand-blue-dark);
   background: var(--brand-blue-soft);
-  border: 1px solid rgba(8, 88, 151, .16);
+  border: 1px solid rgba(10, 88, 154, .16);
 }
 .apps-page .ap-search-note strong { font-weight: 700; word-break: break-word; }
 .apps-page .ap-search-count {
@@ -2731,7 +2731,7 @@
 }
 .apps-page .ap-link-btn {
   margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 10px; border-radius: 8px; border: 1px solid rgba(8, 88, 151, .22);
+  padding: 3px 10px; border-radius: 8px; border: 1px solid rgba(10, 88, 154, .22);
   font-size: 11.5px; font-weight: 700; color: var(--brand-blue); background: var(--surface);
   cursor: pointer; transition: all .16s;
 }
@@ -2742,14 +2742,14 @@
   padding: 3px 4px 3px 10px; border-radius: 999px;
   font-size: 11px; font-weight: 700; white-space: nowrap;
   color: var(--brand-blue-dark); background: var(--brand-blue-soft);
-  border: 1px solid rgba(8, 88, 151, .18);
+  border: 1px solid rgba(10, 88, 154, .18);
 }
 .apps-page .ap-tag button {
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px; border-radius: 50%; border: 0; cursor: pointer;
   color: var(--brand-blue-dark); background: transparent; opacity: .65;
 }
-.apps-page .ap-tag button:hover { opacity: 1; background: rgba(8, 88, 151, .14); }
+.apps-page .ap-tag button:hover { opacity: 1; background: rgba(10, 88, 154, .14); }
 .apps-page .ap-clear-all {
   margin-left: 4px; font-size: 11.5px; font-weight: 700; color: var(--brand-orange-ink);
   background: none; border: 0; cursor: pointer;
@@ -2782,7 +2782,7 @@
 .apps-page .ap-table-wrap {
   overflow-x: auto; border-radius: 14px; border: 1px solid var(--ap-line);
 }
-.apps-page .ap-table { width: 100%; border-collapse: collapse; }
+.apps-page .ap-table { width: 100%; border-collapse: collapse; min-width: 900px; }
 .apps-page .ap-table thead th {
   position: sticky; top: 0;
   padding: 12px 14px; text-align: left; white-space: nowrap;
@@ -2799,10 +2799,10 @@
 }
 .apps-page .ap-table tbody tr:last-child td { border-bottom: 0; }
 .apps-page .ap-table tbody tr { transition: background .15s; }
-.apps-page .ap-table tbody tr:hover { background: rgba(8, 88, 151, .035); }
+.apps-page .ap-table tbody tr:hover { background: rgba(10, 88, 154, .035); }
 .apps-page .ap-table tbody td:first-child { box-shadow: inset 3px 0 0 transparent; transition: box-shadow .15s; }
 .apps-page .ap-table tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--brand-orange); }
-.apps-page .ap-table tbody tr.is-selected { background: rgba(8, 88, 151, .07); }
+.apps-page .ap-table tbody tr.is-selected { background: rgba(10, 88, 154, .07); }
 .apps-page .ap-table tbody tr.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--brand-blue); }
 .apps-page .ap-table td.is-right { text-align: right; }
 .apps-page .ap-th-check, .apps-page .ap-td-check { width: 40px; padding-right: 0 !important; }
@@ -2810,7 +2810,7 @@
 .apps-page .efin-mono-id {
   color: var(--brand-blue-dark);
   background: var(--brand-blue-soft);
-  border-color: rgba(8, 88, 151, .2);
+  border-color: rgba(10, 88, 154, .2);
   border-radius: 7px; padding: 3px 9px; font-size: 11.5px;
 }
 
@@ -2821,7 +2821,7 @@
   font-size: 12.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase;
   color: var(--brand-blue-dark);
   background: linear-gradient(135deg, #e3f0fb, #cfe3f5);
-  border: 1.5px solid rgba(8, 88, 151, .18);
+  border: 1.5px solid rgba(10, 88, 154, .18);
 }
 .apps-page .ap-person-name {
   max-width: 200px; overflow: hidden; text-overflow: ellipsis;
@@ -2833,7 +2833,7 @@
   padding: 0 6px; border-radius: 5px; font-size: 10px; font-weight: 800;
 }
 .apps-page .ap-risk--a { background: rgba(26, 115, 64, .12); color: #1a7340; }
-.apps-page .ap-risk--d { background: rgba(212, 43, 43, .12); color: #d42b2b; }
+.apps-page .ap-risk--d { background: rgba(227, 30, 37, .12); color: #e31e25; }
 .apps-page .ap-risk--mid { background: rgba(230, 126, 0, .13); color: #b86500; }
 
 .apps-page .ap-type {
@@ -2856,11 +2856,11 @@
   transition: all .16s;
 }
 .apps-page .ap-act--open {
-  color: var(--brand-blue); background: var(--surface); border: 1.5px solid rgba(8, 88, 151, .3);
+  color: var(--brand-blue); background: var(--surface); border: 1.5px solid rgba(10, 88, 154, .3);
 }
 .apps-page .ap-act--open:hover {
   color: #fff; background: var(--brand-blue); border-color: var(--brand-blue);
-  box-shadow: 0 5px 14px rgba(8, 88, 151, .3);
+  box-shadow: 0 5px 14px rgba(10, 88, 154, .3);
 }
 .apps-page .ap-act--continue {
   color: var(--brand-orange-ink); background: var(--brand-orange-soft); border: 1.5px solid rgba(245, 135, 48, .5);
@@ -2870,13 +2870,13 @@
   box-shadow: 0 5px 14px rgba(245, 135, 48, .35);
 }
 .apps-page .ap-act--danger {
-  color: var(--danger); background: rgba(192, 57, 43, .07); border: 1.5px solid rgba(192, 57, 43, .22);
+  color: var(--danger); background: rgba(227, 30, 37, .07); border: 1.5px solid rgba(227, 30, 37, .22);
 }
 .apps-page .ap-act--danger:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); color: #fff; }
 .apps-page .ap-act--danger:disabled { opacity: .5; cursor: not-allowed; }
 .apps-page .ap-act--icon { padding: 6px 9px; }
 .apps-page .ap-act--quiet { color: var(--text3); background: transparent; border: 1.5px solid transparent; }
-.apps-page .ap-act--quiet:hover { color: var(--danger); background: rgba(192, 57, 43, .07); }
+.apps-page .ap-act--quiet:hover { color: var(--danger); background: rgba(227, 30, 37, .07); }
 
 /* ── Empty state ─────────────────────────────────────────────────────── */
 .apps-page .ap-empty {
@@ -2888,7 +2888,7 @@
   display: flex; align-items: center; justify-content: center;
   color: var(--brand-blue);
   background: linear-gradient(135deg, #eaf4fc, #d6e8f7);
-  border: 1.5px solid rgba(8, 88, 151, .16);
+  border: 1.5px solid rgba(10, 88, 154, .16);
 }
 .apps-page .ap-empty-icon::after {
   content: ''; position: absolute; top: -5px; right: -5px;
@@ -2922,7 +2922,7 @@
 .apps-page .ap-page-btn.is-active {
   color: #fff; border-color: var(--brand-blue-dark);
   background: linear-gradient(135deg, var(--brand-blue-light), var(--brand-blue-dark));
-  box-shadow: 0 4px 10px rgba(8, 88, 151, .28);
+  box-shadow: 0 4px 10px rgba(10, 88, 154, .28);
 }
 .apps-page .ap-page-btn:disabled { opacity: .45; cursor: not-allowed; }
 
@@ -3011,7 +3011,7 @@
 /* Optional subtle hover-lift for interactive cards/tiles that should feel
    pickable (opt-in via class — NOT applied to every card). */
 .lms-lift { transition: transform .18s cubic-bezier(.4,0,.2,1), box-shadow .18s cubic-bezier(.4,0,.2,1); }
-.lms-lift:hover { transform: translateY(-2px); box-shadow: 0 12px 28px -14px rgba(8, 88, 151, .28); }
+.lms-lift:hover { transform: translateY(-2px); box-shadow: 0 12px 28px -14px rgba(10, 88, 154, .28); }
 
 /* ── Accessibility: global reduced-motion reset ─────────────────────────────
    Best-practice blanket reset so EVERY animation/transition (existing + new,

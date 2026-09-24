@@ -2,6 +2,7 @@ using LoanMS.Application.DTOs;
 using LoanMS.Application.Interfaces;
 using LoanMS.Domain.Entities;
 using LoanMS.Infrastructure.Data;
+using LoanMS.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
@@ -360,11 +361,20 @@ public class IncredController : BaseController
     // one (more authoritative once sanctioned), falling back to
     // RequestedAmount otherwise — a standard coalesce over two genuinely
     // existing fields, not an invented one.
+    //
+    // BUGFIX (confirmed real access-control bypass): this endpoint read
+    // straight off _db.Loans with no visibility scoping at all, so any
+    // authenticated user (Sales, Dsa, Partner, ...) could see every InCred
+    // application in the system regardless of role. Reuses the exact same,
+    // single, centralized rule every other loan-read surface (Loans list/
+    // detail, Dashboard, Reports) already uses instead of inventing a
+    // second one here.
     // ─────────────────────────────────────────────────────────────────────────
     [HttpGet("applications")]
     public async Task<IActionResult> GetApplications()
     {
-        var apps = await _db.Loans
+        var apps = await LoanRepository
+            .ApplyVisibilityScope(_db, _db.Loans, CurrentUserId, CurrentUserRole)
             .AsNoTracking()
             .Where(l => l.IncredApplicationId != null)
             .Select(l => new
@@ -421,6 +431,25 @@ public class IncredController : BaseController
         });
     }
 
+    // Raw InCred proxies act on the lender with the COMPANY credentials, so they
+    // need the same permission that shows InCred in the UI (canViewIncred) —
+    // previously any logged-in user (Sales/Partner/DSA) could call them, e.g.
+    // fetch the live InCred OAuth token or cancel any InCred application.
+    private async Task<IActionResult?> DenyIncredProxyAsync() =>
+        await _rolePerm.IsAllowedAsync(CurrentUserRole, "canViewIncred") ? null : Forbid();
+
+    // application/{id} routes: the InCred application must belong to a loan the
+    // caller can see (same visibility rule as GET /api/incred/applications).
+    private async Task<IActionResult?> DenyIncredAppAsync(string incredAppId)
+    {
+        if (await DenyIncredProxyAsync() is { } denied) return denied;
+        var loanId = await _db.Loans.Where(l => l.IncredApplicationId == incredAppId)
+            .Select(l => (int?)l.Id).FirstOrDefaultAsync();
+        return loanId is int id && await CanSeeLoanAsync(_db, id)
+            ? null
+            : NotFound(new { status = false, message = "InCred application not found." });
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // POST /api/incred/token  (mirrors incred_get_token)
     // Intentionally bypasses the token cache below — this endpoint exists to
@@ -430,6 +459,7 @@ public class IncredController : BaseController
     [HttpPost("token")]
     public async Task<IActionResult> GetToken()
     {
+        if (await DenyIncredProxyAsync() is { } denied) return denied;
         var creds = await _loadCreds();
         var client = _http.CreateClient("incred");
         var form = new FormUrlEncodedContent(new Dictionary<string, string>
@@ -463,6 +493,7 @@ public class IncredController : BaseController
     [HttpPost("application/init")]
     public async Task<IActionResult> CreateApplication([FromBody] JsonElement payload)
     {
+        if (await DenyIncredProxyAsync() is { } denied) return denied;
         // payload is a struct — an empty/invalid body or a Content-Type other than
         // application/json makes model binding silently hand us a default JsonElement
         // (ValueKind == Undefined) instead of failing. Calling GetRawText() on that
@@ -501,6 +532,7 @@ public class IncredController : BaseController
     [HttpPost("offer/request")]
     public async Task<IActionResult> OfferRequest([FromBody] JsonElement payload)
     {
+        if (await DenyIncredProxyAsync() is { } denied) return denied;
         if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
             return BadRequest(new { status = false, message = "Request body is missing or is not valid JSON. Send a JSON object with Content-Type: application/json." });
 
@@ -533,6 +565,7 @@ public class IncredController : BaseController
     [HttpPost("offer/status")]
     public async Task<IActionResult> PollOfferStatus([FromBody] JsonElement payload)
     {
+        if (await DenyIncredProxyAsync() is { } denied) return denied;
         if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
             return BadRequest(new { status = false, message = "Request body is missing or is not valid JSON. Send a JSON object with Content-Type: application/json." });
 
@@ -569,6 +602,8 @@ public class IncredController : BaseController
         if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canViewIncred"))
             return Forbid();
 
+        if (!await CanSeeLoanAsync(_db, loanId))
+            return NotFound(ApiResponseDto<IncredLoanInfoDto>.Fail("Loan not found"));
         var loan = await _db.Loans.Include(l => l.IncredOffers)
             .FirstOrDefaultAsync(l => l.Id == loanId);
         if (loan == null)
@@ -586,6 +621,12 @@ public class IncredController : BaseController
     [HttpPost("loan/{loanId:int}/create")]
     public async Task<IActionResult> CreateIncredApplicationForLoan(int loanId)
     {
+        // Sends the customer's PII to the lender — same permission that shows
+        // the InCred tab (canViewIncred), plus loan visibility, enforced here.
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canViewIncred"))
+            return Forbid();
+        if (!await CanSeeLoanAsync(_db, loanId))
+            return NotFound(ApiResponseDto<IncredLoanInfoDto>.Fail("Loan not found"));
         // No form/request body — payload is built entirely from the loan's existing
         // Customer record (Gender, FatherName, ResidenceType are now real Customer
         // fields, captured once at KYC instead of via a one-off InCred form).
@@ -759,6 +800,10 @@ public class IncredController : BaseController
     [HttpPost("loan/{loanId:int}/refresh-offer")]
     public async Task<IActionResult> RefreshOffer(int loanId)
     {
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canViewIncred"))
+            return Forbid();
+        if (!await CanSeeLoanAsync(_db, loanId))
+            return NotFound(ApiResponseDto<IncredLoanInfoDto>.Fail("Loan not found"));
         var loan = await _db.Loans.Include(l => l.IncredOffers).FirstOrDefaultAsync(l => l.Id == loanId);
         if (loan == null)
             return NotFound(ApiResponseDto<IncredLoanInfoDto>.Fail("Loan not found"));
@@ -892,6 +937,7 @@ public class IncredController : BaseController
     [HttpPost("loan/application/eligibility")]
     public async Task<IActionResult> CheckEligibility([FromBody] JsonElement payload)
     {
+        if (await DenyIncredProxyAsync() is { } denied) return denied;
         var creds = await _loadCreds();
 
         try
@@ -916,6 +962,7 @@ public class IncredController : BaseController
     [HttpPost("loan/application/{id}/document")]
     public async Task<IActionResult> UploadDocument(string id, [FromBody] JsonElement payload)
     {
+        if (await DenyIncredAppAsync(id) is { } denied) return denied;
         var creds = await _loadCreds();
 
         try
@@ -940,6 +987,7 @@ public class IncredController : BaseController
     [HttpPost("loan/application/{id}/cancel")]
     public async Task<IActionResult> CancelApplication(string id, [FromBody] JsonElement payload)
     {
+        if (await DenyIncredAppAsync(id) is { } denied) return denied;
         var creds = await _loadCreds();
 
         try
@@ -964,6 +1012,7 @@ public class IncredController : BaseController
     [HttpGet("loan/application/{id}/repayment-schedule")]
     public async Task<IActionResult> GetRepaymentSchedule(string id)
     {
+        if (await DenyIncredAppAsync(id) is { } denied) return denied;
         var creds = await _loadCreds();
 
         try
@@ -988,6 +1037,7 @@ public class IncredController : BaseController
     [HttpPatch("loan/application/{id}/applicant")]
     public async Task<IActionResult> UpdateApplicant(string id, [FromBody] JsonElement payload)
     {
+        if (await DenyIncredAppAsync(id) is { } denied) return denied;
         var creds = await _loadCreds();
 
         try
@@ -1012,6 +1062,7 @@ public class IncredController : BaseController
     [HttpGet("loan/application/{id}/disbursement")]
     public async Task<IActionResult> GetDisbursement(string id)
     {
+        if (await DenyIncredAppAsync(id) is { } denied) return denied;
         var creds = await _loadCreds();
 
         try

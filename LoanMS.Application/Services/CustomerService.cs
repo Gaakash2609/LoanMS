@@ -49,10 +49,13 @@ public class CustomerService : ICustomerService
 
     public async Task<ApiResponseDto<CustomerDto>> CreateAsync(CreateCustomerRequestDto request)
     {
-        if (await _uow.Customers.EmailExistsAsync(request.Email))
+        // Including soft-deleted rows: the unique indexes on Email/PanNumber
+        // still hold a deleted customer's values, so a filtered check passed
+        // and the INSERT then failed with an unhandled duplicate-key 500.
+        if (await _uow.Customers.EmailTakenIncludingDeletedAsync(request.Email))
             return ApiResponseDto<CustomerDto>.Fail("Email already registered.");
 
-        if (!string.IsNullOrEmpty(request.PanNumber) && await _uow.Customers.PanExistsAsync(request.PanNumber))
+        if (!string.IsNullOrEmpty(request.PanNumber) && await _uow.Customers.PanTakenIncludingDeletedAsync(request.PanNumber))
             return ApiResponseDto<CustomerDto>.Fail("PAN number already registered.");
 
         var customer = new Customer
@@ -102,8 +105,13 @@ public class CustomerService : ICustomerService
         var customer = await _uow.Customers.GetByIdAsync(id);
         if (customer == null) return ApiResponseDto<CustomerDto>.Fail("Customer not found.");
 
-        if (await _uow.Customers.EmailExistsAsync(request.Email, id))
+        // Same unique-index rule as CreateAsync (deleted rows count), and PAN
+        // was not checked on update at all — both used to surface as a 500.
+        if (await _uow.Customers.EmailTakenIncludingDeletedAsync(request.Email, id))
             return ApiResponseDto<CustomerDto>.Fail("Email already in use.");
+
+        if (!string.IsNullOrEmpty(request.PanNumber) && await _uow.Customers.PanTakenIncludingDeletedAsync(request.PanNumber, id))
+            return ApiResponseDto<CustomerDto>.Fail("PAN number already registered to another customer.");
 
         customer.FullName       = request.FullName.Trim();
         customer.Email          = request.Email.ToLower().Trim();
@@ -142,21 +150,6 @@ public class CustomerService : ICustomerService
         await _uow.Customers.UpdateAsync(customer);
         await _uow.SaveChangesAsync();
         return ApiResponseDto<CustomerDto>.Ok(MapToDto(customer), "Customer updated.");
-    }
-
-    public async Task<ApiResponseDto<bool>> DeleteAsync(int id)
-    {
-        var customer = await _uow.Customers.GetByIdAsync(id);
-        if (customer == null) return ApiResponseDto<bool>.Fail("Customer not found.");
-
-        var loans = await _uow.Loans.GetLoansByCustomerAsync(id);
-        if (loans.Any(l => l.Status != LoanMS.Domain.Enums.LoanStatus.Closed &&
-                           l.Status != LoanMS.Domain.Enums.LoanStatus.Rejected))
-            return ApiResponseDto<bool>.Fail("Cannot delete customer with active loans.");
-
-        await _uow.Customers.DeleteAsync(id);
-        await _uow.SaveChangesAsync();
-        return ApiResponseDto<bool>.Ok(true, "Customer deleted.");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

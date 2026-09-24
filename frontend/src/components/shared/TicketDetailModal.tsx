@@ -98,7 +98,7 @@ export default function TicketDetailModal({ ticket, onClose }: { ticket: Ticket;
       }
       footer={<>
         {isClosed ? (
-          <Button size="sm" loading={reopen.isPending} disabled={busy} onClick={() => reopen.mutate()}>
+          <Button size="sm" loading={reopen.isPending} disabled={busy} onClick={() => { if (confirm(`Reopen ticket #${ticket.id}?`)) reopen.mutate() }}>
             Reopen
           </Button>
         ) : (
@@ -112,7 +112,7 @@ export default function TicketDetailModal({ ticket, onClose }: { ticket: Ticket;
             )}
             {canClose && (
               <Button size="sm" variant="danger" loading={close.isPending} disabled={busy}
-                onClick={() => close.mutate()}>Close</Button>
+                onClick={() => { if (confirm(`Close ticket #${ticket.id}? This cannot be undone.`)) close.mutate() }}>Close</Button>
             )}
           </>
         )}

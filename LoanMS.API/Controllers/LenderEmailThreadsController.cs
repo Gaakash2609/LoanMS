@@ -22,6 +22,7 @@ public class LenderEmailThreadsController : BaseController
     [HttpGet("{loanApplicationId:int}")]
     public async Task<IActionResult> GetThread(int loanApplicationId)
     {
+        if (!await CanSeeLoanAsync(_db, loanApplicationId)) return NotFound(ApiResponseDto<object>.Fail("Loan not found."));
         var entries = await _db.LenderEmailThreadEntries
             .Where(t => t.LoanApplicationId == loanApplicationId)
             .OrderBy(t => t.CreatedAt)
@@ -43,7 +44,7 @@ public class LenderEmailThreadsController : BaseController
         if (string.IsNullOrWhiteSpace(dto.Direction))
             return BadRequest(ApiResponseDto<object>.Fail("direction is required."));
 
-        var loanExists = await _db.Loans.AnyAsync(l => l.Id == dto.LoanApplicationId);
+        var loanExists = await CanSeeLoanAsync(_db, dto.LoanApplicationId);
         if (!loanExists)
             return BadRequest(ApiResponseDto<object>.Fail("Loan application not found."));
 

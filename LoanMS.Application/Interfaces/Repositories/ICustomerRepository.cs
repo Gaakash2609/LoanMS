@@ -14,4 +14,8 @@ public interface ICustomerRepository : IGenericRepository<Customer>
     Task<PagedResultDto<CustomerDto>> GetPagedAsync(int page, int pageSize, string? search, int? currentUserId = null, string? currentUserRole = null);
     Task<bool> EmailExistsAsync(string email, int? excludeId = null);
     Task<bool> PanExistsAsync(string pan, int? excludeId = null);
+    /// <summary>Like EmailExistsAsync/PanExistsAsync but also counts SOFT-DELETED
+    /// customers — the DB unique indexes on Email/PanNumber include them.</summary>
+    Task<bool> EmailTakenIncludingDeletedAsync(string email, int? excludeId = null);
+    Task<bool> PanTakenIncludingDeletedAsync(string pan, int? excludeId = null);
 }

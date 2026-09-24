@@ -114,4 +114,19 @@ public class CustomerRepositoryTests
 
         result.Items.Should().Contain(c => c.Id == loanlessCustomer.Id);
     }
+
+    [Fact]
+    public async Task TakenIncludingDeleted_CountsSoftDeletedCustomer_ButExistsDoesNot()
+    {
+        using var db = CreateContext();
+        db.Customers.Add(new Customer { FullName = "Gone", Email = "gone@x.com", Phone = "9000000001", PanNumber = "GONEP1234G", IsDeleted = true });
+        await db.SaveChangesAsync();
+        var repo = new CustomerRepository(db);
+
+        // The unique indexes on Email/PanNumber still hold a deleted row, so
+        // create/update validation must see it (otherwise: duplicate-key 500).
+        (await repo.EmailTakenIncludingDeletedAsync("GONE@x.com")).Should().BeTrue();
+        (await repo.PanTakenIncludingDeletedAsync("gonep1234g")).Should().BeTrue();
+        (await repo.EmailExistsAsync("gone@x.com")).Should().BeFalse();
+    }
 }

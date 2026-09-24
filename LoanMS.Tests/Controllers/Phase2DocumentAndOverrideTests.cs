@@ -161,4 +161,28 @@ public class Phase2DocumentAndOverrideTests
         audit.Reason.Should().Be("Board-approved exception");
         audit.UserId.Should().Be(9);
     }
+    // ── G-11 replace keeps the applicant identity (Gap-2) ─────────────────────
+
+    [Fact]
+    public async Task Replace_CoApplicantDocument_KeepsApplicantRoleAndKey()
+    {
+        using var db = NewDb();
+        var old = new LoanDocument { LoanId = 1, DocumentName = "Co slip", DocumentType = "salary_slip", FilePath = "1/old.pdf",
+                                     ApplicantRole = ApplicantRole.CoApplicant, ApplicantKey = "co1" };
+        db.Set<LoanDocument>().Add(old);
+        db.SaveChanges();
+        var perm = new Mock<IRolePermissionService>();
+        perm.Setup(r => r.IsAllowedAsync(It.IsAny<string?>(), "canUploadDocs")).ReturnsAsync(true);
+        var bytes = System.Text.Encoding.ASCII.GetBytes("%PDF-1.4 replacement");
+        var file = new FormFile(new MemoryStream(bytes), 0, bytes.Length, "file", "Co_slip_v2.pdf") { Headers = new HeaderDictionary(), ContentType = "application/pdf" };
+
+        var result = await Controller(db, perm.Object, LoanServiceWithVisibleLoan().Object).ReplaceDocument(1, old.Id, file);
+
+        result.Should().BeOfType<OkObjectResult>();
+        var replacement = db.Set<LoanDocument>().Single(d => d.Id != old.Id);
+        replacement.ApplicantRole.Should().Be(ApplicantRole.CoApplicant);
+        replacement.ApplicantKey.Should().Be("co1");
+        replacement.Version.Should().Be(old.Version + 1);
+    }
+
 }

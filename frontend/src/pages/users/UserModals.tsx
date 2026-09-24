@@ -117,7 +117,7 @@ export function ViewUserDetailModal({ user, onClose }: { user: User; onClose: ()
         <Row label="Email / Login">{user.email}</Row>
         <Row label="Mobile">{user.phoneNumber || '—'}</Row>
         <Row label="Role"><RolePill role={user.role} /></Row>
-        <Row label="Locations">{onePill(user.locationName, '#085897', '📍 ')}</Row>
+        <Row label="Locations">{onePill(user.locationName, '#0a589a', '📍 ')}</Row>
         <Row label="Sales Team(s)">{onePill(user.salesTeam, '#f59e0b')}</Row>
         <Row label="Operation Team(s)">{onePill(user.opTeam, '#10b981')}</Row>
         <Row label="Created">{created}</Row>

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { DeleteCustomerModal } from '@/components/shared/DeleteCustomerModal'
 import { StatusBadge } from '@/components/ui/Badge'
 import { LoadingSpinner, PageLoader } from '@/components/ui/LoadingSpinner'
 import { formatCurrency, formatDate, formatDateTime } from '@/utils/format'
@@ -14,9 +15,10 @@ import {
   ArrowLeft,
   XCircle, Lock, Wallet,
   PauseCircle, PlayCircle,
+  Lightbulb, Copy, Check, Ellipsis, ChevronDown,
 } from 'lucide-react'
 import type { Loan, ApiResponse } from '@/types'
-import { useState, useMemo, lazy, Suspense } from 'react'
+import { useState, useMemo, useEffect, lazy, Suspense } from 'react'
 import type { ReactNode } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import ObligationsWorkspace from '@/components/shared/ObligationsWorkspace'
@@ -587,6 +589,16 @@ export default function LoanDetailPage() {
   const [pendingAction, setPendingAction] = useState<HeaderAction | null>(null)
   const [actionReason, setActionReason] = useState('')
   const [moreOpen, setMoreOpen] = useState(false)
+  const [deleteCustomerOpen, setDeleteCustomerOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  // Escape closes the header "More" menu (the backdrop handles outside clicks).
+  useEffect(() => {
+    if (!moreOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoreOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [moreOpen])
 
   // ── Detail tabs ───────────────────────────────────────────────────────
   // Restores legacy's nine-tab navigation on the application detail page
@@ -708,97 +720,191 @@ export default function LoanDetailPage() {
   const showReopen = isAdmin && loan.status === 'Rejected'
   const reopenExpired = showReopen && reopenDaysElapsed > 45
 
+  const copyLoanNumber = async () => {
+    try {
+      await navigator.clipboard.writeText(loan.loanNumber)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch { /* clipboard blocked — nothing to do */ }
+  }
+
+  // Header key facts — straight from the loan; Lender shows a muted
+  // placeholder until one is assigned, the rest are hidden when empty.
+  const tip = employmentTip(loan.customer.employmentType)
+  const salesPerson = loan.assignedTo?.fullName ?? loan.createdBy?.fullName
+  const lender = loan.bankLines?.[0]?.bankName
+  const headerFacts: { label: string; value: string; muted?: boolean }[] = [
+    { label: 'Requested amount', value: formatCurrency(loan.requestedAmount) },
+    ...(loan.approvedAmount ? [{ label: 'Approved amount', value: formatCurrency(loan.approvedAmount) }] : []),
+    { label: 'Lender', value: lender || 'Not assigned yet', muted: !lender },
+    ...(salesPerson ? [{ label: 'Sales person', value: salesPerson }] : []),
+    { label: 'Created', value: formatDate(loan.createdAt) },
+  ]
+
   const openAction = (a: HeaderAction) => { setMoreOpen(false); setActionError(''); setActionReason(''); setPendingAction(a) }
 
   return (
     <div className="space-y-6">
-      {/* ── Loan header — plain card, matching Vanilla's loan-detail header
-             (openDetail view): a Back button, the loan id + status, a
-             "{Type} Loan — {Customer}" subtitle, and Raise Ticket. Vanilla
-             has NO gradient accent bar, NO ₹ icon tile and NO Requested/
-             Approved stat tiles here — those amounts live in the Overview →
-             Loan Details card (as in Vanilla). */}
-      <div className="bg-surface rounded-[18px] border border-token p-5 md:p-6" style={{ boxShadow: '0 2px 12px rgba(8,88,151,.05)' }}>
-        <button onClick={() => navigate(-1)}
-          className="inline-flex items-center gap-1 text-sm font-semibold mb-3 px-2 py-1 rounded-lg hover:bg-[color:var(--surface2)]"
-          style={{ color: 'var(--text2)' }}>
-          <ArrowLeft size={16} /> Back
-        </button>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="text-xl md:text-2xl font-black leading-tight" style={{ fontFamily: 'var(--font-head)', color: 'var(--text)', letterSpacing: '-.3px' }}>
-            {loan.loanNumber}
-          </h1>
-          <StatusBadge status={loan.status} />
-        </div>
-        <p className="text-sm mt-1" style={{ color: 'var(--text3)' }}>
-          {loan.loanType} Loan — {loan.customer.fullName}
-        </p>
-        {/* Employment tip — Vanilla's header 💡 empNote (efin-app.js:27179),
-            keyed by the applicant's employment type. */}
-        {employmentTip(loan.customer.employmentType) && (
-          <div className="mt-2.5 flex items-start gap-2 text-[13px] rounded-xl px-3.5 py-2.5"
-            style={{ background: 'var(--accent-subtle)', border: '1.5px solid rgba(8,88,151,.15)', color: 'var(--text2)' }}>
-            <span>💡</span><span>{employmentTip(loan.customer.employmentType)}</span>
-          </div>
-        )}
-        {/* Raise Ticket — parity with legacy openRaiseTicketFromApp
-            (efin-app.js:7805): a helpdesk ticket pre-linked to this loan. */}
-        <button
-          onClick={() => navigate('/tickets', { state: { loanId: loan.id, loanNumber: loan.loanNumber, applicantName: loan.customer?.fullName } })}
-          className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold text-[color:var(--accent)] hover:bg-[color:var(--accent-subtle)] transition-colors"
-          style={{ borderColor: 'rgba(8,88,151,.25)' }}
-        >
-          <LifeBuoy size={13} /> Raise Ticket
-        </button>
-        {/* Vanilla buildDetailActionBar: Un-hold / Re-open + "⋯ More" (Hold, Reject). */}
-        {(canUnhold || showReopen || canHold || canReject) && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+      {/* ── Loan header ─────────────────────────────────────────────────
+             Row 1: Back on the left, every action grouped on the right
+                    (Raise Ticket · Un-hold / Re-open · More menu).
+             Row 2: loan id (click-to-copy) + status, then loan type and
+                    applicant.
+             Row 3: key facts at a glance (amount, lender, sales person,
+                    created) — read straight from the loan, empty ones hidden.
+             Row 4: employment verification hint (Vanilla's header empNote).
+             All handlers and permission gates are unchanged. */}
+      <header className="relative bg-surface rounded-[18px] border border-token p-5 md:p-6" style={{ boxShadow: '0 2px 12px rgba(10,88,154,.05)' }}>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <button onClick={() => navigate(-1)}
+            className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold transition-colors hover:bg-[color:var(--surface2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]"
+            style={{ color: 'var(--text2)' }}>
+            <ArrowLeft size={16} /> Back
+          </button>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Raise Ticket — parity with legacy openRaiseTicketFromApp
+                (efin-app.js:7805): a helpdesk ticket pre-linked to this loan. */}
+            <Button size="sm" variant="secondary"
+              onClick={() => navigate('/tickets', { state: { loanId: loan.id, loanNumber: loan.loanNumber, applicantName: loan.customer?.fullName } })}>
+              <LifeBuoy size={14} className="mr-1.5" />Raise Ticket
+            </Button>
             {canUnhold && (
               <Button size="sm" variant="primary" onClick={() => openAction('Un-hold')}>
-                <PlayCircle size={14} className="mr-1" />Un-hold
+                <PlayCircle size={14} className="mr-1.5" />Un-hold
               </Button>
             )}
             {showReopen && !reopenExpired && (
               <Button size="sm" variant="primary" onClick={() => openAction('Re-open')}
                 title={`${reopenDaysLeft} day${reopenDaysLeft === 1 ? '' : 's'} remaining to re-open`}>
-                <RotateCcw size={14} className="mr-1" />Re-open ({reopenDaysLeft}d left)
+                <RotateCcw size={14} className="mr-1.5" />Re-open ({reopenDaysLeft}d left)
               </Button>
             )}
             {reopenExpired && (
-              <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-token" style={{ color: 'var(--text3)', background: 'var(--surface2)' }}>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-token px-3 py-1.5 text-xs" style={{ color: 'var(--text3)', background: 'var(--surface2)' }}>
                 <Lock size={12} /> Re-open window expired
               </span>
             )}
-            {(canHold || canReject) && (
+            {(canHold || canReject || isAdmin) && (
               <div className="relative">
-                <Button size="sm" variant="secondary" onClick={() => setMoreOpen(o => !o)}>⋯ More</Button>
+                <Button size="sm" variant="secondary" aria-haspopup="menu" aria-expanded={moreOpen}
+                  onClick={() => setMoreOpen(o => !o)}>
+                  <Ellipsis size={15} className="mr-1.5" />More
+                  <ChevronDown size={13} className={`ml-1 transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
+                </Button>
                 {moreOpen && (
                   <>
-                    <button type="button" aria-label="Close menu" className="fixed inset-0 z-10 cursor-default" onClick={() => setMoreOpen(false)} />
-                    <div className="absolute left-0 z-20 mt-1 min-w-[200px] rounded-xl border border-token bg-surface p-1 shadow-lg">
-                      <p className="px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-wide" style={{ color: 'var(--text3)' }}>Application Actions</p>
+                    <button type="button" aria-label="Close menu" tabIndex={-1} className="fixed inset-0 z-20 cursor-default" onClick={() => setMoreOpen(false)} />
+                    <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-[270px] max-w-[calc(100vw-2rem)] rounded-2xl border border-token bg-surface p-1.5"
+                      style={{ boxShadow: '0 14px 36px rgba(10,40,90,.16), 0 2px 6px rgba(10,40,90,.06)' }}>
+                      {(canHold || canReject) && (
+                        <p className="px-2.5 pb-1 pt-1.5 text-[11.5px] font-semibold" style={{ color: 'var(--text3)' }}>Application</p>
+                      )}
                       {canHold && (
-                        <button type="button" onClick={() => openAction('Hold')}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-[color:var(--surface2)]"
-                          style={{ color: 'var(--warn)' }}>
-                          <PauseCircle size={14} /> Put on Hold
+                        <button type="button" role="menuitem" onClick={() => openAction('Hold')}
+                          className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-[color:var(--surface2)] focus:outline-none focus-visible:bg-[color:var(--surface2)]">
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: 'rgba(230,126,0,.12)', color: 'var(--warn)' }}>
+                            <PauseCircle size={16} />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold" style={{ color: 'var(--text)' }}>Put on Hold</span>
+                            <span className="block text-[11.5px] leading-snug" style={{ color: 'var(--text3)' }}>Pause it now, un-hold it later</span>
+                          </span>
                         </button>
                       )}
                       {canReject && (
-                        <button type="button" onClick={() => openAction('Reject')}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-[color:var(--surface2)]"
-                          style={{ color: 'var(--danger, #e31e25)' }}>
-                          <XCircle size={14} /> Reject Application
+                        <button type="button" role="menuitem" onClick={() => openAction('Reject')}
+                          className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-[color:var(--surface2)] focus:outline-none focus-visible:bg-[color:var(--surface2)]">
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: 'rgba(227,30,37,.09)', color: 'var(--danger, #e31e25)' }}>
+                            <XCircle size={16} />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold" style={{ color: 'var(--text)' }}>Reject Application</span>
+                            <span className="block text-[11.5px] leading-snug" style={{ color: 'var(--text3)' }}>Can be re-opened within 45 days</span>
+                          </span>
                         </button>
                       )}
+                      {/* Permanent customer delete — Admin only, same as DELETE /api/customers/{id}. */}
+                      {isAdmin && (<>
+                        <div className="my-1.5 border-t border-token" />
+                        <p className="px-2.5 pb-1 pt-0.5 text-[11.5px] font-semibold" style={{ color: 'var(--text3)' }}>Customer</p>
+                        <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); setDeleteCustomerOpen(true) }}
+                          className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-[color:var(--surface2)] focus:outline-none focus-visible:bg-[color:var(--surface2)]">
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: 'rgba(227,30,37,.09)', color: 'var(--danger, #e31e25)' }}>
+                            <Trash2 size={15} />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold" style={{ color: 'var(--danger, #e31e25)' }}>Delete customer permanently</span>
+                            <span className="block text-[11.5px] leading-snug" style={{ color: 'var(--text3)' }}>Admin only — this can't be undone</span>
+                          </span>
+                        </button>
+                      </>)}
                     </div>
                   </>
                 )}
               </div>
             )}
           </div>
+        </div>
+
+        {/* Identity */}
+        <div className="mt-4 min-w-0">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h1 className="break-all text-2xl md:text-[28px] font-black leading-tight"
+              style={{ fontFamily: 'var(--font-head)', color: 'var(--text)', letterSpacing: '-.4px' }}>
+              {loan.loanNumber}
+            </h1>
+            <button type="button" onClick={copyLoanNumber}
+              aria-label={copied ? 'Application ID copied' : 'Copy application ID'} title={copied ? 'Copied' : 'Copy application ID'}
+              className="grid h-7 w-7 place-items-center rounded-lg border border-token transition-colors hover:bg-[color:var(--surface2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]"
+              style={{ color: copied ? 'var(--success)' : 'var(--text3)' }}>
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+            </button>
+            <StatusBadge status={loan.status} />
+          </div>
+          <p className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-sm">
+            <span className="rounded-md px-2 py-0.5 text-xs font-semibold" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
+              {loan.loanType} Loan
+            </span>
+            <span className="font-semibold" style={{ color: 'var(--text2)' }}>{loan.customer.fullName}</span>
+          </p>
+        </div>
+
+        {/* Key facts */}
+        {headerFacts.length > 0 && (
+          <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-3 border-t border-token pt-4">
+            {headerFacts.map(f => (
+              <div key={f.label} className="min-w-[120px]">
+                <dt className="text-[11.5px] font-medium" style={{ color: 'var(--text3)' }}>{f.label}</dt>
+                <dd className="mt-0.5 text-sm font-bold" style={{ color: f.muted ? 'var(--text3)' : 'var(--text)' }}>{f.value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
-      </div>
+
+        {/* Employment tip — Vanilla's header empNote (efin-app.js:27179),
+            keyed by the applicant's employment type. */}
+        {tip && (
+          <div className="mt-4 flex items-start gap-3 rounded-xl py-2.5 pl-3 pr-4 text-[13px] leading-relaxed"
+            style={{ background: 'var(--accent-subtle)', borderLeft: '3px solid var(--accent)', color: 'var(--text2)' }}>
+            <Lightbulb size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
+            <span>
+              {tip.includes(':')
+                ? <><strong style={{ color: 'var(--text)' }}>{tip.slice(0, tip.indexOf(':') + 1)}</strong>{tip.slice(tip.indexOf(':') + 1)}</>
+                : tip}
+            </span>
+          </div>
+        )}
+      </header>
+
+      {deleteCustomerOpen && (
+        <DeleteCustomerModal
+          customerId={loan.customer.id}
+          customerName={loan.customer.fullName ?? ''}
+          onClose={() => setDeleteCustomerOpen(false)}
+          onDeleted={() => { setDeleteCustomerOpen(false); navigate('/loans', { replace: true }) }}
+        />
+      )}
 
       {/* ── Tab bar — legacy #page-app-detail switchTab(), same nine tabs,
              same order and labels. Hidden tabs follow the Roles &

@@ -127,14 +127,23 @@ public class PerfiosController : BaseController
         if (explicitDocId is int id)
             doc = await _db.LoanDocuments.FirstOrDefaultAsync(d => d.Id == id && d.LoanId == loanId && !d.IsDeleted);
         if (doc is null && !string.IsNullOrWhiteSpace(fileName))
-            doc = await _db.LoanDocuments.FirstOrDefaultAsync(d =>
-                d.LoanId == loanId && !d.IsDeleted && d.DocumentName == fileName);
+        {
+            // The browser sends the original file name WITH its extension
+            // ("HDFC_Statement.pdf"), but UploadDocument stores DocumentName
+            // WITHOUT it ("HDFC_Statement") — match either, newest upload first,
+            // otherwise wizard/loan-detail reports were never bound to evidence.
+            var stem = Path.GetFileNameWithoutExtension(fileName);
+            doc = await _db.LoanDocuments
+                .Where(d => d.LoanId == loanId && !d.IsDeleted && (d.DocumentName == fileName || d.DocumentName == stem))
+                .OrderByDescending(d => d.CreatedAt)
+                .FirstOrDefaultAsync();
+        }
         if (doc is null) return (null, null);
 
         string? hash = null;
         try
         {
-            var obj = await _storage.GetAsync(doc.FilePath);
+            var obj = await _storage.GetAsync(DocumentStorageKeys.ForLoanDocument(doc.FilePath));
             if (obj is not null)
             {
                 using var ms = new MemoryStream();

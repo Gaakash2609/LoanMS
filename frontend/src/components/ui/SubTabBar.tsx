@@ -41,8 +41,8 @@ export function SubTabBar<K extends string>({ tabs, active, onChange, className 
               on ? 'font-semibold' : 'font-medium hover:!text-[#4a6299]'
             }`}
             style={{
-              color: on ? 'var(--accent, #085897)' : 'var(--text3, #7a8aaa)',
-              borderBottomColor: on ? 'var(--accent, #085897)' : 'transparent',
+              color: on ? 'var(--accent, #0a589a)' : 'var(--text3, #7a8aaa)',
+              borderBottomColor: on ? 'var(--accent, #0a589a)' : 'transparent',
             }}
           >
             {t.emoji && <span>{t.emoji}</span>}

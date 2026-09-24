@@ -19,6 +19,7 @@ public class TrackingController : BaseController
     {
         if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canViewTracking"))
             return Forbid();
+        if (!await CanSeeLoanAsync(_db, loanId)) return NotFound(ApiResponseDto<object>.Fail("Loan not found."));
 
         var entries = await _db.TrackingEntries
             .Where(t => t.LoanId == loanId)
@@ -35,6 +36,7 @@ public class TrackingController : BaseController
     {
         if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canPostTracking"))
             return Forbid();
+        if (!await CanSeeLoanAsync(_db, loanId)) return NotFound(ApiResponseDto<object>.Fail("Loan not found."));
 
         var entry = new TrackingEntry {
             LoanId = loanId, Name = dto.Name, Stage = dto.Stage,
@@ -54,7 +56,7 @@ public class TrackingController : BaseController
             return Forbid();
 
         var entry = await _db.TrackingEntries.FindAsync(id);
-        if (entry == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+        if (entry == null || !await CanSeeLoanAsync(_db, entry.LoanId)) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
         entry.Name = dto.Name; entry.Stage = dto.Stage;
         entry.AssignedUser = dto.AssignedUser; entry.Status = dto.Status ?? entry.Status;
         entry.Comment = dto.Comment; entry.SubNote = dto.SubNote;
@@ -70,7 +72,7 @@ public class TrackingController : BaseController
             return Forbid();
 
         var entry = await _db.TrackingEntries.FindAsync(id);
-        if (entry == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+        if (entry == null || !await CanSeeLoanAsync(_db, entry.LoanId)) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
         entry.IsDeleted = true; entry.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<bool>.Ok(true, "Deleted."));

@@ -232,7 +232,7 @@ export default function UsersPage() {
     // returns; the full multi-assignment is managed via "Manage Locations &
     // Teams" (same split as legacy: table shows primary, editor shows the set).
     { key: 'locationName', label: 'Locations', sortable: true, sortValue: u => u.locationName ?? '', render: (u: User) => (
-      <UserPill value={u.locationName} color="var(--accent)" bg="rgba(8,88,151,.1)" prefix="📍 " />
+      <UserPill value={u.locationName} color="var(--accent)" bg="rgba(10,88,154,.1)" prefix="📍 " />
     )},
     { key: 'salesTeam', label: 'Sales Team(s)', sortable: true, sortValue: u => u.salesTeam ?? '', render: (u: User) => (
       <UserPill value={u.salesTeam} color="#f59e0b" bg="rgba(255,179,71,.12)" />
@@ -278,7 +278,7 @@ export default function UsersPage() {
         {[
           { label: 'Total Users', value: allUsers?.length ?? 0, sub: 'All roles combined', icon: UsersIcon, accent: 'var(--accent)', tint: 'var(--accent-subtle)' },
           { label: 'Active', value: (allUsers ?? []).filter(u => u.isActive).length, sub: 'Currently signed-in eligible', icon: UserCheck, accent: 'var(--success)', tint: 'rgba(26,115,64,.1)' },
-          { label: 'Inactive', value: (allUsers ?? []).filter(u => !u.isActive).length, sub: 'Deactivated accounts', icon: UserX, accent: 'var(--danger)', tint: 'rgba(192,57,43,.1)' },
+          { label: 'Inactive', value: (allUsers ?? []).filter(u => !u.isActive).length, sub: 'Deactivated accounts', icon: UserX, accent: 'var(--danger)', tint: 'rgba(227,30,37,.1)' },
           { label: 'Admins', value: (allUsers ?? []).filter(u => u.role === 'Admin').length, sub: 'Full-access accounts', icon: ShieldCheck, accent: '#7c3aed', tint: 'rgba(124,58,237,.1)' },
         ].map(({ label, value, sub, icon: Icon, accent, tint }) => (
           <div key={label} className="kpi-card" style={{ ['--kpi-accent' as string]: accent, ['--kpi-tint' as string]: tint }}>

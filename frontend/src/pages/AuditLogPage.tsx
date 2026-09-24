@@ -41,7 +41,7 @@ export default function AuditLogPage() {
   const actionMeta = (action: string) => {
     switch (action) {
       case 'Create': return { fg: 'var(--success)', bg: 'rgba(26,115,64,.12)', node: 'var(--success)', Icon: PlusCircle }
-      case 'Update': return { fg: 'var(--accent)', bg: 'rgba(8,88,151,.12)', node: 'var(--accent)', Icon: PencilLine }
+      case 'Update': return { fg: 'var(--accent)', bg: 'rgba(10,88,154,.12)', node: 'var(--accent)', Icon: PencilLine }
       case 'Delete': return { fg: 'var(--danger)', bg: 'rgba(255,69,96,.15)', node: 'var(--danger)', Icon: Trash2 }
       case 'Login': case 'Auth': return { fg: 'var(--warn)', bg: 'rgba(230,126,0,.12)', node: 'var(--warn)', Icon: LogIn }
       default: return { fg: 'var(--text2)', bg: 'var(--surface3)', node: 'var(--text3)', Icon: Activity }

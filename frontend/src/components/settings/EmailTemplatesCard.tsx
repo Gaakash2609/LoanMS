@@ -10,6 +10,7 @@ import {
   type TemplateBadge,
 } from '@/constants/emailTemplates'
 import { useAuthStore } from '@/store/authStore'
+import { apiErrorMessage as errorMessage } from '@/utils/apiError'
 
 // ── Email Templates ─────────────────────────────────────────────────────
 // Ports legacy's Settings → Templates panel (stgRenderAllTemplates /
@@ -32,10 +33,6 @@ const BADGE_CLASS: Record<TemplateBadge, string> = {
   modal:  'bg-gray-100 text-gray-500 border-gray-200',
 }
 
-function errorMessage(err: unknown, fallback: string): string {
-  const d = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-  return d?.message || d?.errors?.join(' ') || fallback
-}
 
 function TemplateRow({
   def, override, canEdit,

@@ -24,7 +24,7 @@ function MenuRow({ icon, label, onClick, danger }: { icon: ReactNode; label: str
       onClick={onClick}
       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[9px] text-[13px] font-medium transition-colors text-left"
       style={{ color: 'var(--text2)' }}
-      onMouseOver={e => { e.currentTarget.style.background = danger ? 'rgba(212,43,43,.07)' : 'var(--accent-subtle)'; e.currentTarget.style.color = danger ? 'var(--accent2)' : 'var(--accent)' }}
+      onMouseOver={e => { e.currentTarget.style.background = danger ? 'rgba(227,30,37,.07)' : 'var(--accent-subtle)'; e.currentTarget.style.color = danger ? 'var(--accent2)' : 'var(--accent)' }}
       onMouseOut={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text2)' }}
     >
       {icon}{label}
@@ -58,14 +58,14 @@ export default function TopbarUserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         className="flex w-[38px] h-[38px] rounded-full text-white items-center justify-center font-extrabold"
-        style={{ background: 'var(--accent2)', fontFamily: 'var(--font-head)', fontSize: 14, letterSpacing: '.5px', boxShadow: '0 2px 10px rgba(212,43,43,.3)' }}
+        style={{ background: 'var(--accent2)', fontFamily: 'var(--font-head)', fontSize: 14, letterSpacing: '.5px', boxShadow: '0 2px 10px rgba(227,30,37,.3)' }}
       >
         {getInitials(user?.fullName)}
       </button>
 
       {open && (
         <div role="menu" className="lms-menu-in absolute right-0 top-[calc(100%+10px)] p-2.5"
-          style={{ minWidth: 230, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 12px 48px rgba(8,88,151,.16)', zIndex: 300 }}>
+          style={{ minWidth: 230, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 12px 48px rgba(10,88,154,.16)', zIndex: 300 }}>
           <div className="flex items-center gap-3 px-3 pt-2.5 pb-3">
             <div className="w-[38px] h-[38px] rounded-full flex items-center justify-center text-white font-extrabold shrink-0"
               style={{ background: 'var(--accent2)', fontFamily: 'var(--font-head)', fontSize: 13 }}>

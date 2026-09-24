@@ -67,7 +67,7 @@ const LOAN_TYPE_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: 'Overdraft', label: 'Overdraft / CC' },
 ]
 
-/** Distinct values pulled off the loaded rows, so every option is real. */
+/** Distinct values across every loan the user can see (GET /api/loans/filter-options), so every option is real. */
 export interface FilterOptions {
   salesPeople: string[]
   locations: string[]
@@ -174,7 +174,7 @@ export default function AdvancedFilterModal({
                 {list.map(p => (
                   <span key={p.name}
                     className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-semibold"
-                    style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(8,88,151,.2)', color: 'var(--accent)' }}>
+                    style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(10,88,154,.2)', color: 'var(--accent)' }}>
                     <button onClick={() => setDraft({ ...EMPTY_ADV_FILTER, ...p.filters })} title="Load preset">
                       {p.name}
                     </button>

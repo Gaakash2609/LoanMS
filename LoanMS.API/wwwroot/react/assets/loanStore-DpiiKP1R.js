@@ -1,0 +1,1 @@
+import{f as r}from"./index-CmjB0ifR.js";const i={page:1,pageSize:25},f=r(s=>({filter:i,setFilter:e=>s(o=>{const t={...o.filter,...e,page:e.page??1};return"statuses"in e&&!("status"in e)&&(t.status=void 0),"status"in e&&!("statuses"in e)&&(t.statuses=void 0),{filter:t}}),resetFilter:()=>s({filter:i})}));export{f as u};

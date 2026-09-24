@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Security.Claims;
 using FluentAssertions;
 using LoanMS.API.Controllers;
@@ -316,5 +317,215 @@ public class WizardControllerTests
         response.Success.Should().BeTrue();
         var loan = await db.Loans.FirstAsync(l => l.Id == response.Data!.LoanId);
         loan.LoanType.Should().Be(expected);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Visibility / IDOR — ListDrafts, GetDraft, Submit(resume), SaveDraft
+    //
+    // All four share the same rule: a Draft belongs to its creator; only
+    // that creator, or an Admin/Manager, may see or act on it. These tests
+    // pin that rule down at each of the four surfaces so none of them can
+    // silently regress back to leaking/accepting another user's draft id.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private static Loan SeedDraft(AppDbContext db, int createdByUserId, string suffix, bool creatorDeleted = false)
+    {
+        // Loans.CreatedByUserId is a real FK on PostgreSQL — the creator row
+        // must exist (ListDrafts projects CreatedBy.Email through it).
+        if (!db.Users.IgnoreQueryFilters().Any(u => u.Id == createdByUserId))
+        {
+            db.Users.Add(new User { Id = createdByUserId, FullName = $"Creator {createdByUserId}", Email = $"creator{createdByUserId}@t.com", PasswordHash = "x", Role = UserRole.Sales, IsActive = true, IsDeleted = creatorDeleted });
+            db.SaveChanges();
+        }
+        var customer = new Customer { FullName = $"Draft Owner {suffix}", Email = $"owner{suffix}@t.com", Phone = $"90000000{suffix}" };
+        db.Customers.Add(customer);
+        db.SaveChanges();
+        var draft = new Loan
+        {
+            LoanNumber = $"EFIN2026DFT{suffix}", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
+            RequestedAmount = 50000, InterestRate = 12, TenureMonths = 24,
+            CustomerId = customer.Id, CreatedByUserId = createdByUserId
+        };
+        db.Loans.Add(draft);
+        db.SaveChanges();
+        return draft;
+    }
+
+    private static JsonElement ExtractListDraftsData(IActionResult result)
+    {
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        var response = (ApiResponseDto<object>)ok.Value!;
+        var json = System.Text.Json.JsonSerializer.Serialize(response.Data);
+        return System.Text.Json.JsonDocument.Parse(json).RootElement;
+    }
+
+    [Fact]
+    public async Task ListDrafts_NonInternalRole_OnlySeesOwnDrafts()
+    {
+        var (controller, db) = CreateController(currentUserId: 1, currentUserRole: "Sales");
+        var own    = SeedDraft(db, createdByUserId: 1, suffix: "01");
+        var foreign = SeedDraft(db, createdByUserId: 2, suffix: "02");
+
+        var result = await controller.ListDrafts();
+        var data = ExtractListDraftsData(result);
+
+        data.GetArrayLength().Should().Be(1);
+        data[0].GetProperty("loanId").GetInt32().Should().Be(own.Id);
+    }
+
+    [Theory]
+    [InlineData("Admin")]
+    [InlineData("Manager")]
+    public async Task ListDrafts_InternalRole_SeesEveryDraft(string role)
+    {
+        var (controller, db) = CreateController(currentUserId: 99, currentUserRole: role);
+        SeedDraft(db, createdByUserId: 1, suffix: "03");
+        SeedDraft(db, createdByUserId: 2, suffix: "04");
+
+        var result = await controller.ListDrafts();
+        var data = ExtractListDraftsData(result);
+
+        data.GetArrayLength().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ListDrafts_CreatorSoftDeleted_DraftStillListedForAdmin()
+    {
+        // Regression: the User soft-delete filter turned the required
+        // Loan.CreatedBy navigation into an INNER JOIN, so drafts created by a
+        // deleted user silently vanished from the Admin/Manager drafts list.
+        var (controller, db) = CreateController(currentUserId: 99, currentUserRole: "Admin");
+        var draft = SeedDraft(db, createdByUserId: 7, suffix: "07", creatorDeleted: true);
+
+        var result = await controller.ListDrafts();
+        var data = ExtractListDraftsData(result);
+
+        data.GetArrayLength().Should().Be(1);
+        data[0].GetProperty("loanId").GetInt32().Should().Be(draft.Id);
+        data[0].GetProperty("createdByUserEmail").GetString().Should().Be("creator7@t.com");
+    }
+
+    [Fact]
+    public async Task GetDraft_NonInternalRole_ForeignDraft_ReturnsNotFound()
+    {
+        var (controller, db) = CreateController(currentUserId: 1, currentUserRole: "Sales");
+        var foreign = SeedDraft(db, createdByUserId: 2, suffix: "05");
+
+        var result = await controller.GetDraft(foreign.Id);
+
+        result.Should().BeOfType<NotFoundObjectResult>();
+    }
+
+    [Fact]
+    public async Task GetDraft_Owner_ReturnsOwnDraft()
+    {
+        var (controller, db) = CreateController(currentUserId: 1, currentUserRole: "Sales");
+        var own = SeedDraft(db, createdByUserId: 1, suffix: "06");
+
+        var result = await controller.GetDraft(own.Id);
+
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        var response = (ApiResponseDto<WizardSubmitDto>)ok.Value!;
+        response.Data!.LoanId.Should().Be(own.Id);
+    }
+
+    [Theory]
+    [InlineData("Admin")]
+    [InlineData("Manager")]
+    public async Task GetDraft_InternalRole_CanAccessForeignDraft(string role)
+    {
+        var (controller, db) = CreateController(currentUserId: 99, currentUserRole: role);
+        var foreign = SeedDraft(db, createdByUserId: 1, suffix: "07");
+
+        var result = await controller.GetDraft(foreign.Id);
+
+        result.Should().BeOfType<OkObjectResult>();
+    }
+
+    [Fact]
+    public async Task Submit_ResumeDraft_NonInternalRole_ForeignDraft_ReturnsNotFound_AndLeavesItUntouched()
+    {
+        var (controller, db) = CreateController(currentUserId: 1, currentUserRole: "Sales");
+        var foreign = SeedDraft(db, createdByUserId: 2, suffix: "08");
+        var salesUser = new User { FullName = "Map Sales2", Email = "map2@efin.com", Role = UserRole.Sales, IsActive = true };
+        db.Users.Add(salesUser);
+        await db.SaveChangesAsync();
+
+        var dto = CreateValidDto("Map Sales2");
+        dto.LoanId = foreign.Id;
+
+        var result = await controller.Submit(dto);
+
+        result.Should().BeOfType<NotFoundObjectResult>();
+        var untouched = await db.Loans.FirstAsync(l => l.Id == foreign.Id);
+        untouched.Status.Should().Be(LoanStatus.Draft);
+        untouched.CreatedByUserId.Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData("Admin")]
+    [InlineData("Manager")]
+    public async Task Submit_ResumeDraft_InternalRole_CanSubmitForeignDraft(string role)
+    {
+        var (controller, db) = CreateController(currentUserId: 99, currentUserRole: role);
+        var foreign = SeedDraft(db, createdByUserId: 1, suffix: "09");
+        var salesUser = new User { FullName = "Map Sales3", Email = "map3@efin.com", Role = UserRole.Sales, IsActive = true };
+        db.Users.Add(salesUser);
+        await db.SaveChangesAsync();
+
+        var dto = CreateValidDto("Map Sales3");
+        dto.LoanId = foreign.Id;
+
+        var result = await controller.Submit(dto);
+        var response = ExtractResponse(result);
+
+        response.Success.Should().BeTrue();
+        var loan = await db.Loans.FirstAsync(l => l.Id == foreign.Id);
+        loan.Status.Should().NotBe(LoanStatus.Draft);
+    }
+
+    [Fact]
+    public async Task SaveDraft_NonInternalRole_ForeignLoanId_CreatesNewDraftInstead_AndLeavesForeignDraftUntouched()
+    {
+        var (controller, db) = CreateController(currentUserId: 1, currentUserRole: "Sales");
+        var foreign = SeedDraft(db, createdByUserId: 2, suffix: "10");
+
+        var dto = CreateValidDto(null);
+        dto.LoanId = foreign.Id;
+
+        var result = await controller.SaveDraft(dto);
+        var response = ExtractResponse(result);
+
+        response.Success.Should().BeTrue();
+        response.Data!.LoanId.Should().NotBe(foreign.Id,
+            "a non-owner's autosave must never write into someone else's draft — it should start a new one instead");
+
+        var untouched = await db.Loans.FirstAsync(l => l.Id == foreign.Id);
+        untouched.CreatedByUserId.Should().Be(2);
+        untouched.RequestedAmount.Should().Be(50000, "the foreign draft's own data must be unaffected by someone else's autosave");
+
+        var newDraft = await db.Loans.FirstAsync(l => l.Id == response.Data!.LoanId);
+        newDraft.CreatedByUserId.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("Admin")]
+    [InlineData("Manager")]
+    public async Task SaveDraft_InternalRole_CanUpdateForeignDraft(string role)
+    {
+        var (controller, db) = CreateController(currentUserId: 99, currentUserRole: role);
+        var foreign = SeedDraft(db, createdByUserId: 1, suffix: "11");
+
+        var dto = CreateValidDto(null);
+        dto.LoanId = foreign.Id;
+        dto.Amount = 75000;
+
+        var result = await controller.SaveDraft(dto);
+        var response = ExtractResponse(result);
+
+        response.Success.Should().BeTrue();
+        response.Data!.LoanId.Should().Be(foreign.Id);
+        var updated = await db.Loans.FirstAsync(l => l.Id == foreign.Id);
+        updated.RequestedAmount.Should().Be(75000);
     }
 }

@@ -227,8 +227,8 @@ export default function SanctionDetailCard({ loan }: { loan: Loan }) {
       onClick={onClick}
       className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold whitespace-nowrap transition-colors"
       style={{
-        background: on ? 'rgba(8,88,151,.11)' : 'rgba(122,138,170,.10)',
-        borderColor: on ? 'rgba(8,88,151,.35)' : 'rgba(122,138,170,.3)',
+        background: on ? 'rgba(10,88,154,.11)' : 'rgba(122,138,170,.10)',
+        borderColor: on ? 'rgba(10,88,154,.35)' : 'rgba(122,138,170,.3)',
         color: on ? 'var(--accent)' : 'var(--text3, #7a8aaa)',
       }}
     >

@@ -44,11 +44,11 @@ export default {
           500: '#3b82f6',
           600: '#2563eb',
           700: '#1d4ed8',
-          800: '#085897',  // MudraHub primary blue (logo "Mudra" blue)
+          800: '#0a589a',  // MudraHub primary blue (logo "Mudra" blue)
           900: '#064377',
         },
         efin: {
-          blue:      '#085897',
+          blue:      '#0a589a',
           'blue-dark': '#064377',
           'blue-light': '#e8f0fe',
           green:     '#16a34a',

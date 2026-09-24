@@ -123,7 +123,7 @@ export function buildLoansPdfHtml(loans: LoanListItem[], columns: ExportColumn[]
   thead th { padding:5px 6px; text-align:left; font-weight:700; white-space:nowrap; }
   tbody tr:nth-child(even) { background:#f0f4ff; }
   tbody td { padding:4px 6px; border-bottom:1px solid #dde3f0; vertical-align:top; }
-  .truncate-note { color:#c0392b; font-size:8pt; margin-bottom:6px; }
+  .truncate-note { color:#e31e25; font-size:8pt; margin-bottom:6px; }
   .footer { margin-top:10px; font-size:7.5pt; color:#888; text-align:right; }
 </style></head><body>
 <div class="hdr">

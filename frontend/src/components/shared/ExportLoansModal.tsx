@@ -117,12 +117,11 @@ export default function ExportLoansModal({ filter, onClose }: { filter: LoanFilt
         // what is already on screen".
         effectiveFilter = { status: scopeToStatus(scope) }
       }
-      const res = await loansApi.getAll({ ...effectiveFilter, page: 1, pageSize: 5000 })
-      const page = res.data.data
-      if (!page) throw new Error('Could not load loans to export')
+      // Every matching loan (was pageSize 5000, which the API clamps to 10).
+      const items = await loansApi.getAllPages(effectiveFilter)
       return scope === 'pending'
-        ? page.items.filter(l => (PIPELINE_STATUSES as readonly string[]).includes(l.status))
-        : page.items
+        ? items.filter(l => (PIPELINE_STATUSES as readonly string[]).includes(l.status))
+        : items
     },
     onSuccess: (items) => {
       if (items.length === 0) { setExportError('No loans match the current filter — nothing to export.'); return }

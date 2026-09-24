@@ -334,6 +334,24 @@ public class UsersController : BaseController
     /// Location at all (User.LocationId is a single FK) — this is the new
     /// source of truth via the UserLocations many-to-many table.
     /// </summary>
+    // UserLocations has a UNIQUE (UserId, LocationId) index that is not filtered
+    // by IsDeleted, so an unassigned (soft-deleted) row still owns the pair.
+    // Re-assigning the same location must reactivate that row — inserting a new
+    // one failed with a duplicate-key 500. Same pattern as the Users/Customers
+    // reactivation (IgnoreQueryFilters + IsDeleted = false).
+    private async Task AddOrReactivateUserLocationAsync(int userId, int locationId)
+    {
+        var row = await _db.UserLocations.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(ul => ul.UserId == userId && ul.LocationId == locationId);
+        if (row == null)
+            _db.UserLocations.Add(new UserLocation { UserId = userId, LocationId = locationId, CreatedAt = DateTime.UtcNow });
+        else if (row.IsDeleted)
+        {
+            row.IsDeleted = false;
+            row.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
     [HttpPut("{id:int}/locations")]
     [Authorize(Roles = "Admin,ProductTeam")]
     public async Task<IActionResult> SetLocations(int id, [FromBody] List<int> locationIds)
@@ -351,7 +369,7 @@ public class UsersController : BaseController
         var existingLocationIds = existing.Select(row => row.LocationId).ToHashSet();
         foreach (var locId in locationIds.Where(locId => !existingLocationIds.Contains(locId)))
         {
-            _db.UserLocations.Add(new UserLocation { UserId = id, LocationId = locId, CreatedAt = DateTime.UtcNow });
+            await AddOrReactivateUserLocationAsync(id, locId);
         }
 
         // Keep User.LocationId (the single "primary" Location every
@@ -497,7 +515,7 @@ public class UsersController : BaseController
 
                 var already = await _db.UserLocations.AnyAsync(ul => ul.LocationId == newLocationId && ul.UserId == userId && !ul.IsDeleted);
                 if (!already)
-                    _db.UserLocations.Add(new UserLocation { UserId = userId, LocationId = newLocationId.Value, CreatedAt = DateTime.UtcNow });
+                    await AddOrReactivateUserLocationAsync(userId, newLocationId.Value);
             }
 
             if (oldLocationName != null)

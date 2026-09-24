@@ -102,4 +102,18 @@ public class CustomerRepository : GenericRepository<Customer>, ICustomerReposito
         if (excludeId.HasValue) query = query.Where(c => c.Id != excludeId.Value);
         return await query.AnyAsync();
     }
+
+    public async Task<bool> EmailTakenIncludingDeletedAsync(string email, int? excludeId = null)
+    {
+        var normalized = email.ToLower().Trim();
+        return await _set.IgnoreQueryFilters()
+            .AnyAsync(c => c.Email == normalized && (!excludeId.HasValue || c.Id != excludeId.Value));
+    }
+
+    public async Task<bool> PanTakenIncludingDeletedAsync(string pan, int? excludeId = null)
+    {
+        var normalized = pan.ToUpper().Trim();
+        return await _set.IgnoreQueryFilters()
+            .AnyAsync(c => c.PanNumber == normalized && (!excludeId.HasValue || c.Id != excludeId.Value));
+    }
 }

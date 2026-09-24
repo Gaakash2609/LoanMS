@@ -326,7 +326,7 @@ export default function LenderQuickSetup({ onOpenAdvanced }: { onOpenAdvanced?: 
       </div>
 
       {error && (
-        <div className="text-xs rounded-lg px-3 py-2 mb-4" style={{ color: 'var(--danger)', background: 'rgba(192,57,43,.1)', border: '1px solid rgba(192,57,43,.25)' }}>{error}</div>
+        <div className="text-xs rounded-lg px-3 py-2 mb-4" style={{ color: 'var(--danger)', background: 'rgba(227,30,37,.1)', border: '1px solid rgba(227,30,37,.25)' }}>{error}</div>
       )}
 
       {/* ── Step 1: Bank & Product ── */}

@@ -8,6 +8,9 @@ namespace LoanMS.Infrastructure.Data;
 
 public class AppDbContext : DbContext
 {
+    /// <summary>Name of the User soft-delete query filter (see OnModelCreating).</summary>
+    public const string UserSoftDeleteFilter = "UserSoftDelete";
+
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     // Root-caused live in production 2026-08-24: POST /api/loans/{id}/obligations
@@ -108,7 +111,16 @@ public class AppDbContext : DbContext
             e.Property(u => u.SalesTeam).HasMaxLength(150);
             e.Property(u => u.OpTeam).HasMaxLength(150);
             e.Property(u => u.EmployeeCode).HasMaxLength(40);
-            e.HasQueryFilter(u => !u.IsDeleted);
+            // Named (EF Core 10) so queries over HISTORICAL records can opt out of
+            // this one filter via QueryableExtensions.IncludeDeletedUsers().
+            // Loan.CreatedBy, LoanStatusHistory.ChangedBy, LoanTask.CreatedBy/
+            // AssignedTo, Ticket.CreatedBy, TicketComment.User and
+            // PayoutClaim.ClaimedBy are REQUIRED relationships to User; with the
+            // filter in force EF turns every Include/projection of them into an
+            // INNER JOIN against non-deleted users, so deleting a user made every
+            // loan/claim/task/ticket/status-history row they created vanish
+            // (loan detail 404 even for Admin) — verified on PostgreSQL.
+            e.HasQueryFilter(UserSoftDeleteFilter, u => !u.IsDeleted);
             e.HasOne(u => u.Location).WithMany(loc => loc.Users).HasForeignKey(u => u.LocationId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -144,7 +156,12 @@ public class AppDbContext : DbContext
             e.HasIndex(l => l.OpsManagerId);
             e.Property(l => l.LoanNumber).HasMaxLength(20).IsRequired();
             e.Property(l => l.LoanType).HasConversion<string>();
-            e.Property(l => l.Status).HasConversion<string>();
+            // Optimistic concurrency on the status: every UPDATE of a loan carries
+            // WHERE "Status" = <value read>, so two concurrent transitions (e.g.
+            // Approve and Reject on the same UnderReview loan) can no longer both
+            // succeed — the loser gets DbUpdateConcurrencyException → HTTP 409.
+            // Model-only: no column is added.
+            e.Property(l => l.Status).HasConversion<string>().IsConcurrencyToken();
             e.Property(l => l.PreRejectedStatus).HasConversion<string>();
             e.Property(l => l.RequestedAmount).HasColumnType("decimal(18,2)").IsRequired();
             e.Property(l => l.ApprovedAmount).HasColumnType("decimal(18,2)");

@@ -1366,7 +1366,7 @@ export default function NewApplicationPage() {
       {(step === 6 || step === 9) && data.empType === 'salaried' && (
         <div
           className="mb-2 rounded-lg px-3 py-1.5 text-[11.5px] font-medium"
-          style={{ color: '#085897', background: 'rgba(8, 88, 151, .07)', border: '1px solid rgba(8, 88, 151, .14)' }}
+          style={{ color: '#0a589a', background: 'rgba(10, 88, 154, .07)', border: '1px solid rgba(10, 88, 154, .14)' }}
         >
           💡 Salaried: Verify salary slips, Form 16 and employer credentials
         </div>
@@ -1376,7 +1376,7 @@ export default function NewApplicationPage() {
       <div
         ref={stepBodyRef}
         className="p-6 mb-5"
-        style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 18, boxShadow: '0 2px 12px rgba(8,88,151,.05)' }}
+        style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 18, boxShadow: '0 2px 12px rgba(10,88,154,.05)' }}
       >
         {/* Keyed by step so each step change replays a subtle fade+rise.
             Presentation only — step data/validation/flow are untouched. */}

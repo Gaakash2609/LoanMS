@@ -196,6 +196,7 @@ try
     builder.Services.AddScoped<IEmailService, LoanMS.Infrastructure.Services.EmailService>();
     builder.Services.AddScoped<LoanMS.Application.Interfaces.IEmailTemplateProvider, LoanMS.Infrastructure.Services.EmailTemplateProvider>();
     builder.Services.AddScoped<LoanMS.Application.Interfaces.IEmployeeCodeGenerator, LoanMS.Infrastructure.Services.EmployeeCodeGenerator>();
+    builder.Services.AddScoped<LoanMS.Application.Interfaces.ICustomerDeletionService, LoanMS.Infrastructure.Services.CustomerDeletionService>();
     builder.Services.AddScoped<ICibilAnalysisService, CibilAnalysisService>();
 
     // ── Income Verification — Phase 3 trusted inputs ────────────────────────────
@@ -819,6 +820,21 @@ try
     // bottom, which serves the React shell. The legacy file itself is left on
     // disk and stays reachable at its explicit path "/index.html" (served by
     // the static middleware below) as a grace-period escape hatch.
+
+    // Legacy shell retired (owner confirmed 2026-09-23: nobody uses it). Its
+    // api-bridge.js kept a localStorage mirror that never dropped rows deleted
+    // on the server (locations, payout claims), so deleted data could reappear
+    // on another device. Send the explicit "/index.html" to the React app
+    // instead; the legacy files stay on disk only as a code reference.
+    app.Use(async (context, next) =>
+    {
+        if (string.Equals(context.Request.Path.Value, "/index.html", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.Redirect("/");
+            return;
+        }
+        await next();
+    });
 
     // Serve wwwroot static files; block /uploads/* from direct browser access
     app.UseStaticFiles(new StaticFileOptions

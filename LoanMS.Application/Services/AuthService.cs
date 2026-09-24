@@ -59,7 +59,9 @@ public class AuthService : IAuthService
     public async Task<ApiResponseDto<LoginResponseDto>> RefreshTokenAsync(string refreshToken)
     {
         var user = await _uow.Users.GetByRefreshTokenAsync(refreshToken);
-        if (user == null || user.RefreshTokenExpiry < DateTime.UtcNow)
+        // Same IsActive rule as LoginAsync — without it a user deactivated by an
+        // Admin kept refreshing (new access + refresh token) indefinitely.
+        if (user == null || !user.IsActive || user.RefreshTokenExpiry < DateTime.UtcNow)
             return ApiResponseDto<LoginResponseDto>.Fail("Invalid or expired refresh token.");
 
         var newAccess  = _jwt.GenerateAccessToken(user);

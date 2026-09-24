@@ -13,7 +13,7 @@ public class LoanStatusHistoryRepository : GenericRepository<LoanStatusHistory>,
     public LoanStatusHistoryRepository(AppDbContext ctx) : base(ctx) { }
 
     public async Task<IEnumerable<LoanStatusHistory>> GetByLoanIdAsync(int loanId) =>
-        await _set.Include(h => h.ChangedBy)
+        await _set.IncludeDeletedUsers().Include(h => h.ChangedBy)
                   .Where(h => h.LoanId == loanId)
                   .OrderByDescending(h => h.CreatedAt)
                   .ToListAsync();

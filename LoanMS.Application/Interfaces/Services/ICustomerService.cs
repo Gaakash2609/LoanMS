@@ -14,7 +14,6 @@ public interface ICustomerService
     Task<ApiResponseDto<PagedResultDto<CustomerDto>>> GetAllAsync(int page, int pageSize, string? search, int currentUserId, string callerRole);
     Task<ApiResponseDto<CustomerDto>> CreateAsync(CreateCustomerRequestDto request);
     Task<ApiResponseDto<CustomerDto>> UpdateAsync(int id, UpdateCustomerRequestDto request);
-    Task<ApiResponseDto<bool>> DeleteAsync(int id);
     Task<bool> PanExistsAsync(string pan, int? excludeId = null);
     Task<PagedResultDto<CustomerDto>> GetPagedAsync(int page, int pageSize, string? search, int currentUserId, string callerRole);
 }

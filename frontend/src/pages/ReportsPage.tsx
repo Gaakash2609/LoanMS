@@ -42,11 +42,11 @@ export default function ReportsPage() {
   // useMutation (rather than a plain async click handler) guards against a
   // duplicate fetch firing while one is already in flight.
   const fetchExportRows = useMutation({
-    mutationFn: () => loansApi.getAll({
+    // Every loan in the range (was pageSize 5000, which the API clamps to 10).
+    mutationFn: () => loansApi.getAllPages({
       dateFrom: filters.from || undefined,
       dateTo: filters.to || undefined,
-      page: 1, pageSize: 5000,
-    }).then(r => r.data.data?.items ?? []),
+    }),
   })
 
   // ── Export — matches legacy's toggleRptExportMenu/exportReportCSV/Excel/
@@ -143,7 +143,7 @@ export default function ReportsPage() {
   const getTatStatus = (actual: number, target: number) => {
     if (actual <= target) return { status: 'On Track', icon: <Check size={12} />, accent: 'var(--success)', tint: 'rgba(26, 115, 64, .1)', border: 'border-[rgba(26,115,64,.3)]' }
     if (actual <= target * 1.15) return { status: 'Slightly Delayed', icon: <Zap size={12} />, accent: 'var(--warn)', tint: 'rgba(230, 126, 0, .12)', border: 'border-[rgba(230,126,0,.3)]' }
-    return { status: 'Delayed', icon: <AlertTriangle size={12} />, accent: 'var(--danger)', tint: 'rgba(192, 57, 43, .1)', border: 'border-[rgba(192,57,43,.3)]' }
+    return { status: 'Delayed', icon: <AlertTriangle size={12} />, accent: 'var(--danger)', tint: 'rgba(227, 30, 37, .1)', border: 'border-[rgba(227,30,37,.3)]' }
   }
 
   const tatStatus = getTatStatus(tatLoginToDisbDays, tatLoginToDisbTarget)
@@ -211,7 +211,7 @@ export default function ReportsPage() {
               { label: 'Total Disbursed', value: formatCurrency(data?.totalPortfolio), sub: `${disbursedCount} disbursed of ${statusTotal} applications`, icon: TrendingUp, accent: 'var(--accent)', tint: 'var(--accent-subtle)' },
               { label: 'Avg Loan Size', value: formatCurrency(data?.averageLoanAmount), sub: 'Mean ticket size', icon: BarChart3, accent: '#7c3aed', tint: 'rgba(124,58,237,.1)' },
               { label: 'Conversion Rate', value: `${data?.conversionRate ?? 0}%`, sub: 'Applications disbursed', icon: Award, accent: 'var(--success)', tint: 'rgba(26,115,64,.1)' },
-              { label: 'Rejection Rate', value: `${rejectionRate}%`, sub: `${rejectedCount} rejected of ${statusTotal}`, icon: TrendingDown, accent: 'var(--accent2)', tint: 'rgba(212,43,43,.1)' },
+              { label: 'Rejection Rate', value: `${rejectionRate}%`, sub: `${rejectedCount} rejected of ${statusTotal}`, icon: TrendingDown, accent: 'var(--accent2)', tint: 'rgba(227,30,37,.1)' },
             ].map(({ label, value, sub, icon: Icon, accent, tint }) => (
               <div key={label} className="rp-kpi-card" style={{ ['--rp-accent' as string]: accent, ['--rp-tint' as string]: tint }}>
                 <div className="rp-kpi-icon">

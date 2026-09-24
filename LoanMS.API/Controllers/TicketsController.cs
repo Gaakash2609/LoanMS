@@ -20,7 +20,7 @@ public class TicketsController : BaseController
         if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "tickets"))
             return Forbid();
 
-        var q = _db.Tickets.Include(t => t.CreatedBy).Include(t => t.AssignedTo).AsQueryable();
+        var q = _db.Tickets.IncludeDeletedUsers().Include(t => t.CreatedBy).Include(t => t.AssignedTo).AsQueryable();
         if (!string.IsNullOrEmpty(status)) q = q.Where(t => t.Status == status);
 
         // Scope: Sales, Dsa, and Partner see only their own tickets.
@@ -49,7 +49,7 @@ public class TicketsController : BaseController
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
-        var ticket = await _db.Tickets.Include(t => t.CreatedBy).Include(t => t.AssignedTo)
+        var ticket = await _db.Tickets.IncludeDeletedUsers().Include(t => t.CreatedBy).Include(t => t.AssignedTo)
             .FirstOrDefaultAsync(t => t.Id == id);
         if (ticket == null) return NotFound(ApiResponseDto<object>.Fail("Not found."));
 
@@ -221,7 +221,7 @@ public class TicketsController : BaseController
             && ticket.CreatedByUserId != CurrentUserId)
             return NotFound(ApiResponseDto<object>.Fail("Not found."));
 
-        var comments = await _db.TicketComments.Include(c => c.User)
+        var comments = await _db.TicketComments.IncludeDeletedUsers().Include(c => c.User)
             .Where(c => c.TicketId == id)
             .OrderBy(c => c.CreatedAt)
             .Select(c => new { c.Id, c.Content, c.Type, User = c.User.FullName, c.CreatedAt })

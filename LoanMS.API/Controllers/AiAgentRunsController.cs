@@ -27,6 +27,7 @@ public class AiAgentRunsController : BaseController
     [HttpGet("{loanApplicationId:int}")]
     public async Task<IActionResult> GetRuns(int loanApplicationId)
     {
+        if (!await CanSeeLoanAsync(_db, loanApplicationId)) return NotFound(ApiResponseDto<object>.Fail("Loan not found."));
         var runs = await _db.AiAgentRuns
             .Where(r => r.LoanApplicationId == loanApplicationId)
             .OrderByDescending(r => r.StartedAt)
@@ -46,7 +47,7 @@ public class AiAgentRunsController : BaseController
         if (dto.LoanApplicationId <= 0)
             return BadRequest(ApiResponseDto<object>.Fail("loanApplicationId is required."));
 
-        var loanExists = await _db.Loans.AnyAsync(l => l.Id == dto.LoanApplicationId);
+        var loanExists = await CanSeeLoanAsync(_db, dto.LoanApplicationId);
         if (!loanExists)
             return BadRequest(ApiResponseDto<object>.Fail("Loan application not found."));
 
@@ -68,7 +69,7 @@ public class AiAgentRunsController : BaseController
     public async Task<IActionResult> UpdateRun(int id, [FromBody] AiAgentRunUpdateDto dto)
     {
         var run = await _db.AiAgentRuns.FindAsync(id);
-        if (run == null) return NotFound(ApiResponseDto<bool>.Fail("Run not found."));
+        if (run == null || !await CanSeeLoanAsync(_db, run.LoanApplicationId)) return NotFound(ApiResponseDto<bool>.Fail("Run not found."));
 
         if (dto.StepsJson != null) run.StepsJson = dto.StepsJson;
         if (!string.IsNullOrWhiteSpace(dto.Status)) run.Status = dto.Status;

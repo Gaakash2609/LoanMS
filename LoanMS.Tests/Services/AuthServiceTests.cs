@@ -95,6 +95,19 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task RefreshTokenAsync_DeactivatedUser_ReturnsFail()
+    {
+        var user = new User { Id=2, Email="d@a.com", PasswordHash="x", IsActive=false,
+                              Role=UserRole.Sales, FullName="D",
+                              RefreshToken="live_token", RefreshTokenExpiry=DateTime.UtcNow.AddDays(1) };
+        _userMock.Setup(r => r.GetByRefreshTokenAsync("live_token")).ReturnsAsync(user);
+        var svc    = CreateService();
+        var result = await svc.RefreshTokenAsync("live_token");
+        result.Success.Should().BeFalse();
+        user.RefreshToken.Should().Be("live_token"); // not rotated
+    }
+
+    [Fact]
     public async Task LogoutAsync_ValidUser_ClearsRefreshToken()
     {
         var user = new User { Id=1, Email="a@a.com", PasswordHash="x", IsActive=true,

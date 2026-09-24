@@ -205,9 +205,9 @@ function BankDetailEditor({ bank, productKey, canEdit, onClose }: {
   const distinctCatIds = [...new Set(lines.map(l => l.categoryId))]
 
   return (
-    <div className="border-2 rounded-2xl overflow-hidden" style={{ borderColor: 'rgba(8,88,151,.18)' }}>
+    <div className="border-2 rounded-2xl overflow-hidden" style={{ borderColor: 'rgba(10,88,154,.18)' }}>
       {/* Detail header */}
-      <div className="px-5 py-4 border-b border-gray-200" style={{ background: 'rgba(8,88,151,.03)' }}>
+      <div className="px-5 py-4 border-b border-gray-200" style={{ background: 'rgba(10,88,154,.03)' }}>
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-[10px] flex items-center justify-center font-extrabold text-base shrink-0"
@@ -244,7 +244,7 @@ function BankDetailEditor({ bank, productKey, canEdit, onClose }: {
 
       <div className="p-5 space-y-4">
         {error && (
-          <div className="text-xs rounded-lg px-3 py-2" style={{ color: 'var(--danger)', background: 'rgba(192,57,43,.1)', border: '1px solid rgba(192,57,43,.25)' }}>{error}</div>
+          <div className="text-xs rounded-lg px-3 py-2" style={{ color: 'var(--danger)', background: 'rgba(227,30,37,.1)', border: '1px solid rgba(227,30,37,.25)' }}>{error}</div>
         )}
 
         {/* ── Approved Companies (eligibility lines) ── */}
@@ -514,10 +514,8 @@ export default function BankProductConfigCard({ companiesTab, categoriesTab, lin
       qc.invalidateQueries({ queryKey: ['banks'] })
       if (openBankId === id) setOpenBankId(null)
     },
-    onError: (err: unknown) => {
-      const d = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-      window.alert(d?.message || d?.errors?.join(' ') || 'Could not delete this bank.')
-    },
+    // The failure reason is raised by the app-wide toast handler (main.tsx).
+    meta: { errorMessage: 'Could not delete this bank.' },
   })
   function handleDeleteBank(b: BankConfig) {
     if (!window.confirm(`Permanently delete "${b.bankName}"?\n\nThis removes the bank and all its eligibility rules (Approved Companies, PINs, CIBIL, Bank Rules) across every loan product. This cannot be undone.`)) return
@@ -780,7 +778,7 @@ export default function BankProductConfigCard({ companiesTab, categoriesTab, lin
                     <td className="px-3 py-2.5">{pinCount ? <><span className="font-bold" style={{ color: 'var(--success)' }}>{pinCount}</span> <span className="text-[10.5px] text-gray-400">pins</span></> : <span className="text-gray-400">All</span>}</td>
                     <td className="px-3 py-2.5">{empTypes.length ? empTypes.map(e => <span key={e} className="text-[9.5px] font-semibold px-1.5 py-0.5 rounded mr-1" style={{ background: 'rgba(230,126,0,.1)', color: 'var(--warn)' }}>{({ SALARIED: 'Sal.', SELFEMP: 'SEP', SENP: 'SENP' } as Record<string, string>)[e] ?? e}</span>) : <span className="text-gray-400">All</span>}</td>
                     <td className="px-3 py-2.5">{cibil != null ? <span className="font-bold" style={{ color: cibilColor, fontFamily: 'var(--font-head)' }}>{cibil}{r.acceptNtc ? ' +NTC' : ''}</span> : <span className="text-gray-400">—</span>}</td>
-                    <td className="px-3 py-2.5">{rulesSet ? <span className="text-[10.5px] px-2 py-0.5 rounded" style={{ background: 'rgba(8,88,151,.07)', color: 'var(--accent)' }}>₹{((r.maxLoanAmt ?? 0) / 100000).toFixed(0)}L · {r.foirLimit ?? 50}% FOIR</span> : <span className="text-gray-400">Default</span>}</td>
+                    <td className="px-3 py-2.5">{rulesSet ? <span className="text-[10.5px] px-2 py-0.5 rounded" style={{ background: 'rgba(10,88,154,.07)', color: 'var(--accent)' }}>₹{((r.maxLoanAmt ?? 0) / 100000).toFixed(0)}L · {r.foirLimit ?? 50}% FOIR</span> : <span className="text-gray-400">Default</span>}</td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-2.5">
                         <button onClick={() => setOpenBankId(openBankId === b.id ? null : b.id)} className="text-[11px] font-semibold text-efin-blue hover:underline">{openBankId === b.id ? 'Close' : '✏ Edit'}</button>

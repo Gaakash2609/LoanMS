@@ -44,6 +44,19 @@ public class ExceptionMiddleware
     private static async Task HandleExceptionAsync(HttpContext context, Exception ex, bool isDev)
     {
         context.Response.ContentType = "application/json";
+
+        // Optimistic-concurrency conflict (e.g. Loan.Status changed by another
+        // user between read and save): a normal, user-actionable situation, not
+        // a server fault — 409 with a clear message in every environment.
+        if (ex is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            context.Response.StatusCode = (int)HttpStatusCode.Conflict;
+            const string conflict = "This record was changed by someone else just now. Refresh and try again.";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(
+                new { success = false, message = conflict, errors = new[] { conflict } },
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+            return;
+        }
         context.Response.StatusCode  = ex switch
         {
             UnauthorizedAccessException => (int)HttpStatusCode.Unauthorized,

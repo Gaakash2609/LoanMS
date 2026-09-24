@@ -228,4 +228,43 @@ public class PerfiosControllerTests
         response.Success.Should().BeTrue();
         response.Data.Should().BeNull();
     }
+    // 10 — Evidence binding hashes the REAL stored bytes. Regression: the
+    // controller read storage with the raw DB FilePath ("{loanId}/{file}"),
+    // but uploads are stored under "loans/{loanId}/{file}", so the lookup
+    // always missed and SourcePdfHash was silently never set.
+    [Fact]
+    public async Task Save_BindsDocument_AndHashesBytesFromLoansPrefixedStorageKey()
+    {
+        using var db = NewDb();
+        db.LoanDocuments.Add(new LoanDocument { Id = 11, LoanId = 1, DocumentName = "statement.pdf", DocumentType = "bank_statement", FilePath = "1/abc.pdf" });
+        db.SaveChanges();
+
+        var bytes = System.Text.Encoding.ASCII.GetBytes("%PDF-1.4 statement bytes");
+        var storage = new Mock<IFileStorageService>();
+        storage.Setup(s => s.GetAsync("loans/1/abc.pdf", It.IsAny<CancellationToken>()))
+               .ReturnsAsync(() => ((Stream)new MemoryStream(bytes), "application/pdf"));
+        var controller = new PerfiosController(LoanServiceWithVisibleLoan().Object, db, storage.Object)
+        {
+            ControllerContext = Controller(db, LoanServiceWithVisibleLoan().Object).ControllerContext
+        };
+
+        await controller.Save(1, NewRequest(fileName: "statement.pdf"));
+
+        var row = db.PerfiosReports.Single(r => r.LoanId == 1);
+        row.BankStatementDocumentId.Should().Be(11);
+        row.SourcePdfHash.Should().Be(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant());
+    }
+    // 11 — The wizard sends the browser file name WITH its extension while
+    // UploadDocument stores DocumentName without it; binding must still work.
+    [Fact]
+    public async Task Save_BindsDocument_WhenFileNameIncludesExtension()
+    {
+        using var db = NewDb();
+        db.LoanDocuments.Add(new LoanDocument { Id = 21, LoanId = 1, DocumentName = "HDFC_Statement", DocumentType = "bank_statement", FilePath = "1/h.pdf" });
+        db.SaveChanges();
+
+        await Controller(db, LoanServiceWithVisibleLoan().Object).Save(1, NewRequest(fileName: "HDFC_Statement.pdf"));
+
+        db.PerfiosReports.Single(r => r.LoanId == 1).BankStatementDocumentId.Should().Be(21);
+    }
 }

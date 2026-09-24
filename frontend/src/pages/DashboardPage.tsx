@@ -79,7 +79,7 @@ export default function DashboardPage() {
           <ExpertExportButton />
           <div
             className="flex items-center gap-2.5 bg-surface px-[18px] py-[11px]"
-            style={{ border: '1.5px solid var(--border)', borderRadius: 14, boxShadow: '0 2px 10px rgba(8,88,151,.07)' }}
+            style={{ border: '1.5px solid var(--border)', borderRadius: 14, boxShadow: '0 2px 10px rgba(10,88,154,.07)' }}
           >
             <span
               className="inline-block w-[9px] h-[9px] rounded-full"

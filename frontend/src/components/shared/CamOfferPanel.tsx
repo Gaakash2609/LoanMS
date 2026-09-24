@@ -141,7 +141,7 @@ export default function CamOfferPanel({
       {/* ── OFFER CONFIRMED CARD ─────────────────────────────────────── */}
       {!showOffer && !warning && (
         <div className="relative rounded-2xl border border-token bg-surface p-5 mb-4 overflow-hidden transition-shadow hover:shadow-md"
-          style={{ boxShadow: '0 2px 16px rgba(8,88,151,.06)' }}>
+          style={{ boxShadow: '0 2px 16px rgba(10,88,154,.06)' }}>
           <div style={{
             position: 'absolute', top: -50, right: -50, width: 180, height: 180, borderRadius: '50%',
             background: 'radial-gradient(circle, var(--accent-subtle) 0%, transparent 70%)', pointerEvents: 'none',

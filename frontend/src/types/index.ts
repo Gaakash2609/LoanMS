@@ -269,6 +269,20 @@ export interface LoanFilter {
   // Phase 1 (DSA parity) — backs the DSA Management "Apps" drill-down.
   dsaId?: number
   partnerId?: number
+  // Applications Advanced Filter — all evaluated server-side (LoanFilterDto).
+  minAmount?: number; maxAmount?: number
+  minCibil?: number; maxCibil?: number
+  minSalary?: number; maxSalary?: number
+  salesPerson?: string; location?: string; channel?: string; bank?: string
+  purpose?: string; empType?: string; city?: string; state?: string; gender?: string
+  dsaName?: string; partnerName?: string; companyName?: string
+}
+
+/** GET /api/loans/filter-options — distinct values across the caller's visible loans. */
+export interface LoanFilterOptions {
+  salesPeople: string[]; locations: string[]; channels: string[]; banks: string[]
+  purposes: string[]; empTypes: string[]; cities: string[]; states: string[]
+  genders: string[]; dsaNames: string[]; partners: string[]; companies: string[]
 }
 
 export interface CreateLoanRequest {

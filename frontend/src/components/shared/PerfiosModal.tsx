@@ -99,7 +99,7 @@ export default function PerfiosModal({ onClose, onConfirm }: {
                         <p className="text-[11px] text-gray-500 leading-snug">{c.detail}</p>
                       </div>
                       <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0"
-                        style={{ background: c.status === 'pass' ? 'rgba(26,115,64,.12)' : c.status === 'warn' ? 'rgba(230,126,0,.12)' : 'rgba(192,57,43,.1)', color: c.status === 'pass' ? 'var(--success)' : c.status === 'warn' ? 'var(--warn)' : 'var(--danger)' }}>
+                        style={{ background: c.status === 'pass' ? 'rgba(26,115,64,.12)' : c.status === 'warn' ? 'rgba(230,126,0,.12)' : 'rgba(227,30,37,.1)', color: c.status === 'pass' ? 'var(--success)' : c.status === 'warn' ? 'var(--warn)' : 'var(--danger)' }}>
                         {c.status}
                       </span>
                     </div>

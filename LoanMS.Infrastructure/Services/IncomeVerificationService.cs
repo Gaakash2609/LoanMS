@@ -304,9 +304,14 @@ public sealed class IncomeVerificationService : IIncomeVerificationService
         var added = false;
         foreach (var doc in slipDocs)
         {
-            if (existing.Any(e => e.DocumentId == doc.Id)) continue;
+            // A row with no ContentHash means the file bytes were never read
+            // (until ebe9e6d every slip hit a wrong storage key and was recorded
+            // "not found"). Such rows are re-extracted instead of skipped;
+            // successfully read rows keep the one-extraction-per-document rule.
+            var prior = existing.FirstOrDefault(e => e.DocumentId == doc.Id);
+            if (prior != null && prior.ContentHash != null) continue;
             TrustedSalaryExtractionResult ex;
-            try { ex = await _extraction.ExtractAsync(doc.FilePath); }
+            try { ex = await _extraction.ExtractAsync(DocumentStorageKeys.ForLoanDocument(doc.FilePath)); }
             catch (Exception e)
             {
                 _log.LogWarning(e, "Salary extraction threw for doc {DocId}", doc.Id);
@@ -314,6 +319,23 @@ public sealed class IncomeVerificationService : IIncomeVerificationService
             }
 
             var (yr, mo) = ParseMonthLabel(ex.MonthLabel);
+            if (prior != null)
+            {
+                // Still unreadable → leave the row as it is and retry next run.
+                if (ex.ContentHash == null) continue;
+                // Reprocess in place: refresh what the server extracted, but keep
+                // any manual override (UserEditedSalary / OverrideReason / editor).
+                prior.Year = yr;
+                prior.Month = mo;
+                prior.MonthLabel = ex.MonthLabel;
+                prior.OriginalNetSalary = ex.OriginalNetSalary;
+                prior.ExtractionMethod = ex.ExtractionMethod;
+                prior.IsTrustedOriginal = ex.IsTrusted;
+                prior.ContentHash = ex.ContentHash;
+                prior.UpdatedAt = DateTime.UtcNow;
+                added = true;
+                continue;
+            }
             var row = new SalarySlipExtraction
             {
                 LoanId = loanId,

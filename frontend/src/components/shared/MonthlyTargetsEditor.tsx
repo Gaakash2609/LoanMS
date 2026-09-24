@@ -9,6 +9,7 @@ import {
 import { useAuthStore } from '@/store/authStore'
 import { SkeletonText } from '@/components/ui/Skeleton'
 import { NumberInput } from '@/components/ui/NumberInput'
+import { apiErrorMessage as errorMessage } from '@/utils/apiError'
 
 // ── Edit Monthly Targets ────────────────────────────────────────────────
 // Ports legacy's "🎯 Edit Monthly Targets" card (index.html:4756) and its
@@ -27,10 +28,6 @@ import { NumberInput } from '@/components/ui/NumberInput'
 
 type Draft = Pick<ReportTarget, 'disbAmt' | 'loginCount' | 'disbCount'>
 
-function errorMessage(err: unknown, fallback: string): string {
-  const d = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-  return d?.message || d?.errors?.join(' ') || fallback
-}
 
 export default function MonthlyTargetsEditor() {
   const qc = useQueryClient()
