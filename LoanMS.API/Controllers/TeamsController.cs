@@ -16,7 +16,9 @@ namespace LoanMS.API.Controllers;
 // can delete teams"). Manager keeps its existing GetAll-only, team-scoped
 // view access (see the comment on GetAll below) — vanilla never lets a
 // Manager edit/archive/delete a team, only Admin/ProductTeam can.
-[Authorize(Roles = "Admin,Manager,ProductTeam")]
+// Master prompt Part 5: TeamLeader, LocationHead and OperationManager also
+// read the team pages — scoped to their own teams / Location, never org-wide.
+[Authorize(Roles = "Admin,Manager,ProductTeam,TeamLeader,LocationHead,OperationManager")]
 public class TeamsController : BaseController
 {
     private readonly AppDbContext _db;
@@ -37,23 +39,34 @@ public class TeamsController : BaseController
     {
         // Menu Access Control (Settings screen) — additional, Admin-
         // configurable restriction on TOP of the class-level [Authorize]
-        // above (which already excludes every role except Admin/Manager;
-        // this only lets Admin further narrow Manager's access if wanted,
-        // it can never grant access to a role the Authorize list already
-        // excludes — see RolePermissionService's fail-open default).
-        var menuId = string.Equals(type, "Sales", StringComparison.OrdinalIgnoreCase) ? "sales-teams"
-                    : string.Equals(type, "Login", StringComparison.OrdinalIgnoreCase) ? "login-teams"
-                    : "team-overview";
-        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, menuId))
+        // above; it can never grant access to a role that list excludes.
+        // The one list feeds Team Overview, Sales Teams and Login Teams (and
+        // the loan-assignment / report team pickers) — `type` only filters
+        // it — so any of the three team menus allows reading it.
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "team-overview") &&
+            !await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "sales-teams") &&
+            !await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "login-teams"))
             return Forbid();
 
         var q = _db.Teams.Include(t => t.TeamLead).Include(t => t.Location).Include(t => t.Members).ThenInclude(m => m.User).AsQueryable();
         if (!string.IsNullOrEmpty(type)) q = q.Where(t => t.Type == type);
 
-        if (string.Equals(CurrentUserRole, "Manager", StringComparison.OrdinalIgnoreCase))
+        // Admin/ProductTeam: every team. Manager, TeamLeader, OperationManager:
+        // teams they lead or belong to. LocationHead: those plus every team
+        // at one of their Locations (master prompt Part 5).
+        if (!LoanMS.API.Services.OrgScope.IsOrgWide(CurrentUserRole))
         {
-            q = q.Where(t => t.TeamLeadUserId == CurrentUserId
-                           || t.Members.Any(m => m.UserId == CurrentUserId && !m.IsDeleted));
+            var myTeamIds = LoanMS.API.Services.OrgScope.TeamIdsOf(_db, CurrentUserId);
+            if (LoanMS.API.Services.OrgScope.Is(CurrentUserRole, "LocationHead"))
+            {
+                var myLocationIds = LoanMS.API.Services.OrgScope.LocationIdsOf(_db, CurrentUserId);
+                q = q.Where(t => myTeamIds.Contains(t.Id) ||
+                                 (t.LocationId != null && myLocationIds.Contains(t.LocationId.Value)));
+            }
+            else
+            {
+                q = q.Where(t => myTeamIds.Contains(t.Id));
+            }
         }
 
         var teams = await q.Select(t => new {

@@ -36,8 +36,6 @@ export const ticketsApi = {
   getAll: (params?: { status?: string }) =>
     api.get<ApiResponse<Ticket[]>>('/api/tickets', { params }),
   create: (data: TicketCreateRequest) => api.post<ApiResponse<{ id: number }>>('/api/tickets', data),
-  update: (id: number, data: Partial<Ticket>) =>
-    api.put<ApiResponse<Ticket>>(`/api/tickets/${id}`, data),
   close: (id: number) => api.patch<ApiResponse<Ticket>>(`/api/tickets/${id}/close`),
 
   // ── Routes that already existed but had no React caller ────────────────

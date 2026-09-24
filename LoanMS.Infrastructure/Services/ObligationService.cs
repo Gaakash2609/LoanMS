@@ -7,7 +7,6 @@ using LoanMS.Domain.Entities;
 using LoanMS.Domain.Enums;
 using LoanMS.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace LoanMS.Infrastructure.Services;
 
@@ -24,20 +23,17 @@ public sealed class ObligationService : IObligationService
     private readonly ILoanService _loanService;
     private readonly IIncomeVerificationService _incomeVerification;
     private readonly IObligationDetectionService _detection;
-    private readonly ILogger<ObligationService> _log;
 
     public ObligationService(
         AppDbContext db,
         ILoanService loanService,
         IIncomeVerificationService incomeVerification,
-        IObligationDetectionService detection,
-        ILogger<ObligationService> log)
+        IObligationDetectionService detection)
     {
         _db = db;
         _loanService = loanService;
         _incomeVerification = incomeVerification;
         _detection = detection;
-        _log = log;
     }
 
     // Reverse of WizardController._loanTypeMap (enum → canonical frontend product

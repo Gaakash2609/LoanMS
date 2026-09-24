@@ -209,6 +209,21 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
         // Team Leader is scoped to their mapped Sales Team ONLY — no Location or
         // Login-queue widening — so another team's applications stay hidden even
         // at the same Location.
+        //
+        // UPDATE (2026-09-24, business owner request): a Team Leader's actual
+        // job includes following up DSA- and Partner-sourced files and
+        // coordinating their progress with Login/Operations — but those loans
+        // are created by the DSA/Partner user, not by a member of this Team
+        // Leader's own Sales Team, so the rule above never surfaced them. Added
+        // ONE extra, narrowly-scoped OR-term: a DSA- or Partner-originated loan
+        // (l.DsaId/l.PartnerId set) becomes visible ONLY when it also falls in
+        // one of this Team Leader's own mapped Locations (UserLocations) — the
+        // location-based linkage the business owner asked for, chosen instead
+        // of adding a new DSA/Partner-to-Team mapping field. This does NOT
+        // widen visibility into other Sales Teams' internal loans (G-15's
+        // least-privilege intent for non-DSA/Partner loans is unchanged) — it
+        // only adds the DSA/Partner channel, and only within their own
+        // location(s).
         if (string.Equals(role, "TeamLeader", StringComparison.OrdinalIgnoreCase))
         {
             var mySalesTeamIds = ctx.Set<Team>()
@@ -224,20 +239,35 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                     .Where(t => mySalesTeamIds.Contains(t.Id) && t.TeamLeadUserId != null)
                     .Select(t => t.TeamLeadUserId!.Value));
 
+            var myLocationIds = ctx.Set<UserLocation>()
+                .Where(ul => ul.UserId == currentUserId && !ul.IsDeleted)
+                .Select(ul => ul.LocationId);
+
             return query.Where(l =>
                 teamUserIds.Contains(l.CreatedByUserId) ||
-                (l.AssignedToUserId.HasValue && teamUserIds.Contains(l.AssignedToUserId.Value)));
+                (l.AssignedToUserId.HasValue && teamUserIds.Contains(l.AssignedToUserId.Value)) ||
+                ((l.DsaId != null || l.PartnerId != null) &&
+                 l.LocationId.HasValue && myLocationIds.Contains(l.LocationId.Value)));
         }
 
-        // Manager — G-03 (confirmed). Intersection, NOT union: a Manager sees a
-        // loan ONLY when BOTH hold —
-        //   (a) the loan's Location is one of the Manager's mapped Locations
-        //       (UserLocations), AND
-        //   (b) the loan's Team (its creator/assignee belongs to a Sales Team the
-        //       Manager leads/belongs to) is one of the Manager's mapped Teams.
-        // No global access. A Manager with no Location mapping, or no Team
-        // mapping, sees nothing (least privilege — an Admin must map both). This
-        // deliberately replaces the earlier OR/union behaviour.
+        // Manager — G-03 was: Intersection, NOT union — a Manager saw a loan
+        // ONLY when BOTH (a) the loan's Location was one of the Manager's
+        // mapped Locations AND (b) the loan's Team was one of the Manager's
+        // mapped Teams. That meant a Manager with a Team mapping but no
+        // Location mapping (or vice-versa) saw NOTHING — too strict given a
+        // Manager sits above Team Leader in the hierarchy and should never see
+        // less than their own Team Leaders do.
+        //
+        // UPDATE (2026-09-24, business owner request): changed the AND back to
+        // an OR — a Manager now sees a loan when EITHER their own Location
+        // matches OR their own Sales-Team membership matches (least privilege
+        // is still preserved: a Manager with neither mapping still sees
+        // nothing). Making Location a standalone OR-term also naturally covers
+        // DSA/Partner-sourced loans in the Manager's own Location — the same
+        // location-based linkage requested for Team Leader above — without a
+        // separate DSA/Partner-specific clause, since ANY loan (including
+        // DSA/Partner channel ones) in the Manager's mapped Location now
+        // qualifies.
         if (string.Equals(role, "Manager", StringComparison.OrdinalIgnoreCase))
         {
             var mySalesTeamIds = ctx.Set<Team>()
@@ -258,9 +288,9 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 .Select(ul => ul.LocationId);
 
             return query.Where(l =>
-                (l.LocationId.HasValue && myLocationIds.Contains(l.LocationId.Value)) &&
-                (teamUserIds.Contains(l.CreatedByUserId) ||
-                 (l.AssignedToUserId.HasValue && teamUserIds.Contains(l.AssignedToUserId.Value))));
+                (l.LocationId.HasValue && myLocationIds.Contains(l.LocationId.Value)) ||
+                teamUserIds.Contains(l.CreatedByUserId) ||
+                (l.AssignedToUserId.HasValue && teamUserIds.Contains(l.AssignedToUserId.Value)));
         }
 
         // LoginTeam — base rule: an individual Login Team member sees their
@@ -1104,7 +1134,4 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
         var target = a.EntityId != null ? $"{a.EntityName} #{a.EntityId}" : a.EntityName;
         return $"{who} {verb} {target}";
     }
-
-    public async Task<IEnumerable<Loan>> GetLoansByCustomerAsync(int customerId) =>
-        await _set.Where(l => l.CustomerId == customerId).ToListAsync();
 }

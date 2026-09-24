@@ -18,15 +18,13 @@ public class WizardController : BaseController
 {
     private readonly AppDbContext _db;
     private readonly ILogger<WizardController> _logger;
-    private readonly ICacheService _cache;
     private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
     private readonly LoanMS.API.Services.ILoginUserAssignmentService _loginAssign;
 
-    public WizardController(AppDbContext db, ILogger<WizardController> logger, ICacheService cache, LoanMS.API.Services.IRolePermissionService rolePerm, LoanMS.API.Services.ILoginUserAssignmentService loginAssign)
+    public WizardController(AppDbContext db, ILogger<WizardController> logger, LoanMS.API.Services.IRolePermissionService rolePerm, LoanMS.API.Services.ILoginUserAssignmentService loginAssign)
     {
         _db     = db;
         _logger = logger;
-        _cache  = cache;
         _rolePerm = rolePerm;
         _loginAssign = loginAssign;
     }
@@ -55,14 +53,6 @@ public class WizardController : BaseController
         // policy fields still persist via loan.ProductDataJson (ApplyMapping).
         ["insurance"]             = LoanType.Insurance,
     };
-
-    private static decimal CalcEmi(decimal principal, decimal ratePercent, int months)
-    {
-        if (ratePercent == 0) return Math.Round(principal / months, 2);
-        var r   = ratePercent / 12 / 100;
-        var pow = (decimal)Math.Pow((double)(1 + r), months);
-        return Math.Round(principal * r * pow / (pow - 1), 2);
-    }
 
     // ── Field-format validation ──────────────────────────────────────────────
     // Mirrors the frontend's input rules exactly, so a request that bypasses
@@ -656,7 +646,7 @@ public class WizardController : BaseController
 
             var loanType = _loanTypeMap.TryGetValue(dto.LoanType ?? "personal_loan", out var lt)
                            ? lt : LoanType.Personal;
-            var emi      = CalcEmi(dto.Amount, dto.LoanRate > 0 ? dto.LoanRate : 12, dto.Tenure > 0 ? dto.Tenure : 24);
+            var emi      = LoanMS.Application.Services.EmiCalculator.ReducingBalance(dto.Amount, dto.LoanRate > 0 ? dto.LoanRate : 12, dto.Tenure > 0 ? dto.Tenure : 24);
 
             // ── 3. Create or update loan ─────────────────────────────────────────
             // Resuming a draft updates the SAME record (and clears the Draft status)
@@ -1300,7 +1290,7 @@ public class WizardController : BaseController
         if (errors.Any())
             return BadRequest(ApiResponseDto<object>.Fail(errors));
 
-        var emi = CalcEmi(dto.Amount, dto.LoanRate, dto.Tenure);
+        var emi = LoanMS.Application.Services.EmiCalculator.ReducingBalance(dto.Amount, dto.LoanRate, dto.Tenure);
         return Ok(ApiResponseDto<object>.Ok(new {
             valid        = true,
             emi          = emi,

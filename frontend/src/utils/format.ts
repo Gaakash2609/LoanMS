@@ -25,10 +25,8 @@ import type { CSSProperties } from 'react'
 
 // Formatting utilities
 const INR = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })
-const NUM = new Intl.NumberFormat('en-IN')
 
 export const formatCurrency = (n?: number | null) => n != null ? INR.format(n) : '—'
-export const formatNumber   = (n?: number | null) => n != null ? NUM.format(n) : '—'
 
 export const formatDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
@@ -38,16 +36,6 @@ export const formatDateTime = (d?: string | null) =>
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit'
   }) : '—'
-
-export const formatRelativeDate = (d?: string | null) => {
-  if (!d) return '—'
-  const diff = Date.now() - new Date(d).getTime()
-  const days = Math.floor(diff / 86400000)
-  if (days === 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  if (days < 7) return `${days}d ago`
-  return formatDate(d)
-}
 
 // Legacy builds its loan-status pill directly off the raw status value:
 // `<span class="badge badge-${a.status}">` (efin-app.js), and app.css
@@ -107,17 +95,6 @@ export const STATUS_LABELS: Record<string, string> = {
   Acceptance:  'Acceptance',
 }
 
-// Not currently consumed anywhere (Tasks/Tickets build their own variant
-// maps against the generic Badge component instead) -- corrected for the
-// same reason as STATUS_COLORS rather than left with the stock Tailwind
-// pairs, since exporting a mismatched palette is itself a latent mismatch
-// the moment something starts using it.
-export const PRIORITY_COLORS: Record<string, CSSProperties> = {
-  High:   { background: 'rgba(255, 69, 96, .15)',  color: 'var(--danger)' },
-  Medium: { background: 'rgba(255, 179, 71, .15)', color: 'var(--warn)' },
-  Low:    { background: 'rgba(0, 212, 170, .15)',  color: 'var(--accent2)' },
-}
-
 // Keyed by the backend enum's own .ToString() names (what the API actually
 // returns via LoanType.ToString()) — Car/LAP/Overdraft — so the label shows
 // instead of the raw enum name. The extra NewCar/UsedCar/AgainstProperty
@@ -126,28 +103,6 @@ export const LOAN_TYPE_LABELS: Record<string, string> = {
   Personal: 'Personal Loan', Business: 'Business Loan', Home: 'Home Loan',
   Car: 'Car Loan', LAP: 'LAP', Education: 'Education', Overdraft: 'Overdraft / CC',
   NewCar: 'New Car', UsedCar: 'Used Car', AgainstProperty: 'LAP', Insurance: 'Insurance',
-}
-
-// CIBIL tier — centralizes the >=750/>=650 bands that CustomersPage and
-// CustomerDetailPage each independently re-implemented (same thresholds and
-// Excellent/Good/Needs Improvement/Not Available labels as before; this is
-// only a dedupe, not a business-rule change).
-export type CibilTier = 'excellent' | 'good' | 'poor' | 'unknown'
-
-export function cibilTier(score?: number | null): CibilTier {
-  if (score == null) return 'unknown'
-  if (score >= 750) return 'excellent'
-  if (score >= 650) return 'good'
-  return 'poor'
-}
-
-export function cibilTierMeta(score?: number | null): { label: string; color: string; tint: string } {
-  switch (cibilTier(score)) {
-    case 'excellent': return { label: 'Excellent',           color: 'var(--success)', tint: 'rgba(26, 115, 64, .12)' }
-    case 'good':       return { label: 'Good',                color: 'var(--warn)',    tint: 'rgba(230, 126, 0, .12)' }
-    case 'poor':       return { label: 'Needs Improvement',   color: 'var(--danger)',  tint: 'rgba(227, 30, 37, .1)' }
-    default:           return { label: 'Not Available',       color: 'var(--text3)',  tint: 'var(--surface2)' }
-  }
 }
 
 // cn() using clsx + tailwind-merge — handles conditional classes properly

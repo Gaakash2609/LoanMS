@@ -1,6 +1,7 @@
 import type { LoanListItem } from '@/types'
 import { formatDate } from './format'
-import { htmlTable, wrapExcelHtml } from './reportExport'
+import { downloadBlob, htmlTable, wrapExcelHtml } from './reportExport'
+import { csvEscape } from './csv'
 
 // Subset of legacy's EXPORT_COLS whose underlying data actually exists on
 // React's LoanListItem (the data the Loans list already loads). Most of
@@ -34,10 +35,6 @@ export function defaultExportColumns(): ExportColumn[] {
     { key: 'rm', label: 'Assigned To', checked: false, get: l => l.assignedToName || '' },
     { key: 'date', label: 'Created Date', checked: true, get: l => formatDate(l.createdAt) },
   ]
-}
-
-function csvEscape(v: string) {
-  return '"' + (v ?? '').replace(/"/g, '""') + '"'
 }
 
 // Generic CSV builder reused by the small admin-table "Export CSV" buttons
@@ -142,11 +139,5 @@ ${truncated ? `<div class="truncate-note">⚠ PDF shows the first ${PDF_MAX_COLS
 }
 
 export function downloadCsv(csv: string, filename: string) {
-  const blob = new Blob([csv], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a); a.click(); document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  downloadBlob(csv, filename, 'text/csv')
 }

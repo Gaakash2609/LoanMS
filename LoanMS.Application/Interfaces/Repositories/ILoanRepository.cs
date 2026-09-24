@@ -24,7 +24,6 @@ public interface ILoanRepository : IGenericRepository<Loan>
     Task<string> GenerateLoanNumberAsync();
     Task<DashboardStatsDto> GetDashboardStatsAsync(int? userId = null, string? role = null);
     Task<LoanFilterOptionsDto> GetFilterOptionsAsync(int userId, string? role);
-    Task<IEnumerable<Loan>> GetLoansByCustomerAsync(int customerId);
     // Phase 3A: reuses the same ApplyVisibilityScope rules that gate the list/
     // detail endpoints (Phase 2B) — the single source of truth for "can this
     // user see/act on this loan", now also used to gate Update/UpdateStatus/

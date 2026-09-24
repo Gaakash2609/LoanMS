@@ -6,6 +6,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/States'
 import { expertExportApi } from '@/api/expertExportApi'
+import { downloadBlob } from '@/utils/reportExport'
 import { useLoanStore } from '@/store/loanStore'
 import { useCountUp } from '@/hooks/useCountUp'
 import type { LoanListItem, LoanType } from '@/types'
@@ -205,13 +206,7 @@ export function ExpertExportButton() {
   const download = useMutation({
     mutationFn: () => expertExportApi.downloadData(),
     onSuccess: (res) => {
-      const blob = new Blob([res.data], { type: 'text/csv' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `expert-export-${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      downloadBlob(res.data, `expert-export-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv')
       setError('')
     },
     onError: (e: unknown) => {

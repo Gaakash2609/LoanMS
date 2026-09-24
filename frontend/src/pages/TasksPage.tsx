@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { roleTitle } from '@/pages/users/userConstants'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { tasksApi, type Task, type TaskCreateRequest } from '@/api/tasksApi'
 import api from '@/api/axios'
@@ -150,7 +151,7 @@ function TransferTaskModal({ task, pending, onClose, onSubmit }: {
       <select value={userId} onChange={e => setUserId(e.target.value)} disabled={isLoading} className="efin-input">
         <option value="">— Select user —</option>
         {(users ?? []).filter(u => u.fullName !== task.assignedTo).map(u => (
-          <option key={u.id} value={u.id}>{u.fullName} · {u.role}</option>
+          <option key={u.id} value={u.id}>{u.fullName} · {roleTitle(u.role)}</option>
         ))}
       </select>
       {task.assignedTo && <p className="text-[11px] text-gray-400 mt-2">Currently assigned to {task.assignedTo}.</p>}

@@ -44,10 +44,12 @@ export default function TeamsPage({ view = 'overview' }: { view?: TeamsView }) {
     queryKey: ['locationOptions'],
     queryFn: () => usersApi.getAllLocations().then(r => r.data.data ?? []),
   })
+  // Only the edit form's leader/member pickers need the user list, and only
+  // Admin/ProductTeam can open it; view-only roles read names off the team.
   const { data: users } = useQuery({
     queryKey: ['users'],
     queryFn: () => usersApi.getAll().then(r => r.data.data ?? []),
-    enabled: view !== 'overview',
+    enabled: view !== 'overview' && canManage,
   })
   const { data: openTickets } = useQuery({
     queryKey: ['tickets', 'Open', 'count'],

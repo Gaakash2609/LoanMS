@@ -70,7 +70,7 @@ export const dsaApi = {
   delete: (id: number) => api.delete<ApiResponse<boolean>>(`/api/dsa/${id}`),
 
   // ── Onboarding / KYC documents ────────────────────────────────────────
-  // All three routes already existed on DsaController (same pattern as the
+  // These routes already existed on DsaController (same pattern as the
   // loan-document routes) but had no React caller at all — neither the DSA
   // nor the Partner page had any document UI.
   getDocuments: (id: number) =>
@@ -83,8 +83,6 @@ export const dsaApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  downloadDocument: (id: number, fileName: string) =>
-    api.get<Blob>(`/api/dsa/${id}/documents/${encodeURIComponent(fileName)}`, { responseType: 'blob' }),
 
   // GET /api/dsa/export — the server builds the CSV itself and returns it as
   // a file, so this asks for a blob rather than JSON. Legacy calls exactly

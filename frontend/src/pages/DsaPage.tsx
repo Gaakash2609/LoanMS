@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/axios'
-import type { ApiResponse } from '@/types'
+import type { ApiResponse, UserRole } from '@/types'
+import { DSA_FULL_DETAIL_ROLES } from '@/routes/pageAccess'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -14,6 +15,7 @@ import DsaMappingOverviewModal from '@/components/shared/DsaMappingOverviewModal
 import DsaAppsModal from '@/components/shared/DsaAppsModal'
 import { useAuthStore } from '@/store/authStore'
 import { useToast } from '@/store/toastStore'
+import { downloadBlob } from '@/utils/reportExport'
 
 const PAGE_SIZE = 20
 const OFFICE_ADDR_TYPES = [
@@ -48,7 +50,9 @@ export default function DsaPage() {
   // same allow-list Vanilla's dsaCanCreate()/dsaCanEdit() enforce client-side
   // (efin-app.js:30550), gated here so the Add/Edit/Toggle controls aren't
   // shown to a role the backend would 403 anyway.
-  const canManage = ['Admin', 'Sales', 'ProductTeam'].includes(user?.role ?? '')
+  // Master prompt Part 6 — other roles receive only the lookup directory.
+  const fullDetail = DSA_FULL_DETAIL_ROLES.includes(user?.role as UserRole)
+  const canManage = fullDetail && ['Admin', 'Sales', 'ProductTeam'].includes(user?.role ?? '')
 
   const { data: all, isLoading, error, refetch } = useQuery({
     queryKey: ['dsa'],
@@ -145,11 +149,7 @@ export default function DsaPage() {
     mutationFn: async () => {
       const res = await dsaApi.exportCsv()
       const name = filenameFromDisposition(res.headers?.['content-disposition'], 'dsa_partners_export.csv')
-      const url = URL.createObjectURL(res.data)
-      const a = document.createElement('a')
-      a.href = url; a.download = name
-      document.body.appendChild(a); a.click(); a.remove()
-      URL.revokeObjectURL(url)
+      downloadBlob(res.data, name, res.data.type)
     },
     onError: (err: unknown) => {
       const d = (err as { response?: { data?: { message?: string } } })?.response?.data
@@ -177,7 +177,7 @@ export default function DsaPage() {
 
   const mappedPartnersFor = (dsaId: number) => partnerList.filter(p => p.mappedDsaId === dsaId)
 
-  const columns: Column<DsaPartner>[] = [
+  const allColumns: Column<DsaPartner>[] = [
     { key: 'name', label: 'DSA Name', render: d => (
       <div><p className="font-medium">{d.name}</p><p className="text-xs text-gray-500 font-mono">{d.code}</p></div>
     )},
@@ -222,6 +222,8 @@ export default function DsaPage() {
     )},
   ]
 
+  const columns = fullDetail ? allColumns : allColumns.filter(c => c.key === 'name' || c.key === 'apps')
+
   // Stats strip — Total / Active / Inactive / Mapped, matching Vanilla's
   // dsaStatsRefresh (efin-app.js:30616): "Mapped" counts every Partner
   // record that has a mappedDsaId set, across all DSAs (not per-row).
@@ -233,11 +235,13 @@ export default function DsaPage() {
       <PageHeader title="DSA Management" subtitle={`${dsaList.length} DSAs`}
         action={
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="secondary"
-              loading={exportCsv.isPending} disabled={exportCsv.isPending}
-              onClick={() => exportCsv.mutate()}>
-              <Download size={14} className="mr-1" />Export CSV
-            </Button>
+            {fullDetail && (
+              <Button size="sm" variant="secondary"
+                loading={exportCsv.isPending} disabled={exportCsv.isPending}
+                onClick={() => exportCsv.mutate()}>
+                <Download size={14} className="mr-1" />Export CSV
+              </Button>
+            )}
             {canManage && (
               <Button size="sm" onClick={startAdd}><Plus size={14} className="mr-1" />Add DSA</Button>
             )}
@@ -251,13 +255,20 @@ export default function DsaPage() {
           { label: 'Active', value: activeCount, color: 'text-green-600' },
           { label: 'Inactive', value: dsaList.length - activeCount, color: 'text-red-600' },
           { label: 'Mapped Partners', value: mappedCount, color: 'text-purple-600' },
-        ].map(s => (
+        ].filter(s => fullDetail || s.label === 'Total DSAs').map(s => (
           <Card key={s.label} className="py-4">
             <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
             <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
           </Card>
         ))}
       </div>
+
+      {!fullDetail && (
+        <p className="mb-4 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+          Directory view — PAN, contact details and KYC documents are shown only to Chief Administrator,
+          Product &amp; Risk Officer, Business Development Manager and Deputy Sales Manager.
+        </p>
+      )}
 
       {showForm && canManage && (
         <Card className="mb-5 p-5">
@@ -350,12 +361,14 @@ export default function DsaPage() {
           <input value={search} onChange={e => { setSearch(e.target.value); setPage(1) }}
             placeholder="Search DSAs…"
             className="flex-1 max-w-xs border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-efin-blue" />
-          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as 'all'); setPage(1) }}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
+          {fullDetail && (
+            <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as 'all'); setPage(1) }}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          )}
         </div>
 
         <DataTable columns={columns} data={pageItems} isLoading={isLoading}

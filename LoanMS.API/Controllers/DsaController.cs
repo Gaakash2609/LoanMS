@@ -45,13 +45,25 @@ public class DsaController : BaseController
     /// brought in a lead. Mirrors the existing GET /api/users/lookup and /api/locations/lookup
     /// pattern used elsewhere in the wizard.</summary>
     [HttpGet("lookup")]
-    public async Task<IActionResult> GetLookup()
-    {
-        var result = await _db.DsaPartners.Where(d => d.IsActive).OrderBy(d => d.Name)
-            .Select(d => new { d.Id, d.Name, d.Code, PartnerType = d.PartnerType.ToString() })
+    public async Task<IActionResult> GetLookup() =>
+        Ok(ApiResponseDto<object>.Ok(await LookupRowsAsync(_db.DsaPartners)));
+
+    /// <summary>The directory fields every role may see: active records, id/name/code/type.</summary>
+    private sealed record DsaLookupRow(int Id, string Name, string Code, string PartnerType);
+
+    private static Task<List<DsaLookupRow>> LookupRowsAsync(IQueryable<DsaPartner> query) =>
+        query.Where(d => d.IsActive).OrderBy(d => d.Name)
+            .Select(d => new DsaLookupRow(d.Id, d.Name, d.Code, d.PartnerType.ToString()))
             .ToListAsync();
-        return Ok(ApiResponseDto<object>.Ok(result));
-    }
+
+    // Master prompt Part 6 — PAN, email, phone, office address and KYC files
+    // are for the roles that work with DSAs/Partners (Manager, TeamLeader) or
+    // configure them (Admin, ProductTeam); a DSA/Partner login sees its own
+    // record(s) in full. Every other role that may open the directory gets
+    // only the lookup fields above.
+    private static readonly string[] FullDetailRoles = { "Admin", "ProductTeam", "Manager", "TeamLeader", "Dsa", "Partner" };
+
+    private bool SeesFullDetail => FullDetailRoles.Contains(CurrentUserRole ?? "", StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Partners/DSAs this caller may see — the one rule shared by the list and
@@ -61,23 +73,20 @@ public class DsaController : BaseController
     /// </summary>
     private async Task<IQueryable<DsaPartner>?> ScopedPartnersAsync()
     {
-        var dsaOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "dsa-mgmt");
-        var partnerOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "partner-mgmt");
-        if (!dsaOk && !partnerOk) return null;
-
         var query = _db.DsaPartners.AsQueryable();
 
+        // Their own record(s) only — no management-menu permission needed
+        // (the Payout page's DSA-mapping check reads this for a Partner).
         if (string.Equals(CurrentUserRole, "Partner", StringComparison.OrdinalIgnoreCase))
-        {
-            query = query.Where(d => d.LinkedUserId == CurrentUserId);
-        }
-        else if (string.Equals(CurrentUserRole, "Dsa", StringComparison.OrdinalIgnoreCase))
-        {
-            query = query.Where(d =>
+            return query.Where(d => d.LinkedUserId == CurrentUserId);
+        if (string.Equals(CurrentUserRole, "Dsa", StringComparison.OrdinalIgnoreCase))
+            return query.Where(d =>
                 d.LinkedUserId == CurrentUserId ||
                 (d.MappedDsa != null && d.MappedDsa.LinkedUserId == CurrentUserId));
-        }
-        return query;
+
+        var dsaOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "dsa-mgmt");
+        var partnerOk = await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "partner-mgmt");
+        return dsaOk || partnerOk ? query : null;
     }
 
     /// <summary>
@@ -102,6 +111,7 @@ public class DsaController : BaseController
         // permission is on for this role, not both.
         var query = await ScopedPartnersAsync();
         if (query == null) return Forbid();
+        if (!SeesFullDetail) return Ok(ApiResponseDto<object>.Ok(await LookupRowsAsync(query)));
 
         var dsa = await query
             .Include(d => d.MappedSalesUser)
@@ -130,26 +140,25 @@ public class DsaController : BaseController
     }
 
     /// <summary>
-    /// 🟡 DSA/Partner Export (item #11) — same role-based visibility scoping
-    /// as GetAll above (Partner sees only their own record, Dsa sees own +
-    /// linked partners, everyone else sees all), reused verbatim rather than
-    /// a second/looser rule, so export can never expose a record the same
-    /// caller couldn't already see in the list view.
+    /// 🟡 DSA/Partner Export (item #11) — exactly the list view's access:
+    /// the same menu gate and scope (ScopedPartnersAsync — it used to skip the
+    /// menu gate entirely) and the same field rule, so export can never
+    /// expose a record or a field the same caller couldn't already see.
     /// </summary>
     [HttpGet("export")]
     public async Task<IActionResult> Export()
     {
-        var query = _db.DsaPartners.AsQueryable();
+        var query = await ScopedPartnersAsync();
+        if (query == null) return Forbid();
 
-        if (string.Equals(CurrentUserRole, "Partner", StringComparison.OrdinalIgnoreCase))
+        if (!SeesFullDetail)
         {
-            query = query.Where(d => d.LinkedUserId == CurrentUserId);
-        }
-        else if (string.Equals(CurrentUserRole, "Dsa", StringComparison.OrdinalIgnoreCase))
-        {
-            query = query.Where(d =>
-                d.LinkedUserId == CurrentUserId ||
-                (d.MappedDsa != null && d.MappedDsa.LinkedUserId == CurrentUserId));
+            var directory = new System.Text.StringBuilder();
+            directory.AppendLine("Name,Code,Type");
+            foreach (var r in await LookupRowsAsync(query))
+                directory.AppendLine(string.Join(",", DsaCsvField(r.Name), DsaCsvField(r.Code), DsaCsvField(r.PartnerType)));
+            return File(System.Text.Encoding.UTF8.GetBytes(directory.ToString()), "text/csv",
+                $"dsa_partners_export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv");
         }
 
         var rows = await query
@@ -354,9 +363,10 @@ public class DsaController : BaseController
         if (fileName.Contains("..") || fileName.Contains('/') || fileName.Contains('\\'))
             return BadRequest(ApiResponseDto<object>.Fail("Invalid file reference."));
 
-        // Partner KYC files: same visibility as the partner list (was unchecked).
+        // Partner KYC files: same visibility as the partner list (was unchecked),
+        // and only for roles that see full details (Part 6).
         var scoped = await ScopedPartnersAsync();
-        if (scoped == null) return Forbid();
+        if (scoped == null || !SeesFullDetail) return Forbid();
         var dsa = await scoped.FirstOrDefaultAsync(d => d.Id == id);
         if (dsa == null) return NotFound(ApiResponseDto<object>.Fail("DSA/Partner not found."));
 
@@ -383,9 +393,10 @@ public class DsaController : BaseController
     [HttpGet("{id:int}/documents")]
     public async Task<IActionResult> GetDocuments(int id)
     {
-        // Partner KYC files: same visibility as the partner list (was unchecked).
+        // Partner KYC files: same visibility as the partner list (was unchecked),
+        // and only for roles that see full details (Part 6).
         var scoped = await ScopedPartnersAsync();
-        if (scoped == null) return Forbid();
+        if (scoped == null || !SeesFullDetail) return Forbid();
         var dsa = await scoped.FirstOrDefaultAsync(d => d.Id == id);
         if (dsa == null) return NotFound(ApiResponseDto<object>.Fail("DSA/Partner not found."));
 

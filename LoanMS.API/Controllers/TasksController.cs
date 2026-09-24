@@ -129,6 +129,11 @@ public class TasksController : BaseController
 
         var task = await _db.Tasks.FindAsync(id);
         if (task == null) return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+        // Same rule as the task list and Complete: outside Admin/Manager only
+        // your own (assigned or created) tasks — a task you cannot see.
+        if (CurrentUserRole != "Admin" && CurrentUserRole != "Manager"
+            && task.AssignedToUserId != CurrentUserId && task.CreatedByUserId != CurrentUserId)
+            return NotFound(ApiResponseDto<bool>.Fail("Not found."));
         task.IsDeleted = true; task.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<bool>.Ok(true, "Deleted."));

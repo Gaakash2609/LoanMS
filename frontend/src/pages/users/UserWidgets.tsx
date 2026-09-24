@@ -22,11 +22,12 @@ export function RolePill({ role }: { role: string }) {
 // menu button (efin-app.js:24931), not a strip of icon buttons. Only actions
 // this app's backend actually supports are shown: legacy's "Suspend" is a third
 // user state that LoanMS's UserDto (active/inactive only) does not have, so it
-// is intentionally omitted rather than shown as a no-op.
+// is intentionally omitted rather than shown as a no-op. A handler left out
+// hides its action (read-only viewers, Admin accounts for a non-Admin).
 export function UserActionsMenu({ isActive, onView, onEdit, onMap, onToggle, onReset, onDelete }: {
   isActive: boolean
-  onView: () => void; onEdit: () => void; onMap: () => void
-  onToggle: () => void; onReset: () => void; onDelete?: () => void
+  onView: () => void; onEdit?: () => void; onMap?: () => void
+  onToggle?: () => void; onReset?: () => void; onDelete?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -46,12 +47,14 @@ export function UserActionsMenu({ isActive, onView, onEdit, onMap, onToggle, onR
         <div className="absolute right-0 top-9 z-[var(--z-dropdown)] w-56 bg-white border border-gray-200 rounded-xl py-1.5"
           style={{ boxShadow: '0 12px 40px rgba(10,88,154,.14)' }}>
           <button className={item} onClick={() => { setOpen(false); onView() }}><Eye size={14} className="text-gray-500" /> View Details</button>
-          <button className={item} onClick={() => { setOpen(false); onEdit() }}><Pencil size={14} className="text-orange-500" /> Edit User</button>
-          <button className={item} onClick={() => { setOpen(false); onMap() }}><MapPin size={14} className="text-pink-500" /> Manage Locations &amp; Teams</button>
-          <button className={item} style={{ color: 'var(--warn)' }} onClick={() => { setOpen(false); onToggle() }}>
-            {isActive ? <UserX size={14} /> : <UserCheck size={14} />} {isActive ? 'Deactivate' : 'Activate'}
-          </button>
-          <button className={item} onClick={() => { setOpen(false); onReset() }}><KeyRound size={14} className="text-amber-500" /> Reset Password</button>
+          {onEdit && <button className={item} onClick={() => { setOpen(false); onEdit() }}><Pencil size={14} className="text-orange-500" /> Edit User</button>}
+          {onMap && <button className={item} onClick={() => { setOpen(false); onMap() }}><MapPin size={14} className="text-pink-500" /> Manage Locations &amp; Teams</button>}
+          {onToggle && (
+            <button className={item} style={{ color: 'var(--warn)' }} onClick={() => { setOpen(false); onToggle() }}>
+              {isActive ? <UserX size={14} /> : <UserCheck size={14} />} {isActive ? 'Deactivate' : 'Activate'}
+            </button>
+          )}
+          {onReset && <button className={item} onClick={() => { setOpen(false); onReset() }}><KeyRound size={14} className="text-amber-500" /> Reset Password</button>}
           {onDelete && (
             <button className={item} style={{ color: 'var(--danger)' }} onClick={() => { setOpen(false); onDelete() }}>
               <Trash2 size={14} /> Delete User

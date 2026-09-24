@@ -3,6 +3,7 @@ import { X, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import PerfiosUpload from '@/components/shared/PerfiosUpload'
 import type { PerfiosUploadResult } from '@/hooks/usePerfiosUpload'
+import { formatCurrency as fmtINR } from '@/utils/format'
 
 // Perfios Banking System v9.0 — Bank Statement Analysis modal.
 // Faithful React shell of legacy's pfv9 popup (perfios/index.html): the same
@@ -11,7 +12,6 @@ import type { PerfiosUploadResult } from '@/hooks/usePerfiosUpload'
 // usePerfiosUpload). On completion it shows the analysis summary + validation
 // checks and a Confirm Attachment button; the finished report + raw file are
 // handed back so the caller attaches the document and persists the report.
-const fmtINR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 
 const STEPS = ['Upload PDF', 'Parse & Validate', 'Detect Salary', 'Run Checks', 'Complete']
 

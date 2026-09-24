@@ -390,7 +390,11 @@ public class ReportsController : BaseController
     [HttpGet("summary")]
     public async Task<IActionResult> Summary([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? scope, [FromQuery] int? userId, [FromQuery] int? teamId, [FromQuery] LoanMS.Domain.Enums.LoanStatus? status)
     {
-        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "reports"))
+        // scope=mine is the caller's own figures (Profile page, every role) —
+        // narrowed to loans they created or are assigned below — so it does not
+        // need the Reports menu permission; every other scope does.
+        var ownFiguresOnly = string.Equals(scope, "mine", StringComparison.OrdinalIgnoreCase);
+        if (!ownFiguresOnly && !await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "reports"))
             return Forbid();
 
         var now   = DateTime.UtcNow;

@@ -61,16 +61,4 @@ public class JwtService : IJwtService
         rng.GetBytes(bytes);
         return Convert.ToBase64String(bytes);
     }
-
-    public int? GetUserIdFromToken(string token)
-    {
-        try
-        {
-            var handler = new JwtSecurityTokenHandler();
-            var jwt = handler.ReadJwtToken(token);
-            var claim = jwt.Claims.FirstOrDefault(c => c.Type == "userId");
-            return claim != null ? int.Parse(claim.Value) : null;
-        }
-        catch { return null; }
-    }
 }

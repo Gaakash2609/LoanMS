@@ -20,4 +20,7 @@ public interface IRolePermissionService
     /// IsAllowedAsync).
     /// </summary>
     Task<HashSet<string>> GetDeniedPermissionsAsync(string? backendRole, IEnumerable<string> permissionKeys);
+
+    /// <summary>The caller's own role flags + menu visibility from the saved matrices (never other roles').</summary>
+    Task<OwnPermissions> GetOwnPermissionsAsync(string? backendRole);
 }

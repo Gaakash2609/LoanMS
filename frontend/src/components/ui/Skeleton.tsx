@@ -22,12 +22,3 @@ export function SkeletonText({ className }: { lines?: number; className?: string
 export function TableSkeleton(_props: { rows?: number; columns?: number }) {
   return <LoadingSpinner size="md" />
 }
-
-/** Stat-card row placeholder → single loanms badge (`count` kept for API compat). */
-export function CardSkeleton({ className }: { count?: number; className?: string }) {
-  return (
-    <div className={className} style={{ gridColumn: '1 / -1' }}>
-      <LoadingSpinner size="sm" />
-    </div>
-  )
-}

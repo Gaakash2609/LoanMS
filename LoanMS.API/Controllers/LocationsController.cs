@@ -41,10 +41,23 @@ public class LocationsController : BaseController
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "locations-mgmt"))
-            return Forbid();
+        // The Locations page, the team pages and the Users page all read this
+        // list, so any of those menus opens it (master prompt Part 5).
+        var allowed = false;
+        foreach (var menuId in new[] { "locations-mgmt", "team-overview", "sales-teams", "login-teams", "users-mgmt" })
+            if (await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, menuId)) { allowed = true; break; }
+        if (!allowed) return Forbid();
 
-        var locs = await _db.Locations.OrderBy(l => l.Name)
+        // Admin/ProductTeam manage every Location and Manager keeps its
+        // existing full list; every other role sees only its own Locations
+        // (with only those Locations' teams and users).
+        var locQuery = _db.Locations.AsQueryable();
+        if (!LoanMS.API.Services.OrgScope.IsOrgWide(CurrentUserRole) && !LoanMS.API.Services.OrgScope.Is(CurrentUserRole, "Manager"))
+        {
+            var myLocationIds = LoanMS.API.Services.OrgScope.LocationIdsOf(_db, CurrentUserId);
+            locQuery = locQuery.Where(l => myLocationIds.Contains(l.Id));
+        }
+        var locs = await locQuery.OrderBy(l => l.Name)
             .Select(l => new { l.Id, l.Name, l.City, l.State, l.PinCode, l.IsActive, l.Code })
             .ToListAsync();
 

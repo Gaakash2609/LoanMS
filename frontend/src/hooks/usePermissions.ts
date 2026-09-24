@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { permissionsApi, type RolePermissionsMap, type MenuVisibilityMap } from '@/api/permissionsApi'
+import { dsaApi, type DsaPartner } from '@/api/dsaApi'
 import {
   BACKEND_TO_ROLE_KEY, DEFAULT_ROLES, NAV_PERM_KEY_BY_MENU_ID,
   type RoleKey, type RolePermissionFlags,
@@ -39,6 +40,54 @@ export function canAccessMenuItem(
     return menuVisibility[menuId].includes(roleKey)
   }
   return undefined
+}
+
+// Sidebar visibility of one nav item. The static `roles` list is a hard
+// ceiling (it mirrors the route guard); inside it the dynamic canNav*/menu
+// visibility answer can only hide an item, never reveal one the route refuses.
+export function isNavItemVisible(
+  roles: readonly UserRole[] | undefined,
+  menuId: string | string[] | undefined,
+  backendRole: UserRole | undefined,
+  rolePermissions: RolePermissionsMap | undefined,
+  menuVisibility: MenuVisibilityMap | undefined,
+): boolean {
+  const staticAllowed = !roles || (!!backendRole && roles.includes(backendRole))
+  if (!menuId) return staticAllowed
+  const menuIds = Array.isArray(menuId) ? menuId : [menuId]
+  const dynamicResults = menuIds.map(id => canAccessMenuItem(id, backendRole, rolePermissions, menuVisibility))
+  if (dynamicResults.every(r => r === undefined)) return staticAllowed
+  return staticAllowed && dynamicResults.some(r => r === true)
+}
+
+// Vanilla hides Payout from a Partner who is mapped to a DSA — that Partner's
+// payout is tracked by the mapped DSA user (efin-app.js :1349-1353, and the
+// showPage guard at :1839). `undefined` while the Partner's own record is
+// still loading; always false for every other role.
+export function isPartnerMappedToDsa(
+  backendRole: UserRole | undefined,
+  userId: number | undefined,
+  partners: DsaPartner[] | undefined,
+): boolean | undefined {
+  if (backendRole !== 'Partner') return false
+  if (!partners || userId == null) return undefined
+  return partners.some(p => p.partnerType === 'Partner' && p.linkedUserId === userId && p.mappedDsaId != null)
+}
+
+export function usePartnerMappedToDsa(): boolean | undefined {
+  const user = useAuthStore(s => s.user)
+  const isPartner = user?.role === 'Partner'
+  // GET /api/dsa returns a Partner login only its own record (DsaController).
+  const { data, isError } = useQuery({
+    queryKey: ['dsa', 'partner-mapping'],
+    queryFn: () => dsaApi.getAll().then(r => r.data.data ?? []),
+    enabled: isPartner,
+    staleTime: 60_000,
+  })
+  // A failed lookup must not leave Payout on a spinner — PayoutController
+  // still refuses a DSA-mapped Partner server-side.
+  if (isError) return false
+  return isPartnerMappedToDsa(user?.role, user?.id, data)
 }
 
 /**
@@ -109,41 +158,9 @@ export function useCurrentUserDept(): string {
   return DEFAULT_ROLES[roleKey]?.dept || 'Admin'
 }
 
-export function useHasRole(role: UserRole): boolean {
-  return useCurrentRole() === role
-}
-
 export function useHasAnyRole(roles: readonly UserRole[]): boolean {
   const current = useCurrentRole()
   return !!current && roles.includes(current)
-}
-
-/** True if the role is granted ANY of the given permission keys. */
-export function useHasAnyPermission(permKeys: (keyof RolePermissionFlags)[], fallback = true): boolean {
-  const user = useAuthStore(s => s.user)
-  const { data: rolePermissions } = useRolePermissionsQuery()
-  const roleKey = user?.role ? BACKEND_TO_ROLE_KEY[user.role as UserRole] : undefined
-  if (!roleKey) return fallback
-  if (roleKey === 'admin') return true
-  if (!rolePermissions) return fallback
-  return permKeys.some(k => {
-    const v = rolePermissions[roleKey]?.[k]
-    return typeof v === 'boolean' ? v : fallback
-  })
-}
-
-/** True only if the role is granted ALL of the given permission keys. */
-export function useHasAllPermissions(permKeys: (keyof RolePermissionFlags)[], fallback = true): boolean {
-  const user = useAuthStore(s => s.user)
-  const { data: rolePermissions } = useRolePermissionsQuery()
-  const roleKey = user?.role ? BACKEND_TO_ROLE_KEY[user.role as UserRole] : undefined
-  if (!roleKey) return fallback
-  if (roleKey === 'admin') return true
-  if (!rolePermissions) return fallback
-  return permKeys.every(k => {
-    const v = rolePermissions[roleKey]?.[k]
-    return typeof v === 'boolean' ? v : fallback
-  })
 }
 
 // The processing roles the backend role-gates the document verify/reject

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { roleTitle } from '@/pages/users/userConstants'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { UserCog, Save } from 'lucide-react'
 import { Card, CardHeader } from '@/components/ui/Card'
@@ -6,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { loansApi } from '@/api/loansApi'
 import { usersApi } from '@/api/usersApi'
 import { teamsApi } from '@/api/teamsApi'
+import { wizardApi } from '@/api/wizardApi'
 import { useHasAnyRole } from '@/hooks/usePermissions'
 import { buildAssignmentPayload, hasAssignmentChange, type AssignmentSelection } from '@/utils/assignment'
 import type { Loan, UserRole } from '@/types'
@@ -46,8 +48,8 @@ export default function LoanAssignmentCard({ loan }: { loan: Loan }) {
     queryFn: () => teamsApi.getAll({ type: 'Sales' }).then(r => r.data.data ?? []),
   })
   const { data: locations } = useQuery({
-    queryKey: ['locationOptions'],
-    queryFn: () => usersApi.getAllLocations().then(r => r.data.data ?? []),
+    queryKey: ['wizard-locations'],
+    queryFn: () => wizardApi.getLocations().then(r => r.data.data ?? []),
   })
 
   const currentAssignedId = loan.assignedTo?.id ?? null
@@ -148,14 +150,14 @@ export default function LoanAssignmentCard({ loan }: { loan: Loan }) {
               <label className="text-xs font-medium text-gray-600 block mb-1">Assign To</label>
               <select value={assignedSel} onChange={e => setAssignedSel(e.target.value)} className={inputCls}>
                 <option value={NONE}>— Unassigned —</option>
-                {options.map(u => <option key={u.id} value={u.id}>{u.fullName} · {u.role}</option>)}
+                {options.map(u => <option key={u.id} value={u.id}>{u.fullName} · {roleTitle(u.role)}</option>)}
               </select>
             </div>
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">Login User</label>
               <select value={loginSel} onChange={e => setLoginSel(e.target.value)} className={inputCls}>
                 <option value={NONE}>— Unassigned —</option>
-                {options.map(u => <option key={u.id} value={u.id}>{u.fullName} · {u.role}</option>)}
+                {options.map(u => <option key={u.id} value={u.id}>{u.fullName} · {roleTitle(u.role)}</option>)}
               </select>
             </div>
             <div>

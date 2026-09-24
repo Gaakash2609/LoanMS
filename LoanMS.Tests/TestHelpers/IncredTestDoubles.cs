@@ -54,11 +54,4 @@ public class FakeCacheService : ICacheService
         _store.Remove(key);
         return Task.CompletedTask;
     }
-
-    public Task RemoveByPrefixAsync(string prefix)
-    {
-        foreach (var k in _store.Keys.Where(k => k.StartsWith(prefix)).ToList())
-            _store.Remove(k);
-        return Task.CompletedTask;
-    }
 }

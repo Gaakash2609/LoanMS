@@ -1,14 +1,11 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { PageLoader } from '@/components/ui/LoadingSpinner'
-import type { UserRole } from '@/types'
 
-interface Props {
-  allowedRoles?: UserRole[]
-}
-
-export default function ProtectedRoute({ allowedRoles }: Props) {
-  const { isAuthenticated, user, hasHydrated } = useAuthStore()
+// Session gate only. Which pages a signed-in role may open is RouteGuard's job
+// (routes/pageAccess.ts PAGE_GUARDS — the same rules as the sidebar).
+export default function ProtectedRoute() {
+  const { isAuthenticated, hasHydrated } = useAuthStore()
   const location = useLocation()
 
   // On a hard refresh, the persisted session is read back from localStorage
@@ -28,10 +25,6 @@ export default function ProtectedRoute({ allowedRoles }: Props) {
   if (!isAuthenticated) {
     const from = `${location.pathname}${location.search}`
     return <Navigate to="/login" replace state={{ from }} />
-  }
-
-  if (allowedRoles && user && !allowedRoles.includes(user.role as UserRole)) {
-    return <Navigate to="/dashboard" replace />
   }
 
   return <Outlet />

@@ -8,26 +8,24 @@ namespace LoanMS.Application.Services;
 public class LoanService : ILoanService
 {
     private readonly IUnitOfWork   _uow;
-    private readonly ICacheService _cache;
     private readonly IEmailService _emailService;
     private readonly IEmailTemplateProvider _emailTemplates;
     // Phase 7 (locked rule): authoritative trusted-income resolver. Optional so
     // existing constructions/tests still compile; DI injects the real service.
     private readonly IIncomeVerificationService? _incomeVerification;
 
-    public LoanService(IUnitOfWork uow, ICacheService cache, IEmailService emailService,
+    public LoanService(IUnitOfWork uow, IEmailService emailService,
         IEmailTemplateProvider emailTemplates, IIncomeVerificationService? incomeVerification = null)
     {
         _uow   = uow;
-        _cache = cache;
         _emailService = emailService;
         _emailTemplates = emailTemplates;
         _incomeVerification = incomeVerification;
     }
 
-    // Salaried = NOT self-employed. Mirrors frontend foir.ts isSelfEmployed
-    // (/SELF|SENP|BUSIN|PROF/) so the salaried/self-employed split is identical
-    // on both sides. Self-employed income is untouched (keeps Perfios-ABB FOIR).
+    // Salaried = NOT self-employed. Same /SELF|SENP|BUSIN|PROF/ classification as
+    // ObligationFoirEngine.IsSelfEmployed (originally the frontend foir.ts
+    // isSelfEmployed). Self-employed income is untouched (keeps Perfios-ABB FOIR).
     private static bool IsSalaried(string? employmentType)
     {
         var t = (employmentType ?? string.Empty).ToUpperInvariant();
@@ -93,7 +91,7 @@ public class LoanService : ILoanService
         if (loginUserError != null) return ApiResponseDto<LoanDto>.Fail(loginUserError);
 
         var loanNumber = await _uow.Loans.GenerateLoanNumberAsync();
-        var emi        = CalculateEmi(request.RequestedAmount, request.InterestRate, request.TenureMonths);
+        var emi        = EmiCalculator.ReducingBalance(request.RequestedAmount, request.InterestRate, request.TenureMonths);
 
         var loan = new Loan
         {
@@ -173,7 +171,7 @@ public class LoanService : ILoanService
         loan.RequestedAmount  = request.RequestedAmount;
         loan.InterestRate     = request.InterestRate;
         loan.TenureMonths     = request.TenureMonths;
-        loan.MonthlyEmi       = CalculateEmi(request.RequestedAmount, request.InterestRate, request.TenureMonths);
+        loan.MonthlyEmi       = EmiCalculator.ReducingBalance(request.RequestedAmount, request.InterestRate, request.TenureMonths);
         loan.Purpose          = request.Purpose;
         loan.Remarks          = request.Remarks;
         loan.AssignedToUserId = request.AssignedToUserId;
@@ -272,7 +270,7 @@ public class LoanService : ILoanService
         {
             loan.ApprovedAt     = DateTime.UtcNow;
             loan.ApprovedAmount = request.ApprovedAmount ?? loan.RequestedAmount;
-            loan.MonthlyEmi     = CalculateEmi(loan.ApprovedAmount.Value, loan.InterestRate, loan.TenureMonths);
+            loan.MonthlyEmi     = EmiCalculator.ReducingBalance(loan.ApprovedAmount.Value, loan.InterestRate, loan.TenureMonths);
         }
         else if (request.NewStatus == LoanStatus.Disbursed)
         {
@@ -600,7 +598,7 @@ public class LoanService : ILoanService
         {
             loan.ApprovedAt ??= DateTime.UtcNow;
             loan.ApprovedAmount ??= loan.RequestedAmount;
-            loan.MonthlyEmi ??= CalculateEmi(loan.ApprovedAmount.Value, loan.InterestRate, loan.TenureMonths);
+            loan.MonthlyEmi ??= EmiCalculator.ReducingBalance(loan.ApprovedAmount.Value, loan.InterestRate, loan.TenureMonths);
         }
         await _uow.Loans.UpdateAsync(loan);
         await _uow.LoanStatusHistories.AddAsync(new LoanStatusHistory
@@ -963,6 +961,14 @@ public class LoanService : ILoanService
         if (!isInternal && loan.CreatedByUserId != currentUserId)
             return ApiResponseDto<bool>.Fail("Loan not found.");
 
+        // Manager may delete another user's draft only inside its own
+        // visibility scope (Location AND Team) — the same rule that decides
+        // whether it can see the loan at all. Admin stays unscoped.
+        if (isInternal && loan.CreatedByUserId != currentUserId &&
+            !string.Equals(currentUserRole, "Admin", StringComparison.OrdinalIgnoreCase) &&
+            !await _uow.Loans.HasAccessAsync(id, currentUserId, currentUserRole))
+            return ApiResponseDto<bool>.Fail("Loan not found.");
+
         await _uow.Loans.DeleteAsync(id);
         await _uow.SaveChangesAsync();
         // No list cache to invalidate — see CreateAsync comment above.
@@ -1008,15 +1014,6 @@ public class LoanService : ILoanService
         if (assignee == null) return "Assigned user not found.";
         if (!assignee.IsActive) return "Assigned user is inactive.";
         return null;
-    }
-
-    private static decimal CalculateEmi(decimal principal, decimal ratePercent, int months)
-    {
-        if (ratePercent == 0) return Math.Round(principal / months, 2);
-        var r   = ratePercent / 12 / 100;
-        var emi = principal * r * (decimal)Math.Pow((double)(1 + r), months)
-                  / ((decimal)Math.Pow((double)(1 + r), months) - 1);
-        return Math.Round(emi, 2);
     }
 
     private static List<LoanStatus> GetAllowedTransitions(LoanStatus current) => current switch

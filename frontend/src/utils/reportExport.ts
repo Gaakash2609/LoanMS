@@ -1,6 +1,7 @@
 import type { ReportData } from '@/api/reportsApi'
 import type { LoanListItem } from '@/types'
 import { formatDate } from './format'
+import { csvEscape } from './csv'
 
 // Legacy's exportReportCSV/Excel/PDF per-application columns: ID, Name,
 // Loan Type, Amount, Bank, Status, Sales Person, Team, Date, City, State,
@@ -29,10 +30,6 @@ const LOAN_ROW_HEADER = ['Application ID', 'Applicant Name', 'Loan Type', 'Amoun
 // PDF is also legacy's exact technique — a print-styled HTML document opened
 // in a new window with window.print() called automatically, letting the
 // browser's own "Save as PDF" produce the file — not a generated PDF binary.
-
-function csvEscape(v: string | number) {
-  return '"' + String(v ?? '').replace(/"/g, '""') + '"'
-}
 
 function csvSection(title: string, header: string[], rows: (string | number)[][]) {
   return [title, header.map(csvEscape).join(','), ...rows.map(r => r.map(csvEscape).join(','))].join('\n')
@@ -135,7 +132,9 @@ ${loans.length ? `<h3>Applications</h3>${htmlTable(LOAN_ROW_HEADER, loanRows(loa
 </body></html>`
 }
 
-export function downloadBlob(content: string, filename: string, mime: string) {
+// The one browser-download helper for every export (reports, loan/admin CSVs,
+// DSA and Expert Export files).
+export function downloadBlob(content: BlobPart, filename: string, mime: string) {
   const blob = new Blob([content], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

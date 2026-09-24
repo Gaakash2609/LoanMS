@@ -51,29 +51,6 @@ export const assignmentAuditApi = {
   // Ordered newest-first by AssignedAt server-side.
   getAll: (params?: AssignmentAuditQuery) =>
     api.get<ApiResponse<AssignmentAuditLog[]>>('/api/assignment-audit', { params }),
-
-  // Deliberately unused for now. An entry can only be recorded when an
-  // assignment actually happens, and React has no assignment or reassignment
-  // UI yet — PATCH /api/loans/{id}/assignment has no caller either. Wiring a
-  // write here without that surface would record events that never occurred.
-  // Kept so the write path is one line away once that screen exists.
-  createEntry: (body: {
-    loanApplicationId?: number | null
-    loanFrontendId: string
-    location?: string | null
-    loanType?: string | null
-    salesPerson?: string | null
-    salesTeam?: string | null
-    assignedToUserId?: number | null
-    assignedToUserName?: string | null
-    assignedByName?: string | null
-    /** Server only trusts its own JWT for assignedByUserId, and only on 'manual'. */
-    method: 'auto' | 'manual' | 'unassigned'
-    tieBreak?: boolean
-    previousUserName?: string | null
-    reason?: string | null
-    candidates?: unknown[]
-  }) => api.post<ApiResponse<{ id: number }>>('/api/assignment-audit', body),
 }
 
 /** Parses CandidatesJson defensively — a malformed blob must not break the row. */

@@ -71,88 +71,6 @@ public class LoansController : BaseController
         return Ok(result);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // TEMPORARY DEBUG ENDPOINT — remove after the Tab Data Access masking
-    // issue is diagnosed. Not gated behind [Authorize(Roles="Admin")] on
-    // purpose: it must be hit by the SAME session/role that is seeing the
-    // bug (e.g. Sales), so it needs to run under that role's own token.
-    // Returns, in one response:
-    //   1. backendRole   — exactly what CurrentUserRole resolves to for
-    //                       this session (the JWT claim value)
-    //   2. roleKey       — the frontend-vocabulary key RolePermissionService
-    //                       maps backendRole to (duplicated here from
-    //                       RolePermissionService.RoleKeyMap — keep in sync;
-    //                       this whole block is deleted once done anyway)
-    //   3. rawSettingValue — the exact "efin_role_permissions" JSON string
-    //                       currently in AppSettings (UserId == null row),
-    //                       or null if no such row exists
-    //   4. roleObjectFoundInJson — whether rawSettingValue actually has a
-    //                       top-level property matching roleKey
-    //   5. deniedTabs    — the live output of GetDeniedPermissionsAsync for
-    //                       this role, for the same 4 keys GetById checks
-    // ═══════════════════════════════════════════════════════════════════
-    [HttpGet("{id:int}/debug-permissions")]
-    public async Task<IActionResult> DebugPermissions(int id)
-    {
-        var backendRole = CurrentUserRole;
-
-        // Exact copy of RolePermissionService.RoleKeyMap — DO NOT let this
-        // drift from that file while this debug endpoint is in use.
-        var roleKeyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Admin"] = "admin", ["Manager"] = "manager", ["Sales"] = "sales_executive",
-            ["Dsa"] = "dsa_user", ["Partner"] = "partner", ["LoginTeam"] = "login_team",
-            ["TeamLeader"] = "team_leader", ["Accounts"] = "accounts",
-            ["LocationHead"] = "location_head", ["OperationManager"] = "operation_manager",
-            ["ProductTeam"] = "product_team",
-        };
-        roleKeyMap.TryGetValue(backendRole ?? string.Empty, out var roleKey);
-
-        var setting = await _db.AppSettings
-            .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.Key == "efin_role_permissions" && s.UserId == null);
-
-        bool? roleObjectFoundInJson = null;
-        System.Text.Json.JsonElement? roleObjectRaw = null;
-        if (setting != null && !string.IsNullOrWhiteSpace(setting.Value) && roleKey != null)
-        {
-            try
-            {
-                using var doc = System.Text.Json.JsonDocument.Parse(setting.Value);
-                roleObjectFoundInJson = doc.RootElement.TryGetProperty(roleKey, out var roleObj);
-                if (roleObjectFoundInJson == true)
-                    roleObjectRaw = System.Text.Json.JsonDocument.Parse(roleObj.GetRawText()).RootElement;
-            }
-            catch (Exception ex)
-            {
-                roleObjectFoundInJson = false;
-                roleObjectRaw = null;
-                return Ok(new
-                {
-                    backendRole,
-                    roleKey,
-                    rawSettingValue = setting.Value,
-                    jsonParseError = ex.Message
-                });
-            }
-        }
-
-        var deniedTabs = await _rolePerm.GetDeniedPermissionsAsync(backendRole,
-            new[] { "canViewPersonal", "canViewAddress", "canViewEmployment", "canViewReferences" });
-
-        return Ok(new
-        {
-            backendRole,
-            roleKey,
-            settingRowExists = setting != null,
-            settingRowUserId = setting?.UserId,
-            rawSettingValue = setting?.Value,
-            roleObjectFoundInJson,
-            roleObjectRaw,
-            deniedTabs
-        });
-    }
-
     /// <summary>Create new loan application</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateLoanRequestDto request)
@@ -865,9 +783,7 @@ public class LoansController : BaseController
         if (amount <= 0 || rate <= 0 || tenure <= 0)
             return BadRequest(ApiResponseDto<object>.Fail("Invalid parameters."));
 
-        decimal r   = rate / 12 / 100;
-        decimal emi = amount * r * (decimal)Math.Pow((double)(1 + r), tenure)
-                      / ((decimal)Math.Pow((double)(1 + r), tenure) - 1);
+        decimal emi = LoanMS.Application.Services.EmiCalculator.ReducingBalance(amount, rate, tenure);
         decimal totalPayable  = Math.Round(emi, 2) * tenure;
         decimal totalInterest = totalPayable - amount;
 

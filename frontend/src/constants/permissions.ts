@@ -37,17 +37,17 @@ export const BACKEND_TO_ROLE_KEY: Record<UserRole, RoleKey> = {
 
 // efin-app.js:812-824 — used by the Menu Access Control role-column header.
 export const ROLE_DISPLAY: Record<RoleKey, { label: string; color: string; bg: string }> = {
-  admin:             { label: 'Admin',         color: '#7c3aed', bg: 'rgba(124,58,237,.1)' },
-  manager:           { label: 'Manager',       color: '#1a4fa3', bg: 'rgba(26,79,163,.1)' },
-  team_leader:       { label: 'Team Lead',     color: '#0369a1', bg: 'rgba(3,105,161,.1)' },
-  login_team:        { label: 'Login Team',    color: '#0f766e', bg: 'rgba(15,118,110,.1)' },
-  operation_manager: { label: 'Ops Manager',   color: '#0f766e', bg: 'rgba(15,118,110,.1)' },
-  location_head:     { label: 'Location Head', color: '#7c3aed', bg: 'rgba(124,58,237,.1)' },
-  sales_executive:   { label: 'Sales',         color: '#b45309', bg: 'rgba(180,83,9,.1)' },
-  dsa_user:          { label: 'DSA',           color: '#be185d', bg: 'rgba(190,24,93,.1)' },
-  partner:           { label: 'Partner',       color: '#be185d', bg: 'rgba(190,24,93,.1)' },
-  accounts:          { label: 'Accounts',      color: '#059669', bg: 'rgba(5,150,105,.1)' },
-  product_team:      { label: 'Product Team',  color: '#db2777', bg: 'rgba(236,72,153,.1)' },
+  admin:             { label: 'Chief Administrator', color: '#7c3aed', bg: 'rgba(124,58,237,.1)' },
+  manager:           { label: 'Business Development Manager', color: '#1a4fa3', bg: 'rgba(26,79,163,.1)' },
+  team_leader:       { label: 'Deputy Sales Manager', color: '#0369a1', bg: 'rgba(3,105,161,.1)' },
+  login_team:        { label: 'Credit Evaluation Officer', color: '#0f766e', bg: 'rgba(15,118,110,.1)' },
+  operation_manager: { label: 'Credit Evaluation Manager', color: '#0f766e', bg: 'rgba(15,118,110,.1)' },
+  location_head:     { label: 'Zonal Manager', color: '#7c3aed', bg: 'rgba(124,58,237,.1)' },
+  sales_executive:   { label: 'Business Development Executive', color: '#b45309', bg: 'rgba(180,83,9,.1)' },
+  dsa_user:          { label: 'Mass Channel Partner', color: '#be185d', bg: 'rgba(190,24,93,.1)' },
+  partner:           { label: 'Channel Partner', color: '#be185d', bg: 'rgba(190,24,93,.1)' },
+  accounts:          { label: 'Payout & Reconciliation Officer', color: '#059669', bg: 'rgba(5,150,105,.1)' },
+  product_team:      { label: 'Product & Risk Officer', color: '#db2777', bg: 'rgba(236,72,153,.1)' },
 }
 
 // The boolean permission flags every role carries. `canManagePayouts` and
@@ -107,7 +107,7 @@ export interface RoleRecord extends RolePermissionFlags {
 // efin-app.js:160-629, transcribed verbatim (values, not paraphrased).
 export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
   admin: {
-    label: 'Admin', key: 'group_location_manager / group_location_user',
+    label: 'Chief Administrator', key: 'group_location_manager / group_location_user',
     icon: '🔑', color: 'rgba(26,79,163,.12)', textColor: 'var(--accent)',
     badgeClass: 'role-badge-admin', dept: 'Admin',
     canCreateApp: true, canChangeStatus: true,
@@ -133,7 +133,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     canNavBanks: true, canNavIncred: true, canNavDSA: true, canNavPartner: true,
     canNavTeamOverview: true, canNavSalesTeams: true, canNavLoginTeams: true, canNavLocations: true, canNavUsers: true,
     canNavReports: true, canNavTickets: true,
-    desc: 'Location Head / Admin — the super-administrator role with unrestricted system access. Can manage the entire loan lifecycle across all locations, teams, and product lines, override policy rules, reassign work, and configure master data.',
+    desc: 'Chief Administrator — the super-administrator role with unrestricted system access. Can manage the entire loan lifecycle across all locations, teams, and product lines, override policy rules, reassign work, and configure master data.',
     scope: 'Location-wide or Enterprise-wide',
     teamSize: 'Senior leadership (typically 1–3 per location)',
     responsibilities: [
@@ -150,7 +150,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     ],
   },
   login_team: {
-    label: 'Login Team', key: 'group_login_team_user',
+    label: 'Credit Evaluation Officer', key: 'group_login_team_user',
     icon: '📋', color: 'rgba(227,30,37,.1)', textColor: 'var(--accent2)',
     badgeClass: 'role-badge-login', dept: 'Login Dep',
     canCreateApp: true, canChangeStatus: true,
@@ -176,7 +176,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     canNavBanks: false, canNavIncred: true, canNavDSA: false, canNavPartner: false,
     canNavTeamOverview: false, canNavSalesTeams: false, canNavLoginTeams: false, canNavLocations: false, canNavUsers: false,
     canNavReports: true, canNavTickets: true,
-    desc: 'Operations / Login Desk — front-line processing team responsible for receiving, logging and moving applications through verification, underwriting, and disbursement. Primary owner of daily case-flow.',
+    desc: 'Credit Evaluation Officer (Operations / Login Desk) — front-line processing team responsible for receiving, logging and moving applications through verification, underwriting, and disbursement. Primary owner of daily case-flow.',
     scope: 'Assigned Location(s)',
     teamSize: 'Medium team (typically 5–15 per location)',
     responsibilities: [
@@ -195,7 +195,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     ],
   },
   team_leader: {
-    label: 'Team Leader', key: 'group_team_leader_manager',
+    label: 'Deputy Sales Manager', key: 'group_team_leader_manager',
     icon: '👥', color: 'rgba(161,89,255,.12)', textColor: '#a159ff',
     badgeClass: 'role-badge-tl', dept: 'Team Dep',
     canCreateApp: false, canChangeStatus: true,
@@ -218,11 +218,18 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     canTabOverview: true, canTabPersonal: true, canTabAddress: true, canTabEmployment: true, canTabReferences: true,
     canTabDocuments: true, canTabLenderDetails: true, canTabTimeline: true, canTabTasks: true, canTabObligations: true, canTabReports: true,
     canNavOverview: true, canNavApplications: true, canNavRegisterNew: false, canNavCalculator: true, canNavTasks: true, canNavPayout: true,
-    canNavBanks: true, canNavIncred: true, canNavDSA: false, canNavPartner: false,
+    // canNavDSA/canNavPartner turned on (2026-09-24, business owner request):
+    // Team Leader's job includes following up DSA/Partner-sourced files, so
+    // they need read access to the DSA Management / Partner Management
+    // directory. Backend (DsaController.ScopedPartnersAsync) already allowed
+    // this — Manager/TeamLeader were never role-restricted there, only this
+    // nav flag was hiding the menu entry. No write rights are granted by
+    // this — Create/Update/Delete on DsaController stay Admin/Sales/ProductTeam-only.
+    canNavBanks: true, canNavIncred: true, canNavDSA: true, canNavPartner: true,
     canNavTeamOverview: true, canNavSalesTeams: false, canNavLoginTeams: false, canNavLocations: false, canNavUsers: false,
     canNavReports: true, canNavTickets: true,
-    desc: 'Operations Manager / Team Leader — supervises one or more Login Teams, approves deviations, ensures SLA compliance, and manages escalations. Bridges front-line operations with management.',
-    scope: 'Multiple teams within a Location',
+    desc: 'Deputy Sales Manager — supervises one or more Login Teams, approves deviations, ensures SLA compliance, and manages escalations. Bridges front-line operations with management.',
+    scope: 'Multiple teams within a Location, plus DSA/Partner files in own Location(s)',
     teamSize: 'Middle management (typically 1–2 per location)',
     responsibilities: [
       'Supervise case flow and SLA adherence across reporting teams',
@@ -230,6 +237,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
       'Change loan status, reject, hold, and approve disbursement',
       'Assign and reassign tasks across team members',
       'View all pipeline tabs including Bank Details and InCred (read-only)',
+      'Follow up DSA/Partner-sourced files in own Location(s) and coordinate with Login/Operations on progress',
       'Generate and review operational reports',
     ],
     restrictions: [
@@ -240,7 +248,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     ],
   },
   sales_executive: {
-    label: 'Sales Person', key: 'group_sales_executive_manager',
+    label: 'Business Development Executive', key: 'group_sales_executive_manager',
     icon: '💼', color: 'rgba(255,107,53,.12)', textColor: 'var(--accent3)',
     badgeClass: 'role-badge-sales', dept: 'Sales Dep',
     canCreateApp: true, canChangeStatus: false,
@@ -266,7 +274,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     canNavBanks: false, canNavIncred: false, canNavDSA: false, canNavPartner: false,
     canNavTeamOverview: false, canNavSalesTeams: false, canNavLoginTeams: false, canNavLocations: false, canNavUsers: false,
     canNavReports: false, canNavTickets: true,
-    desc: 'Sales Person — field / branch sales team that originates applications, collects applicant KYC and income documents, and hands off to Operations. Focused on customer acquisition, not processing.',
+    desc: 'Business Development Executive — field / branch sales team that originates applications, collects applicant KYC and income documents, and hands off to Operations. Focused on customer acquisition, not processing.',
     scope: 'Their own book of originated applications',
     teamSize: 'Large team (typically 20–100+ per region)',
     responsibilities: [
@@ -286,7 +294,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     ],
   },
   accounts: {
-    label: 'Accounts', key: 'group_accounts_user',
+    label: 'Payout & Reconciliation Officer', key: 'group_accounts_user',
     icon: '🧾', color: 'rgba(16,185,129,.12)', textColor: '#059669',
     badgeClass: 'role-badge-accounts', dept: 'Accounts Dep',
     canCreateApp: false, canChangeStatus: false,
@@ -313,7 +321,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     canNavBanks: false, canNavIncred: false, canNavDSA: false, canNavPartner: false,
     canNavTeamOverview: false, canNavSalesTeams: false, canNavLoginTeams: false, canNavLocations: false, canNavUsers: false,
     canNavReports: false, canNavTickets: true,
-    desc: 'Accounts / Finance team — post-disbursement back-office role that reconciles payouts, processes partner commission claims, and maintains financial records. Does not see loan processing details.',
+    desc: 'Payout & Reconciliation Officer (Accounts / Finance) — post-disbursement back-office role that reconciles payouts, processes partner commission claims, and maintains financial records. Does not see loan processing details.',
     scope: 'Finance function — cross-location payout visibility',
     teamSize: 'Small dedicated team (typically 3–8 across the organisation)',
     responsibilities: [
@@ -332,7 +340,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     ],
   },
   partner: {
-    label: 'Partner', key: 'group_sales_partner_user',
+    label: 'Channel Partner', key: 'group_sales_partner_user',
     icon: '🤝', color: 'rgba(138,150,180,.1)', textColor: '#8a96b4',
     badgeClass: 'role-badge-partner', dept: 'Partner Dep',
     canCreateApp: true, canChangeStatus: false,
@@ -358,7 +366,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     canNavBanks: false, canNavIncred: false, canNavDSA: false, canNavPartner: false,
     canNavTeamOverview: false, canNavSalesTeams: false, canNavLoginTeams: false, canNavLocations: false, canNavUsers: false,
     canNavReports: false, canNavTickets: true,
-    desc: 'DSA / Channel Partner — external agents or partner organisations who refer customers. View-only access limited to their own referred applications, with all sensitive data masked for compliance.',
+    desc: 'Channel Partner — external agents or partner organisations who refer customers. View-only access limited to their own referred applications, with all sensitive data masked for compliance.',
     scope: 'Only their own referred / sourced applications',
     teamSize: 'External network (DSAs, referral partners, channel agents)',
     responsibilities: [
@@ -378,7 +386,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     ],
   },
   location_head: {
-    label: 'Location Head', key: 'group_location_head_user',
+    label: 'Zonal Manager', key: 'group_location_head_user',
     icon: '🏢', color: 'rgba(16,185,129,.12)', textColor: '#059669',
     badgeClass: 'role-badge-admin', dept: 'Admin',
     canCreateApp: true, canChangeStatus: true,
@@ -413,10 +421,10 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
       'Cannot access or modify Policies & Roles configuration',
       'Scope limited to own location — cannot see other branches',
     ],
-    desc: 'Location Head — owns the full loan operations for a single branch. All pipeline actions available. Cannot configure system-wide Policies & Roles.',
+    desc: 'Zonal Manager — owns the full loan operations for a single branch. All pipeline actions available. Cannot configure system-wide Policies & Roles.',
   },
   manager: {
-    label: 'Manager', key: 'group_manager_user',
+    label: 'Business Development Manager', key: 'group_manager_user',
     icon: '👔', color: 'rgba(245,158,11,.12)', textColor: '#b45309',
     badgeClass: 'role-badge-tl', dept: 'Team Dep',
     canCreateApp: false, canChangeStatus: true,
@@ -435,16 +443,22 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     canTabOverview: true, canTabPersonal: true, canTabAddress: true, canTabEmployment: true, canTabReferences: true,
     canTabDocuments: true, canTabLenderDetails: true, canTabTimeline: true, canTabTasks: true, canTabObligations: true, canTabReports: true,
     canNavOverview: true, canNavApplications: true, canNavRegisterNew: false, canNavCalculator: true, canNavTasks: true, canNavPayout: true,
-    canNavBanks: true, canNavIncred: true, canNavDSA: false, canNavPartner: false,
+    // canNavDSA/canNavPartner turned on (2026-09-24, business owner request) —
+    // same reasoning as team_leader above: Manager needs read access to the
+    // DSA/Partner directory to follow up sourced files. Backend already
+    // allowed it (DsaController.ScopedPartnersAsync has no per-role block for
+    // Manager); write rights remain Admin/Sales/ProductTeam-only.
+    canNavBanks: true, canNavIncred: true, canNavDSA: true, canNavPartner: true,
     canNavTeamOverview: true, canNavSalesTeams: false, canNavLoginTeams: false, canNavLocations: false, canNavUsers: false,
     canNavReports: true, canNavTickets: true,
-    scope: 'Multi-team within a Location',
+    scope: 'Own mapped Location(s) OR own Sales Team — whichever matches (includes DSA/Partner files in own Location)',
     teamSize: 'Mid-level (1–3 per location)',
     responsibilities: [
       'Oversee multiple processing and sales teams',
       'Approve deviations, change status, reject and hold',
       'Assign tasks across reporting teams',
       'Review and manage pipeline SLAs and bottlenecks',
+      'Follow up DSA/Partner-sourced files in own Location(s) and coordinate disbursement/process with Operations',
       'Access all tabs read-write except document upload',
     ],
     restrictions: [
@@ -453,10 +467,10 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
       'Cannot add banks to master list',
       'No access to Policies & Roles or system configuration',
     ],
-    desc: 'Manager — oversees multiple teams, approves deviations and manages pipeline. Cannot create applications or upload documents.',
+    desc: 'Business Development Manager — oversees multiple teams, approves deviations and manages pipeline. Cannot create applications or upload documents.',
   },
   operation_manager: {
-    label: 'Operation Manager', key: 'group_operation_manager_user',
+    label: 'Credit Evaluation Manager', key: 'group_operation_manager_user',
     icon: '⚙️', color: 'rgba(79,70,229,.12)', textColor: '#4338ca',
     badgeClass: 'role-badge-tl', dept: 'Login Dep',
     canCreateApp: true, canChangeStatus: true,
@@ -492,10 +506,10 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
       'Cannot add banks to master eligibility list',
       'Cannot edit posted tracking entries',
     ],
-    desc: 'Operation Manager — senior ops lead who owns the Login Team workflow. Full pipeline access except deviation approvals.',
+    desc: 'Credit Evaluation Manager — senior ops lead who owns the Login Team workflow. Full pipeline access except deviation approvals.',
   },
   dsa_user: {
-    label: 'DSA User', key: 'group_dsa_user',
+    label: 'Mass Channel Partner', key: 'group_dsa_user',
     icon: '🤝', color: 'rgba(245,158,11,.1)', textColor: '#d97706',
     badgeClass: 'role-badge-sales', dept: 'Sales Exe. Dep',
     canCreateApp: true, canChangeStatus: false,
@@ -532,10 +546,10 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
       'Cannot change status, post tracking, or run checks',
       'Sees only own DSA-tagged applications',
     ],
-    desc: 'DSA User — external DSA agent who submits and tracks their own referred customers. Masked sensitive data, view-only pipeline.',
+    desc: 'Mass Channel Partner — external DSA agent who submits and tracks their own referred customers. Masked sensitive data, view-only pipeline.',
   },
   product_team: {
-    label: 'Product Team', key: 'group_product_team_user',
+    label: 'Product & Risk Officer', key: 'group_product_team_user',
     icon: '🛠️', color: 'rgba(236,72,153,.12)', textColor: '#db2777',
     badgeClass: 'role-badge-product', dept: 'Product Team',
     canCreateApp: false, canChangeStatus: false,
@@ -561,7 +575,7 @@ export const DEFAULT_ROLES: Record<RoleKey, RoleRecord> = {
     canNavBanks: true, canNavIncred: true, canNavDSA: true, canNavPartner: true,
     canNavTeamOverview: true, canNavSalesTeams: true, canNavLoginTeams: true, canNavLocations: true, canNavUsers: true,
     canNavReports: false, canNavTickets: true,
-    desc: 'Product / Platform Team — governs business rules, master data, and organisational structure but does not handle customer-facing loan processing. Configures the system so other roles can operate.',
+    desc: 'Product & Risk Officer (Product / Platform Team) — governs business rules, master data, and organisational structure but does not handle customer-facing loan processing. Configures the system so other roles can operate.',
     scope: 'Configuration plane — organisation-wide master data',
     teamSize: 'Small specialised team (typically 2–5)',
     responsibilities: [
@@ -779,14 +793,14 @@ export interface SecurityGroup {
 // source's own `group_opeation_manager` id typo (kept as-is — it's a
 // display-only reference id, not something re-keyed by anything else).
 export const SECURITY_GROUPS: SecurityGroup[] = [
-  { id: 'group_location_user', name: 'Location Head', cat: 'Location Team', color: '#1a4fa3', implied: ['base.group_user'], desc: 'Sees apps in own locations: location_id in user.location_id.ids' },
-  { id: 'group_location_manager', name: 'Admin', cat: 'Location Team', color: '#1a4fa3', implied: ['group_location_user'], desc: 'Sees ALL records: (1=1). Highest in Location Team.' },
-  { id: 'group_sales_partner_user', name: 'Partner', cat: 'Manager Team', color: '#a159ff', implied: ['base.group_user'], desc: 'Sees own: partner_id = user.partner_id.id' },
-  { id: 'group_sales_executive_manager', name: 'Sales Person', cat: 'Manager Team', color: '#e31e25', implied: ['group_sales_partner_user'], desc: 'Sees own assigned: assigned_user_id = user.id' },
-  { id: 'group_team_leader_manager', name: 'Team Leader', cat: 'Manager Team', color: '#ffb347', implied: ['group_sales_executive_manager'], desc: "Sees team's: salles_id in user.team_sales_ids.ids" },
-  { id: 'group_sales_manager_manager', name: 'Manager', cat: 'Manager Team', color: '#ffb347', implied: ['group_team_leader_manager'], desc: 'Same rule as Team Leader. Highest in Manager Team.' },
-  { id: 'group_login_team_user', name: 'Login Team', cat: 'Operation Team', color: '#10b981', implied: ['base.group_user'], desc: 'Sees assigned: login_user_id = user.id' },
-  { id: 'group_opeation_manager', name: 'Operation Manager', cat: 'Operation Team', color: '#10b981', implied: ['group_login_team_user'], desc: 'Sees op team: login_id in user.operation_team_ids.ids' },
+  { id: 'group_location_user', name: 'Zonal Manager', cat: 'Location Team', color: '#1a4fa3', implied: ['base.group_user'], desc: 'Sees apps in own locations: location_id in user.location_id.ids' },
+  { id: 'group_location_manager', name: 'Chief Administrator', cat: 'Location Team', color: '#1a4fa3', implied: ['group_location_user'], desc: 'Sees ALL records: (1=1). Highest in Location Team.' },
+  { id: 'group_sales_partner_user', name: 'Channel Partner', cat: 'Manager Team', color: '#a159ff', implied: ['base.group_user'], desc: 'Sees own: partner_id = user.partner_id.id' },
+  { id: 'group_sales_executive_manager', name: 'Business Development Executive', cat: 'Manager Team', color: '#e31e25', implied: ['group_sales_partner_user'], desc: 'Sees own assigned: assigned_user_id = user.id' },
+  { id: 'group_team_leader_manager', name: 'Deputy Sales Manager', cat: 'Manager Team', color: '#ffb347', implied: ['group_sales_executive_manager'], desc: "Sees team's: salles_id in user.team_sales_ids.ids" },
+  { id: 'group_sales_manager_manager', name: 'Business Development Manager', cat: 'Manager Team', color: '#ffb347', implied: ['group_team_leader_manager'], desc: 'Same rule as Deputy Sales Manager. Highest in Manager Team.' },
+  { id: 'group_login_team_user', name: 'Credit Evaluation Officer', cat: 'Operation Team', color: '#10b981', implied: ['base.group_user'], desc: 'Sees assigned: login_user_id = user.id' },
+  { id: 'group_opeation_manager', name: 'Credit Evaluation Manager', cat: 'Operation Team', color: '#10b981', implied: ['group_login_team_user'], desc: 'Sees op team: login_id in user.operation_team_ids.ids' },
 ]
 
 // efin-app.js's stgRenderSecGroups() local catColors — deliberately a

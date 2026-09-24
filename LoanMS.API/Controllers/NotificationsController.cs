@@ -17,13 +17,11 @@ namespace LoanMS.API.Controllers;
 public class NotificationsController : BaseController
 {
     private readonly AppDbContext _db;
-    private readonly IConfiguration _cfg;
     private readonly IHttpClientFactory _http;
 
-    public NotificationsController(AppDbContext db, IConfiguration cfg, IHttpClientFactory http)
+    public NotificationsController(AppDbContext db, IHttpClientFactory http)
     {
         _db   = db;
-        _cfg  = cfg;
         _http = http;
     }
 

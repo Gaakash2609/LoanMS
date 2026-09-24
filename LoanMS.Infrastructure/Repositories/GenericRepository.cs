@@ -42,7 +42,4 @@ public class GenericRepository<T> : IGenericRepository<T> where T : BaseEntity
         var entity = await _set.FindAsync(id);
         if (entity != null) { entity.IsDeleted = true; entity.UpdatedAt = DateTime.UtcNow; }
     }
-
-    public async Task<bool> ExistsAsync(int id) =>
-        await _set.AnyAsync(e => e.Id == id);
 }

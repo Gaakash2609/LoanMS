@@ -27,12 +27,14 @@ Status values: `NOT_STARTED` · `IN_PROGRESS` · `DONE` · `OBSERVED_ONLY` (seen
 | C1 | ⚠️ **Critical #1 — Delete not persisting / reappearing on other device** | DONE — React/API/DB path verified; legacy shell (the confirmed source) **retired** after owner confirmed it is unused | `2ba7ab1` (+ related C1-b `864c8c4`) |
 | C2 | **Critical #2 — Missing error/success/confirm popups in React** | DONE | `0474cd6`, `839282c`, `43ad8c8` |
 | 7B | ⚠️ Wizard Documents / Perfios integration | DONE (real S3 = BLOCKED, no AWS creds) | `ebe9e6d`, `9b2667b` |
-| 1 | ⚠️ Core domain / auth / access control (incl. Application View & Control at API level) | DONE · **DECISION NEEDED** (backend permission fail-open) | `37ba232`, `ab52ffd`, `eaddeea`, `ac6749b` |
+| 1 | ⚠️ Core domain / auth / access control (incl. Application View & Control at API level) | DONE (backend permission fail-open → fixed by module M Part 4) | `37ba232`, `ab52ffd`, `eaddeea`, `ac6749b`, `d14f8a9` |
 | 2 | ⚠️ Data persistence layer (repositories, UoW, soft-delete, unique indexes, migrations) | DONE | `eeda15f` (+ C1-b `864c8c4`) |
 | 3 | ⚠️ Workflow modules — Loans/status flow, Wizard, Loan detail tabs, Tasks, Tickets, Tracking, Payout, Obligations, Income verification | DONE | `715e610`, `89822c1`, `82b699c`, `ae19c66` |
 | 4 | Integrations — Perfios, InCred, S3, Email/SMTP, AI providers, Bureau/CIBIL | DONE (code + API level) — live S3 / SMTP / InCred / AI calls **BLOCKED** (no credentials here) | `ab52ffd`, `948495d` |
 | 5 | UI/UX consistency | DONE (functional sweep of all 28 routes + 11 loan-detail tabs; no redesign) | `43ad8c8`, `82fe44b` |
 | X | Cross-cutting: security, performance, config/env, concurrency, transactions, audit trail, API contract, failure handling, pagination, background jobs, deployment parity | DONE | `715e610`, `42a3b9c`, `82fe44b` |
+| R | ⚠️ **User roles & access rights (2026-09-24)** — 11 roles × sidebar / route guard / backend API vs Vanilla, live on PostgreSQL | DONE (decisions #2, #4b, #6, #7, #8 taken by the business owner and implemented in module M) | `b9b7c4a`, `e9747fd`, `7e902a4`, `8b56a82` |
+| M | ⚠️ **Master prompt — role titles, permissions, access rights & security hardening (2026-09-24)** — Parts 1–8 | DONE (Parts 1–7 implemented, tested, live-verified on PostgreSQL; Part 8 = nothing to implement, see section) | `805aab4`, `8b94cae`, `d14f8a9`, `f177a3b`, `335dad9`, `49a861e` |
 
 ---
 
@@ -193,7 +195,7 @@ Mechanical scan of all 287 endpoints (`_scripts/authz_scan*.js`) for write/read 
 | 4 | ⚠️ Any logged-in user could list/download any DSA/Partner's **KYC documents** | list rule extracted once (`ScopedPartnersAsync`) and reused by both document endpoints | Admin 200; unrelated Partner user 404 (`eaddeea`) |
 | 5 | ⚠️ **Deactivated users kept their session forever** — refresh ignored `IsActive` | refresh applies login's `IsActive` rule | before: refresh 200 + new token; after: 400; unit test fails without fix (`ac6749b`) |
 
-### ❓ Decision needed — backend permission checks fail OPEN
+### ✅ Decision taken — backend permission checks fail OPEN → now fail CLOSED (module M Part 4, `d14f8a9`)
 `RolePermissionService.IsAllowedAsync` returns **true for every role** when the `efin_role_permissions` setting has never been saved, or when the saved map lacks a key (e.g. a permission added in a later release). The frontend has full defaults and hides things accordingly, but the backend has **no defaults**. Proven on PostgreSQL: with no saved map, Sales passed the `canViewIncred` gate; after the Admin map was saved (exactly what clicking **Save** on Settings → Roles & Permissions writes), Sales got **403**.
 - **Immediate zero-code mitigation:** an Admin opens Settings → Roles & Permissions in production and clicks **Save** once (writes the full map, all roles, all keys). Repeat after any release that adds a permission key.
 - **Code options (your call):** (a) backend falls back to the same defaults as `constants/permissions.ts` (needs one shared defaults source to avoid a second copy), or (b) seed the default map at startup when missing. Either changes effective permissions on an install where nobody saved the page.
@@ -309,3 +311,92 @@ Owner: "Filter server-side banao". All 18 predicates are `LoanFilterDto` fields 
 - Audit trail stores new values only; old (before) values exist just for payout status and Admin overrides.
 - Unbounded list reads: Tasks, Tickets, Payout claims (admin/accounts), InCred applications and the report endpoints load all matching rows (reports aggregate in the DB). Fine at current volume; add paging if these tables grow large.
 - Advanced Filter decision: done (`7415080`).
+
+---
+
+## R — User roles & access rights (2026-09-24)
+
+**Status:** DONE. #1, #3, #4, #5 fixed here; the business owner then decided #2, #4b, #6, #7, #8 (master prompt) — implemented in **module M** below.
+
+### How access is decided (3 layers, understood)
+1. **Sidebar** — `layouts/AppLayout.tsx` `NAV_ITEMS[].roles` is a hard ceiling; inside it the role's `canNav*` flag (`hooks/usePermissions.ts canAccessMenuItem`, Vanilla `applySession` precedence) can only hide an item.
+2. **Route guard** — `routes/AppRoutes.tsx` `<ProtectedRoute allowedRoles=…>`; a refused role is redirected to `/dashboard`.
+3. **Backend** — `[Authorize(Roles=…)]` on controllers/actions, `RolePermissionService.IsAllowedAsync(role, key)` gates (Admin-editable `efin_role_permissions` map), and record visibility `LoanRepository.ApplyVisibilityScope`.
+Reference = Vanilla `efin-app.js` `ROLES` (:160-640). React `constants/permissions.ts DEFAULT_ROLES` equals it flag-for-flag (only the new `canVerifyDocs` is extra), so every difference comes from the hard-coded route/sidebar role lists.
+
+### Method (executed 2026-09-24)
+- **Frontend matrix** from the real constants (temporary vitest helper, not committed): sidebar visibility + route guard for 11 roles × 22 pages, compared with Vanilla `canNav*`.
+- **Live backend matrix** on the local test API (WSL, **real PostgreSQL 18**, DB `loanms_cleanup_0924`): one test user per role, 81 endpoints (every React list/detail read + 30 writes aimed at a non-existent id 999999, so 403 vs 404/400 separates *forbidden* from *allowed* without changing data) × 11 roles = **891 calls, 0 × 5xx**. Tokens: one real admin login; per-role tokens minted with the local test signing key in the exact claim shape of a real login, validated first (minted Admin ≡ real Admin on `/api/users/profile`; minted Sales → 403 on Admin-only `/api/users`, profile = sales user).
+- Every finding below was then **re-checked against current code** (file:line given).
+
+### Verified OK (no change)
+- Admin-only surfaces are enforced server-side: `/api/users`, `/api/settings`, `/api/audit`, role-permission settings, webhook logs, Expert Export data → 403 for all 10 non-admin roles.
+- Loan actions approve/reject/disburse/hold/status/deviation/doc verify+reject → allowed exactly for Admin, Manager, LoginTeam, TeamLeader, LocationHead, OperationManager (matches React `DOC_VERIFIER_ROLES`/action buttons); `override-status` Admin only; payout status Admin + Accounts; payout delete Admin.
+- Income-verification panel (`LoanDetailPage.tsx:457`, gated by `canViewBanks`) is shown to exactly the roles the API allows (403 roles Sales/Dsa/Partner/Accounts/ProductTeam all have `canViewBanks=false`).
+- Record visibility works as designed: Manager/TeamLeader/OperationManager/Accounts/ProductTeam with no team mapping see 0 loans and get 404 on loan 1; location-mapped Sales/Dsa/Partner/LoginTeam/LocationHead see that location's loans (`adminAssignedLocationIds`, `LoanRepository.cs:85+`) — by design, not a leak.
+
+### Findings (priority order) — verification evidence and status
+| # | Sev | Finding | Evidence (current code) | Status |
+|---|---|---|---|---|
+| 1 | 🔴 | **Payout unreachable for 7 roles** (Sales, Dsa, Partner, LoginTeam, TeamLeader, LocationHead, OperationManager): route + sidebar allow only Admin/Manager/Accounts. Vanilla shows Payout to every role except ProductTeam (and hides it for a Partner mapped to a DSA); `PayoutPage` itself implements Vanilla's `canMine` (everyone except Accounts); backend serves them (claims 200 self-scoped, my-earnings 200, claim create = any authenticated role). There is no other place to raise a claim. | `AppRoutes.tsx:70`, `AppLayout.tsx:78`, `PayoutPage.tsx:559-560`, `PayoutController.cs:11,32,130,288`, Vanilla `efin-app.js` `canNavPayout` (:186…:605) + mapped-partner rule (:1352-1353, :1839) | ✅ FIXED `e9747fd` |
+| 2 | 🔴 | **Backend permission gates fail OPEN** when `efin_role_permissions` was never saved (~30 `IsAllowedAsync` gates + tab masking + menu gate). Re-proven live: before save Sales/Dsa/Partner/Accounts/ProductTeam passed `canManageTasks` (task delete); after Admin saved the defaults they got 403. | `RolePermissionService.cs:75,107,140` (`return true`/`denied` when setting missing) | ✅ FIXED `d14f8a9` (module M Part 4 — fails closed to the per-role defaults) |
+| 3 | 🔴 | **Admin's permission edits never reach non-admin UIs**: `GET /api/settings/{key}` is Admin-only for these keys (live: 403 for all 10 non-admin roles); `permissionsApi.fetchSettingValue` swallows the error and every non-admin UI silently uses hard-coded defaults while the backend enforces the saved map. | `SettingsController.cs:404-435`, `permissionsApi.ts:25-33`, `RolePermissionService.cs:31` | ✅ FIXED `7e902a4` |
+| 4 | 🟠 | **Vanilla grants + backend allows, React hides**: InCred (LoginTeam, TeamLeader, LocationHead, OperationManager, ProductTeam); Banks read-only (TeamLeader, LocationHead, OperationManager); DSA/Partner + Locations read-only (LocationHead). Page edit buttons are already gated to the backend's write roles (`BanksPage.tsx:40`, `DsaPage.tsx:52`, `PartnerPage.tsx:43-45`, `LocationsPage.tsx:34`); (Correction on re-verification: the InCred RM add/edit/delete buttons **are** already gated to Admin — `IncredRmTab.tsx:122,154,193,205` — matching the Admin-only backend `IncredController.cs:1330-1369`; the first report was wrong on this point.) | `AppRoutes.tsx:83,121,132,151`, `AppLayout.tsx:80-84,91`, Vanilla `canNavIncred/Banks/DSA/Partner/Locations` | ✅ FIXED `e9747fd` |
+| 4b | 🟠 | ProductTeam has no sidebar entry for Team Overview / Sales / Login Teams / Locations (route + backend + Vanilla allow) — but `TeamsPage.tsx:48-49` loads members via Admin-only `GET /api/users`, so the member picker is empty for ProductTeam | `AppLayout.tsx:88-91`, `TeamsPage.tsx:48-49`, `TeamFormModal.tsx` (needs email/location) | Locations part ✅ FIXED `e9747fd`. Team pages ✅ FIXED `f177a3b` (module M Part 5) |
+| 5 | 🟠 | **Scope bypass on delete**: Manager can delete any Draft loan, even outside its visibility scope (`_internalRoles = {Admin, Manager}`, unscoped lookup); task delete has no ownership/scope check at all (task list and task complete do) | `LoanService.cs:37-38` + `DeleteAsync`; `TasksController.cs:124-135` vs list rule `:31-32` and complete `:109-111` | ✅ FIXED `8b56a82` |
+| 6 | 🟡 | Vanilla grants, backend refuses: Team pages for TeamLeader/LocationHead/OperationManager (`GET /api/teams` 403); Users for LocationHead/ProductTeam (`GET /api/users` 403) while ProductTeam **can** `PATCH /api/users/{id}/status`; Roles & Rules for ProductTeam | live matrix | ✅ FIXED `f177a3b` (module M Part 5, scoped) |
+| 7 | 🟡 | Backend reads open to every logged-in role that React never shows them: `/api/dsa` + `/api/dsa/export` (partner PAN/phone/email) incl. Dsa/Partner users; banks, lender config, locations, report targets, product-offer matrix, assignment audit | live matrix | ✅ DSA/Partner part FIXED `335dad9` (module M Part 6); `d14f8a9` makes every menu-gated read enforce defaults. Other reads listed here not in the owner's decision — unchanged |
+| 8 | 🟢 | URL-only access broader than Vanilla: Manager & Sales `/dsa`, `/partners`; Manager `/lender-config`; Accounts Overview/Applications/Register/Tasks (Vanilla had no page guard either) | frontend matrix | ✅ FIXED `49a861e` (module M Part 7 — every page route applies the sidebar's own check) |
+
+### Fixes (minimal, tested, verified)
+| # | Commit | Change | Tests | Live on PostgreSQL (API restarted with the fix) |
+|---|---|---|---|---|
+| 1 + 4 | `e9747fd` | `routes/pageAccess.ts` `PAGE_ROLES` is now the single role list per page for **both** the route guard and the sidebar ceiling (they were two hand-kept copies). Payout → every role except ProductTeam; a Partner mapped to a DSA is hidden and redirected with Vanilla's message (`usePartnerMappedToDsa`). InCred + LoginTeam/TL/LH/OM/PT; Banks + TL/LH/OM (read-only); DSA/Partners + LH (read-only); Locations + LH, and ProductTeam now gets the sidebar entry. The sidebar predicate moved unchanged into `isNavItemVisible`. | `page-access.test.ts` (8): PAGE_ROLES vs Vanilla canNav, per-role sidebar, static-ceiling rule, mapped-Partner rule. Reverting Payout to the old list fails 2. | Every newly opened page's data returns 200 for the newly allowed roles (Sales/Partner payout, TL banks + InCred, LH dsa/locations/banks, PT InCred/locations) |
+| 3 | `7e902a4` | `GET /api/users/me/permissions` returns only the caller's **own** role slice (`RolePermissionService.GetOwnPermissionsAsync`: saved flags + whether its role is listed per saved menu). `permissionsApi` uses it for non-Admin sessions; Admin path unchanged. The generic settings read stays Admin-only. | `RolePermissionOwnPermissionsTests` (4) + `permissionsApi.test.ts` (4); forcing the non-Admin branch off fails 2. | Sales receives exactly its 58 saved flags; no other role's config in the response; `GET /api/settings/efin_role_permissions` still 403 for Sales |
+| 5 | `8b56a82` | Draft delete: Manager needs `HasAccessAsync` for another user's draft (Admin unscoped; others already own-drafts only). Task delete: list/Complete rule (outside Admin/Manager only own tasks). | `LoanDeleteScopeTests` (4) + `TasksDeleteScopeTests` (3); without the fixes exactly the 2 "cannot delete" tests fail. | Manager `DELETE /api/loans/3` (a loan it cannot see) → 400, psql `IsDeleted` stays `f`; TeamLeader delete of an Admin task → 404, row intact; Manager → 200 |
+
+Totals after R: backend **412/412**, frontend **25 files / 294 tests**, build + type-check clean, lint unchanged (19 pre-existing warnings, 0 new). Live re-check: **13/13 PASS**.
+
+**Not verified here:** a browser click-through as each non-Admin role (only Admin could be signed in). The routing/sidebar outcome is covered by the unit tests above and every page's API calls were probed live per role.
+
+**Test-DB side effects only** (`loanms_cleanup_0924`): 8 `rbac.*@verify.test` users, one test location + Sales mapping, the default permission map saved once, one test task created then deleted.
+
+---
+
+## M — Master prompt: role titles, permissions, access rights & security hardening (2026-09-24)
+
+**Status:** DONE — Parts 1–7 implemented one commit per part, each with its own tests (every new test mutation-checked: the fix reverted ⇒ the test fails), full build + suites after each commit, then verified live on the local test API (WSL, real PostgreSQL 18, `loanms_cleanup_0924`). Part 8 needed no code (see below). Backend enum names and frontend RoleKey strings are unchanged.
+
+| Part | Commit | What changed | Tests |
+|---|---|---|---|
+| 1 Role titles | `8b94cae` | Display titles only (Chief Administrator, Zonal Manager, Business Development Manager, Credit Evaluation Manager, Deputy Sales Manager, Credit Evaluation Officer, Business Development Executive, Mass Channel Partner, Channel Partner, Payout & Reconciliation Officer, Product & Risk Officer) in every label map and role picker (`roleTitle`) | `role-titles.test.ts` (3) |
+| 2–3 Flags + visibility | `805aab4` | Manager & TeamLeader `canNavDSA`/`canNavPartner` = true; Manager loans = Location **OR** Team; TeamLeader also sees DSA/Partner-sourced loans in its own Location(s) | `LoanRepositoryTests` (5 new, 2 old intersection tests replaced) |
+| 4 Fail-closed matrix | `d14f8a9` | `RolePermissionService`: a missing / soft-deleted / unreadable / partial `efin_role_permissions` or `efin_menu_visibility` now falls back **per role and per key** to the secure default (embedded `RolePermissionDefaults.json`, generated from `DEFAULT_ROLES` / `ALL_MENU_ITEMS` / `NAV_PERM_KEY_BY_MENU_ID` by `frontend/scripts/export-role-permission-defaults.ts`). A saved value always wins; Admin never restricted; unknown role denied. Menu checks use the sidebar precedence (canNav* flag, then menu list). Shared reads kept working: Partner/DSA read their own DSA record(s), team list opens with any team menu, `summary?scope=mine` (Profile) needs no Reports menu, loan assignment reads the location lookup | `RolePermissionFailClosedTests` (21: every non-Admin role × missing/deleted/corrupt/non-object/empty store = its defaults and never wide open; saved overrides; partial matrix; Admin; unknown role), `FailClosedSharedReadsTests` (5), `role-permission-defaults.test.ts` (JSON must equal the frontend defaults) |
+| 5 Teams / Users / Locations | `f177a3b` | Team pages read by TeamLeader, LocationHead, OperationManager (added to `TeamsController`). Rows: Admin/ProductTeam all; Manager, TeamLeader, OperationManager teams they lead or belong to; LocationHead those + every team at its Location(s). Users: ProductTeam full management; LocationHead read-only list of its own Location's users (GetAll/GetById, 404 outside). **Only an Admin can create, edit, deactivate, delete, re-map or reset the password of an Admin account or hand out the Admin role** (403 — also applied to the 3 endpoints ProductTeam already had). Locations list: any of the Locations/team/Users menus; every role except Admin/ProductTeam/Manager sees only its own Location(s). UI: Users page read-only for LocationHead, no Admin-account actions/role option for ProductTeam | `TeamUserLocationAccessTests` (12), `page-access.test.ts` |
+| 6 DSA/Partner PII | `335dad9` | `GET /api/dsa` + `/export`: PAN, email, phone, office address only for Admin, ProductTeam, Manager, TeamLeader (+ a DSA/Partner for its own records); every other role gets the `/api/dsa/lookup` fields (id, name, code, type; active). **Export had no menu gate at all** — now the list's gate + scope. KYC documents (list/download) follow the same rule. DSA/Partner pages show a directory view (name/code, Apps) for other roles | `DsaPiiExposureTests` (12) |
+| 7 Direct URL | `49a861e` | `routes/pageAccess.ts PAGE_GUARDS`: one entry per page (role ceiling + sidebar menu id) read by **both** the sidebar and the new `RouteGuard`, which applies the sidebar's own rule (`canOpenPage` = role ceiling AND canNav* / Menu Access Control). Waits for permission data; falls back to defaults, never to "allowed"; refused page → `/dashboard`, refused `/dashboard` → notice (no loop). Sales removed from DSA/Partner; Lender Configuration = Admin/ProductTeam | `page-access.test.ts` (Sales never reaches /dsa, /partners, /lender-config and Manager never /lender-config — even with every flag switched on; flag-off pages; admin-only pages; every sidebar menu has a guard) |
+
+**Totals after M:** backend **465/465**, frontend **27 files / 307 tests**, `tsc -b` + `vite build` + `dotnet build` clean (0 errors).
+
+### Live verification (real PostgreSQL, API restarted with all of the above) — `p47_live`: **ALL PASS**
+- **Part 4** — the same 9 gates checked in three states. *Admin-saved matrix with Manager DSA off:* Manager `GET /api/dsa` **403** (saved value wins). *Row soft-deleted* and *row corrupted to `{not json`:* Sales task delete **403**, Sales tracking delete **403**, Sales `/api/dsa` **403**, Sales reports summary **403** but `scope=mine` **200**; Manager task delete **404** (authorized), Manager `/api/dsa` **200**, LocationHead tracking delete **404**, Admin **404** (authorized). Before this fix the missing-row state allowed all of them.
+- **Part 5** — LocationHead `/api/users` = exactly the 9 users mapped to its Location in the DB (of 11); LocationHead create user **403**; ProductTeam list = all 11; ProductTeam create-Admin / deactivate-Admin / reset-Admin-password **403** (Admin still active); TeamLeader / LocationHead / OperationManager `/api/teams` **200** (were 403); Sales **403**; LocationHead `/api/locations` = its own Location only.
+- **Part 6** — Admin / ProductTeam / Manager / TeamLeader get PAN + email + phone; LocationHead gets only `code,id,name,partnerType`; LocationHead export = `Name,Code,Type`, no PAN; Manager export has PAN; Accounts and Sales export **403** (Accounts got the full PAN list before); LocationHead KYC documents **403**, Manager **200**.
+- **Part 7** — browser (in-app pane, Admin session): all 23 pages open with no redirect (no regression). Refusals for non-Admin roles are covered by the unit tests; **a non-Admin browser click-through was not done** (only the Admin session exists in the pane; no password was entered on anyone's behalf).
+
+### Things the business owner should know
+1. **Mitigation is no longer required for security** — with no saved matrix the backend now enforces the defaults. Pressing **Save** on Settings → Roles & Permissions is still fine: it stores exactly those defaults.
+2. **A matrix saved before Parts 2/4 keeps its saved values.** Where an Admin had already saved, Manager/TeamLeader `canNavDSA`/`canNavPartner` stay as saved (e.g. `false`) until switched on there — the saved value always wins.
+3. **The defaults now bind on the server too** (they matched Vanilla and already drove the UI). Worth a business review in Roles & Permissions: Sales `canViewTasks` = off; Manager and TeamLeader `canCreateApp`/`canUploadDocs` = off; DSA `canUploadDocs` on but `canViewDocuments` off; Partner `canCreateApp` on but `canUploadDocs` off; ProductTeam `canViewObligations` = off.
+4. **Open follow-up (not in the decisions, not changed):** Sales still holds DSA/Partner Create/Update/Status/Upload rights in `DsaController` although no Sales screen reaches them any more (writes return no PII). Removing them is a business-rule change.
+5. **Part 5 scope reading:** "own team(s)/location" was implemented as TeamLeader & OperationManager → teams they lead or belong to; LocationHead → those plus every team at its Location(s). Manager keeps its existing team scope and full Locations list.
+
+### Part 8 — "Local test API (`localhost`"
+That line came from this session's own status note about the **local test API** (the WSL instance on `localhost:5099` used only for verification, against the test DB). It is not a product endpoint or feature: nothing to implement, and nothing in the product build exposes it. The test API is stopped at the end of the session.
+
+### Prompt statements that did not match the code
+- `LoanMS-Deploy-2026-09-24-final-titles-and-access.zip` does not exist; Parts 1–3 were implemented in this working copy (`805aab4`, `8b94cae`) and ship in this cumulative ZIP.
+- "React Router has no route-level role guard" — static role guards existed; the gap was that they ignored the canNav* flags and still listed Sales (DSA/Partners) and Manager (Lender Configuration).
+- DSA `GetAll` did have a menu gate (made ineffective by the fail-open matrix); `Export` had none.
+
+**Test-DB side effects** (`loanms_cleanup_0924` only): the permission row was saved/soft-deleted/corrupted during the probe and restored byte-identical (md5 checked); one test DSA (`VERIFY-PII`) created then soft-deleted.

@@ -1,10 +1,11 @@
 using LoanMS.Application.DTOs;
+using LoanMS.Application.Services;
 
 namespace LoanMS.Application.Obligations;
 
 // ── Obligation FOIR / credit-capacity engine (authoritative, server-side) ─────
 // The single business authority for FOIR on the Obligations tab. React previously
-// computed this entirely client-side (utils/foir.ts). The suggested-FOIR / ROI /
+// computed this entirely client-side (the former frontend utils/foir.ts). The suggested-FOIR / ROI /
 // self-employed-net heuristics here are a faithful port of that tested logic
 // (itself a verbatim port of legacy renderFoirPanel / getSuggestedFOIR /
 // getSuggestedROI), so numbers stay consistent — but the AUTHORITATIVE capacity
@@ -193,7 +194,7 @@ public static class ObligationFoirEngine
         return r;
     }
 
-    // ── Heuristics — verbatim port of utils/foir.ts (legacy getSuggestedFOIR) ────
+    // ── Heuristics — verbatim port of the former frontend utils/foir.ts (legacy getSuggestedFOIR) ────
     public static int SuggestedFoirFor(string loanType, bool isSelfEmp, decimal income, int cibil)
     {
         double @base = loanType is "home_loan" or "loan_against_property" ? 60
@@ -235,7 +236,7 @@ public static class ObligationFoirEngine
         return (decimal)m.Base;
     }
 
-    // Classify employment exactly as utils/foir.ts did (strict substring match).
+    // Classify employment exactly as the former frontend utils/foir.ts did (strict substring match).
     public static bool IsSelfEmployed(string? employmentType)
     {
         var t = (employmentType ?? string.Empty).ToUpperInvariant();
@@ -252,15 +253,11 @@ public static class ObligationFoirEngine
         return (decimal)pv;
     }
 
-    /// <summary>Standard reducing-balance EMI — mirrors LoanService.CalculateEmi.</summary>
+    /// <summary>Standard reducing-balance EMI (EmiCalculator); 0 when there is no principal or tenure.</summary>
     public static decimal CalculateEmi(decimal principal, decimal ratePercent, int months)
     {
         if (months <= 0 || principal <= 0) return 0m;
-        if (ratePercent == 0) return Math.Round(principal / months, 2);
-        var r = ratePercent / 12 / 100;
-        var emi = principal * r * (decimal)Math.Pow((double)(1 + r), months)
-                  / ((decimal)Math.Pow((double)(1 + r), months) - 1);
-        return Math.Round(emi, 2);
+        return EmiCalculator.ReducingBalance(principal, ratePercent, months);
     }
 
     private static decimal Round1(decimal v) => Math.Round(v, 1);

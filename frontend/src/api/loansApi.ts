@@ -1,6 +1,6 @@
 import api from './axios'
 import { fetchAllPages } from '@/utils/fetchAllPages'
-import type { ApiResponse, CreateLoanRequest, Loan, LoanFilter, LoanListItem, LoanFilterOptions, PagedResult, DashboardStats } from '@/types'
+import type { ApiResponse, Loan, LoanFilter, LoanListItem, LoanFilterOptions, PagedResult, DashboardStats } from '@/types'
 
 // Matches LoansController.GetDocuments' projection exactly.
 export interface LoanDocument {
@@ -57,12 +57,6 @@ export const loansApi = {
 
   getById: (id: number) =>
     api.get<ApiResponse<Loan>>(`/api/loans/${id}`),
-
-  create: (data: CreateLoanRequest) =>
-    api.post<ApiResponse<Loan>>('/api/loans', data),
-
-  update: (id: number, data: Partial<CreateLoanRequest>) =>
-    api.put<ApiResponse<Loan>>(`/api/loans/${id}`, data),
 
   // EMI Calculator "Save EMI to Application" (legacy calcSaveToApplication,
   // efin-app.js:11380) — pushes the calculator's Amount/Rate/Tenure onto an

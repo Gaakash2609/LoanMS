@@ -112,18 +112,3 @@ export interface BreakupData {
 
 // ── EOD grid: day-of-month (1-31) -> { 'YYYY-MM': balance } ─────────────
 export type EodData = Record<number, Record<string, number>>
-
-// ── Final summary shape saved via existing PerfiosController contract ───
-// (SavePerfiosReportRequestDto — field names match exactly)
-export interface PerfiosSummary {
-  fileName: string
-  averageBankBalance: number | null
-  span: number | null
-  totalTransactions: number | null
-  hasSalary: boolean
-  isValid: boolean
-  firstTransactionDate: string | null
-  lastTransactionDate: string | null
-  manualReviewRequired: boolean
-  staleDays: number | null
-}

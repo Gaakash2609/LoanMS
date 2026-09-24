@@ -18,12 +18,6 @@ namespace LoanMS.Application.Services
 
     public class CibilAnalysisService : ICibilAnalysisService
     {
-        // Score Ranges
-        private const int EXCELLENT_MIN = 750;
-        private const int GOOD_MIN = 650;
-        private const int FAIR_MIN = 550;
-        private const int POOR_MIN = 300;
-
         public async Task<CibilReportDetailDto> AnalyzeCibilReport(BureauReport report)
         {
             var dto = new CibilReportDetailDto

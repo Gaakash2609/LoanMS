@@ -190,9 +190,6 @@ export interface VerifyObligationRequest {
 }
 
 export const obligationsApi = {
-  getByLoan: (loanId: number) =>
-    api.get<ApiResponse<LoanObligation[]>>(`/api/loans/${loanId}/obligations`),
-
   getWorkspace: (loanId: number, params?: CalculateFoirRequest) =>
     api.get<ApiResponse<ObligationWorkspace>>(`/api/loans/${loanId}/obligations/workspace`, {
       params: {

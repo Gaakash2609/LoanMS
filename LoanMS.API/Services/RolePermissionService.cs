@@ -6,34 +6,30 @@ namespace LoanMS.API.Services;
 
 /// <summary>
 /// Server-side enforcement for the Admin-configurable permission matrix
-/// (Settings -> Roles and Permissions). Previously this screen only ever
-/// controlled frontend UI visibility -- an Admin could untick, say, "Reject
-/// Application" for Manager, and Managers would correctly lose the button,
-/// but a Manager calling the API directly would still succeed, since
-/// backend authorization only checked the fixed [Authorize(Roles=...)]
-/// role-name list, never this per-role customization. This service reads
-/// the EXACT SAME AppSettings row ("efin_role_permissions") the frontend
-/// already writes to (see stgSaveRolePermissions in efin-app.js) -- same
-/// JSON shape: { "sales_executive": { "canRejectApp": false, ... }, ... }.
+/// (Settings -> Roles and Permissions) and the Menu Access Control map. Reads
+/// the same AppSettings rows the frontend writes ("efin_role_permissions":
+/// { "sales_executive": { "canRejectApp": false, ... } }, and
+/// "efin_menu_visibility": { "dsa-mgmt": ["admin", ...] }).
 ///
-/// Deliberately fails OPEN (returns true / "allowed") whenever the setting
-/// is missing, unparseable, or doesn't mention this role/permission at
-/// all -- matching the existing default-allow behaviour so a fresh install
-/// or an Admin who's never touched this screen sees zero behaviour change.
-/// Only an EXPLICIT false saved by an Admin actually restricts anything.
-/// Admin role itself is never restricted, matching the frontend's own
-/// convention (Admin implicitly has every permission).
+/// FAILS CLOSED (business-owner decision 2026-09-24, master prompt Part 4).
+/// It used to allow everything whenever a matrix had never been saved, was
+/// unreadable, or lacked a key — so an install where the Admin never pressed
+/// Save had no backend restriction at all. Now every missing value falls back
+/// to the secure per-role default in RolePermissionDefaults.json, which is
+/// generated from the frontend's DEFAULT_ROLES / ALL_MENU_ITEMS /
+/// NAV_PERM_KEY_BY_MENU_ID (frontend/scripts/export-role-permission-defaults.ts;
+/// a frontend test fails if the two drift). A value the Admin saved always
+/// wins. Admin is never restricted; an unknown role is denied.
 /// </summary>
 public class RolePermissionService : IRolePermissionService
 {
     private readonly AppDbContext _db;
 
     private const string SettingKey = "efin_role_permissions";
+    private const string MenuVisKey = "efin_menu_visibility";
 
-    // Backend UserRole enum name -> frontend ROLES config key. Must stay in
-    // sync with ROLE_MAP in api-bridge.js -- same mapping, just needed here
-    // too since this is the one place backend code needs to speak the
-    // frontend's snake_case role vocabulary.
+    // Backend UserRole enum name -> frontend ROLES config key (same mapping as
+    // ROLE_MAP in api-bridge.js / BACKEND_TO_ROLE_KEY in constants/permissions.ts).
     private static readonly Dictionary<string, string> RoleKeyMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Admin"] = "admin",
@@ -51,106 +47,149 @@ public class RolePermissionService : IRolePermissionService
 
     public RolePermissionService(AppDbContext db) => _db = db;
 
-    private const string MenuVisKey = "efin_menu_visibility";
-
-    /// <summary>
-    /// "Menu Access Control" — a different saved shape from the permission
-    /// matrix above: { "dsa-mgmt": ["admin","team_leader","product_team"],
-    /// ... } (menu-id -> array of allowed frontend role-keys), see
-    /// stgPushMenuVisibilityToServer in efin-app.js. Same fail-open
-    /// philosophy: missing setting, missing menuId entry, or unparseable
-    /// JSON all default to allowed=true.
-    /// </summary>
-    public async Task<bool> IsMenuAllowedAsync(string? backendRole, string menuId)
+    // ── Secure defaults ──────────────────────────────────────────────────────
+    internal sealed class PermissionDefaults
     {
-        if (string.IsNullOrWhiteSpace(backendRole)) return true;
-        if (string.Equals(backendRole, "Admin", StringComparison.OrdinalIgnoreCase)) return true;
-        if (!RoleKeyMap.TryGetValue(backendRole, out var roleKey)) return true;
-
-        try
-        {
-            var setting = await _db.Set<LoanMS.Domain.Entities.AppSetting>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(s => s.Key == MenuVisKey && s.UserId == null && !s.IsDeleted);
-            if (setting == null || string.IsNullOrWhiteSpace(setting.Value)) return true;
-
-            using var doc = JsonDocument.Parse(setting.Value);
-            if (!doc.RootElement.TryGetProperty(menuId, out var arr)) return true;
-            if (arr.ValueKind != JsonValueKind.Array) return true;
-
-            foreach (var item in arr.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String &&
-                    string.Equals(item.GetString(), roleKey, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            return false;
-        }
-        catch
-        {
-            return true;
-        }
+        public Dictionary<string, Dictionary<string, bool>> Roles { get; init; } = new();
+        public Dictionary<string, string[]> Menus { get; init; } = new();
+        public Dictionary<string, string> NavKeyByMenuId { get; init; } = new();
     }
 
-    public async Task<HashSet<string>> GetDeniedPermissionsAsync(string? backendRole, IEnumerable<string> permissionKeys)
+    private static readonly Lazy<PermissionDefaults> Defaults = new(() =>
     {
-        var denied = new HashSet<string>();
-        if (string.IsNullOrWhiteSpace(backendRole)) return denied;
-        if (string.Equals(backendRole, "Admin", StringComparison.OrdinalIgnoreCase)) return denied;
-        if (!RoleKeyMap.TryGetValue(backendRole, out var roleKey)) return denied;
+        using var stream = typeof(RolePermissionService).Assembly.GetManifestResourceStream("RolePermissionDefaults.json")
+            ?? throw new InvalidOperationException("Embedded resource RolePermissionDefaults.json is missing.");
+        return JsonSerializer.Deserialize<PermissionDefaults>(stream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException("RolePermissionDefaults.json is empty.");
+    });
 
+    internal static PermissionDefaults DefaultSet => Defaults.Value;
+
+    private static bool IsAdmin(string? backendRole) =>
+        string.Equals(backendRole, "Admin", StringComparison.OrdinalIgnoreCase);
+
+    private static string? RoleKeyFor(string? backendRole) =>
+        !string.IsNullOrWhiteSpace(backendRole) && RoleKeyMap.TryGetValue(backendRole, out var k) ? k : null;
+
+    // ── Saved matrices (null = never saved or unreadable → defaults apply) ──
+    private async Task<string?> ReadSettingAsync(string key) =>
+        await _db.Set<LoanMS.Domain.Entities.AppSetting>()
+            .AsNoTracking()
+            .Where(s => s.Key == key && s.UserId == null && !s.IsDeleted)
+            .Select(s => s.Value)
+            .FirstOrDefaultAsync();
+
+    /// <summary>The saved boolean flags of one role, or null.</summary>
+    private async Task<Dictionary<string, bool>?> SavedFlagsAsync(string roleKey)
+    {
+        var json = await ReadSettingAsync(SettingKey);
+        if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
-            var setting = await _db.Set<LoanMS.Domain.Entities.AppSetting>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(s => s.Key == SettingKey && s.UserId == null && !s.IsDeleted);
-            if (setting == null || string.IsNullOrWhiteSpace(setting.Value)) return denied;
-
-            using var doc = JsonDocument.Parse(setting.Value);
-            if (!doc.RootElement.TryGetProperty(roleKey, out var roleObj)) return denied;
-
-            foreach (var key in permissionKeys)
-            {
-                if (roleObj.TryGetProperty(key, out var permVal) &&
-                    (permVal.ValueKind == JsonValueKind.False || permVal.ValueKind == JsonValueKind.True) &&
-                    !permVal.GetBoolean())
-                {
-                    denied.Add(key);
-                }
-            }
-            return denied;
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty(roleKey, out var roleObj) ||
+                roleObj.ValueKind != JsonValueKind.Object)
+                return null;
+            var flags = new Dictionary<string, bool>();
+            foreach (var p in roleObj.EnumerateObject())
+                if (p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    flags[p.Name] = p.Value.GetBoolean();
+            return flags;
         }
-        catch
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>The saved menu-visibility map (menu id → role keys), or null.</summary>
+    private async Task<Dictionary<string, List<string>>?> SavedMenusAsync()
+    {
+        var json = await ReadSettingAsync(MenuVisKey);
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
         {
-            return denied; // fail open — same reasoning as IsAllowedAsync
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+            var menus = new Dictionary<string, List<string>>();
+            foreach (var item in doc.RootElement.EnumerateObject())
+                if (item.Value.ValueKind == JsonValueKind.Array)
+                    menus[item.Name] = item.Value.EnumerateArray()
+                        .Where(v => v.ValueKind == JsonValueKind.String)
+                        .Select(v => v.GetString()!)
+                        .ToList();
+            return menus;
         }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>Saved value if the Admin saved one for this key, else the secure default.</summary>
+    private static bool? EffectiveFlag(string roleKey, string key, Dictionary<string, bool>? saved)
+    {
+        if (saved != null && saved.TryGetValue(key, out var v)) return v;
+        return DefaultSet.Roles.TryGetValue(roleKey, out var d) && d.TryGetValue(key, out var dv) ? dv : null;
     }
 
     public async Task<bool> IsAllowedAsync(string? backendRole, string permissionKey)
     {
-        if (string.IsNullOrWhiteSpace(backendRole)) return true;
-        if (string.Equals(backendRole, "Admin", StringComparison.OrdinalIgnoreCase)) return true;
-        if (!RoleKeyMap.TryGetValue(backendRole, out var roleKey)) return true;
+        if (IsAdmin(backendRole)) return true;
+        var roleKey = RoleKeyFor(backendRole);
+        if (roleKey == null) return false;
+        return EffectiveFlag(roleKey, permissionKey, await SavedFlagsAsync(roleKey)) == true;
+    }
 
-        try
+    public async Task<HashSet<string>> GetDeniedPermissionsAsync(string? backendRole, IEnumerable<string> permissionKeys)
+    {
+        var keys = permissionKeys.ToList();
+        if (IsAdmin(backendRole)) return new HashSet<string>();
+        var roleKey = RoleKeyFor(backendRole);
+        if (roleKey == null) return keys.ToHashSet();
+        var saved = await SavedFlagsAsync(roleKey);
+        return keys.Where(k => EffectiveFlag(roleKey, k, saved) != true).ToHashSet();
+    }
+
+    /// <summary>
+    /// Same precedence as the sidebar (hooks/usePermissions canAccessMenuItem,
+    /// Vanilla applySession): the menu's dedicated canNav* flag wins when the
+    /// role has one; otherwise the Menu Access Control role list decides.
+    /// </summary>
+    public async Task<bool> IsMenuAllowedAsync(string? backendRole, string menuId)
+    {
+        if (IsAdmin(backendRole)) return true;
+        var roleKey = RoleKeyFor(backendRole);
+        if (roleKey == null) return false;
+
+        if (DefaultSet.NavKeyByMenuId.TryGetValue(menuId, out var navKey))
         {
-            var setting = await _db.Set<LoanMS.Domain.Entities.AppSetting>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(s => s.Key == SettingKey && s.UserId == null && !s.IsDeleted);
-            if (setting == null || string.IsNullOrWhiteSpace(setting.Value)) return true;
-
-            using var doc = JsonDocument.Parse(setting.Value);
-            if (!doc.RootElement.TryGetProperty(roleKey, out var roleObj)) return true;
-            if (!roleObj.TryGetProperty(permissionKey, out var permVal)) return true;
-            if (permVal.ValueKind != JsonValueKind.False && permVal.ValueKind != JsonValueKind.True) return true;
-
-            return permVal.GetBoolean();
+            var flag = EffectiveFlag(roleKey, navKey, await SavedFlagsAsync(roleKey));
+            if (flag.HasValue) return flag.Value;
         }
-        catch
-        {
-            // Malformed/unexpected JSON -- fail open rather than locking
-            // everyone out over a settings-save glitch.
-            return true;
-        }
+        var savedMenus = await SavedMenusAsync();
+        if (savedMenus != null && savedMenus.TryGetValue(menuId, out var roles))
+            return roles.Contains(roleKey, StringComparer.OrdinalIgnoreCase);
+        return DefaultSet.Menus.TryGetValue(menuId, out var defaultRoles) &&
+               defaultRoles.Contains(roleKey, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The caller's OWN slice of the Admin-saved matrices, so a non-Admin UI
+    /// can apply what the Admin saved (the generic settings read is Admin-only
+    /// on purpose): the saved flags for the caller's role (null when none were
+    /// saved) and, for each menu id in the saved menu visibility map, whether
+    /// the caller's role is listed. Other roles' configuration is never
+    /// returned. The frontend merges this over the same defaults the backend
+    /// falls back to.
+    /// </summary>
+    public async Task<OwnPermissions> GetOwnPermissionsAsync(string? backendRole)
+    {
+        var roleKey = RoleKeyFor(backendRole);
+        if (roleKey == null) return new OwnPermissions(null, null, new Dictionary<string, bool>());
+        var menus = (await SavedMenusAsync() ?? new Dictionary<string, List<string>>())
+            .ToDictionary(m => m.Key, m => m.Value.Contains(roleKey, StringComparer.OrdinalIgnoreCase));
+        return new OwnPermissions(roleKey, await SavedFlagsAsync(roleKey), menus);
     }
 }
+
+/// <summary>See RolePermissionService.GetOwnPermissionsAsync.</summary>
+public sealed record OwnPermissions(
+    string? RoleKey,
+    Dictionary<string, bool>? Permissions,
+    Dictionary<string, bool> MenuVisibility);

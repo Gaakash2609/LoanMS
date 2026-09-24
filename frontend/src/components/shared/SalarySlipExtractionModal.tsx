@@ -6,6 +6,7 @@ import { kycApi } from '@/api/kycApi'
 import { parseSalarySlip, SALARY_SLIP_VISION_PROMPT } from '@/utils/salarySlipExtraction'
 import { PasswordException } from '@/utils/perfios/pdf'
 import { NumberInput } from '@/components/ui/NumberInput'
+import { formatCurrency as fmtINR } from '@/utils/format'
 
 // Salary Slip Extraction — Auto Income Check.
 // Faithful React port of legacy's PSE modal (index.html #pse-overlay + efin-app.js
@@ -16,7 +17,6 @@ import { NumberInput } from '@/components/ui/NumberInput'
 // them as the loan document and flows the income into the wizard). PDF text is
 // extracted locally; image slips go through the same /api/kyc/vision relay the
 // KYC step uses; password-protected PDFs are unlocked with one shared password.
-const fmtINR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 
 type SlipStatus = 'empty' | 'reading' | 'done' | 'locked' | 'error'
 interface Slip {

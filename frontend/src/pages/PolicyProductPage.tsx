@@ -23,27 +23,27 @@ const ACTIONS = [
   'Add DSA', 'Add partner', 'Configure lender',
 ]
 
-const ROLES = ['Admin', 'Login Team', 'Team Leader', 'Sales Exec', 'Partner', 'Accounts', 'Product Team']
+const ROLES = ['Chief Administrator', 'Credit Evaluation Officer', 'Deputy Sales Manager', 'Business Development Executive', 'Channel Partner', 'Payout & Reconciliation Officer', 'Product & Risk Officer']
 
 const MATRIX: Record<string, Record<string, boolean>> = {
-  'Create new application':     { Admin:true, 'Login Team':true, 'Team Leader':true, 'Sales Exec':true, Partner:true, Accounts:false, 'Product Team':false },
-  'View applications (own)':    { Admin:true, 'Login Team':true, 'Team Leader':true, 'Sales Exec':true, Partner:true, Accounts:true,  'Product Team':true  },
-  'View applications (all)':    { Admin:true, 'Login Team':true, 'Team Leader':true, 'Sales Exec':false, Partner:false, Accounts:true, 'Product Team':true  },
-  'Change loan status':         { Admin:true, 'Login Team':true, 'Team Leader':true, 'Sales Exec':false, Partner:false, Accounts:false,'Product Team':false },
-  'Approve loan':               { Admin:true, 'Login Team':false,'Team Leader':true, 'Sales Exec':false, Partner:false, Accounts:false,'Product Team':false },
-  'Disburse loan':              { Admin:true, 'Login Team':false,'Team Leader':false,'Sales Exec':false, Partner:false, Accounts:true, 'Product Team':false },
-  'Create customer':            { Admin:true, 'Login Team':true, 'Team Leader':true, 'Sales Exec':true,  Partner:true,  Accounts:false,'Product Team':false },
-  'Edit customer':              { Admin:true, 'Login Team':true, 'Team Leader':true, 'Sales Exec':true,  Partner:false, Accounts:false,'Product Team':false },
-  'Delete record':              { Admin:true, 'Login Team':false,'Team Leader':false,'Sales Exec':false, Partner:false, Accounts:false,'Product Team':false },
-  'View payout claims':         { Admin:true, 'Login Team':false,'Team Leader':true, 'Sales Exec':true,  Partner:true,  Accounts:true, 'Product Team':false },
-  'Approve payout':             { Admin:true, 'Login Team':false,'Team Leader':false,'Sales Exec':false, Partner:false, Accounts:true, 'Product Team':false },
-  'Generate reports':           { Admin:true, 'Login Team':false,'Team Leader':true, 'Sales Exec':false, Partner:false, Accounts:true, 'Product Team':true  },
-  'Manage users':               { Admin:true, 'Login Team':false,'Team Leader':false,'Sales Exec':false, Partner:false, Accounts:false,'Product Team':false },
-  'Manage settings':            { Admin:true, 'Login Team':false,'Team Leader':false,'Sales Exec':false, Partner:false, Accounts:false,'Product Team':false },
-  'View audit log':             { Admin:true, 'Login Team':false,'Team Leader':false,'Sales Exec':false, Partner:false, Accounts:false,'Product Team':false },
-  'Add DSA':                    { Admin:true, 'Login Team':false,'Team Leader':false,'Sales Exec':false, Partner:false, Accounts:false,'Product Team':false },
-  'Add partner':                { Admin:true, 'Login Team':false,'Team Leader':false,'Sales Exec':false, Partner:false, Accounts:false,'Product Team':false },
-  'Configure lender':           { Admin:true, 'Login Team':false,'Team Leader':false,'Sales Exec':false, Partner:false, Accounts:false,'Product Team':true  },
+  'Create new application':     { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':true, 'Channel Partner':true, 'Payout & Reconciliation Officer':false, 'Product & Risk Officer':false },
+  'View applications (own)':    { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':true, 'Channel Partner':true, 'Payout & Reconciliation Officer':true,  'Product & Risk Officer':true  },
+  'View applications (all)':    { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':true, 'Product & Risk Officer':true  },
+  'Change loan status':         { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'Approve loan':               { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':true, 'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'Disburse loan':              { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':true, 'Product & Risk Officer':false },
+  'Create customer':            { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':true,  Partner:true,  Accounts:false,'Product & Risk Officer':false },
+  'Edit customer':              { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':true,  Partner:false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'Delete record':              { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'View payout claims':         { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':true, 'Business Development Executive':true,  Partner:true,  Accounts:true, 'Product & Risk Officer':false },
+  'Approve payout':             { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':true, 'Product & Risk Officer':false },
+  'Generate reports':           { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':true, 'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':true, 'Product & Risk Officer':true  },
+  'Manage users':               { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'Manage settings':            { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'View audit log':             { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'Add DSA':                    { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'Add partner':                { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'Configure lender':           { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':true  },
 }
 
 // ── Rejection Reasons — RejectionReasonsController: GET open to any

@@ -97,7 +97,6 @@ export const usersApi = {
   // silently implying server-side paging/search that doesn't exist.
   getAll: () =>
     api.get<ApiResponse<User[]>>('/api/users'),
-  getById: (id: number) => api.get<ApiResponse<User>>(`/api/users/${id}`),
   // Read-only Location/Team display data for Part C — reuses the
   // existing per-user endpoint UsersController.GetLocationsAndTeams
   // already exposes (built for the legacy "Manage Locations & Teams"

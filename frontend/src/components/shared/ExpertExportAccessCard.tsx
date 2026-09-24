@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { roleTitle } from '@/pages/users/userConstants'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -93,7 +94,7 @@ export default function ExpertExportAccessCard() {
                 <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs cursor-pointer">
                   <input type="checkbox" checked={userIds.includes(u.id)} onChange={() => toggleUser(u.id)} />
                   <span className="font-semibold">{u.name}</span>
-                  <span className="text-gray-400">{u.email} · {u.role}</span>
+                  <span className="text-gray-400">{u.email} · {roleTitle(u.role)}</span>
                 </label>
               ))}
             </div>

@@ -6,6 +6,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { AlertTriangle, Check, FileCheck, FileImage, IdCard, ListChecks, Pencil, ScanLine, ShieldCheck, Upload, X } from 'lucide-react'
 import { kycApi } from '@/api/kycApi'
 import { extractPanData, extractAadhaarData } from '@/utils/kycExtraction'
+import { downloadBlob } from '@/utils/reportExport'
 import { InlineLoader, OverlayLoader } from '@/components/ui/LoadingSpinner'
 import { AADHAR_RE, PAN_RE } from '@/pages/wizard/wizardConstants'
 import { FormGroup, TextInput, SelectInput } from '@/pages/wizard/WizardFields'
@@ -327,12 +328,7 @@ Extract exactly what is on the card. Be accurate.`,
       '---',
       ...kycReportRows.map(r => `${r.label}: ${r.value}`),
     ]
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `KYC_Report_${ts.toISOString().slice(0, 10)}.txt`
-    a.click()
-    URL.revokeObjectURL(a.href)
+    downloadBlob(lines.join('\n'), `KYC_Report_${ts.toISOString().slice(0, 10)}.txt`, 'text/plain')
   }
 
   // Redesigned dropzone tile — replaces the old plain dashed upload row with

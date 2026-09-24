@@ -11,7 +11,8 @@ import { type PerfiosReportSaveRequest, type PerfiosReport } from '@/api/perfios
 import type { PerfiosUploadResult } from '@/hooks/usePerfiosUpload'
 import { fmtDate as fmtPerfiosDate } from '@/utils/perfios/analysis'
 import { serializePerfiosReport } from '@/utils/perfios/persist'
-import { fmtINR, getWizardDocs, MANDATORY_DOC_KEY_BY_NAME } from '@/pages/wizard/wizardConstants'
+import { getWizardDocs, MANDATORY_DOC_KEY_BY_NAME } from '@/pages/wizard/wizardConstants'
+import { formatCurrency as fmtINR } from '@/utils/format'
 import type { UploadedDocInfo } from '@/pages/wizard/wizardTypes'
 
 // Lazy-loaded Step-8 extraction modals — pdfjs-dist stays out of the main

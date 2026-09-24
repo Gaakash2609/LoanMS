@@ -8,6 +8,7 @@ import { loansApi } from '@/api/loansApi'
 import { CHANNELS, LEAD_SOURCES } from '@/pages/wizard/wizardConstants'
 import { FormGroup, TextInput, SelectInput } from '@/pages/wizard/WizardFields'
 import type { WizardData } from '@/pages/wizard/wizardTypes'
+import { roleTitle } from '@/pages/users/userConstants'
 
 export function Step1({ data, onChange, errors, touch }: {
   data: WizardData
@@ -199,7 +200,7 @@ export function Step1({ data, onChange, errors, touch }: {
               value={data.salesPerson}
               onChange={v => onChange({ salesPerson: v })}
               onBlur={() => touch('salesPerson')}
-              options={salesUsers.map(u => ({ value: u.fullName, label: `${u.fullName} (${u.role === 'TeamLeader' ? 'Team Leader' : 'Sales Person'})` }))}
+              options={salesUsers.map(u => ({ value: u.fullName, label: `${u.fullName} (${roleTitle(u.role)})` }))}
               placeholder={data.location ? '— Select Sales Person —' : '— Select a Location first —'}
             />
             {/* Vanilla hint (efin-app.js:6960) when a location has no sales staff. */}

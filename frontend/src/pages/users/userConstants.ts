@@ -6,12 +6,18 @@ import type { UserRole } from '@/types'
 
 // Legacy display labels for the role enum (efin-app.js ROLES[].label) — e.g.
 // the Sales enum shows as "Sales Person", Dsa as "DSA User", etc.
+// Display titles (business-owner rename 2026-09-24). Keys are the backend
+// UserRole enum names, which are never renamed.
 export const ROLE_LABELS: Record<string, string> = {
-  Admin: 'Admin', Manager: 'Manager', Sales: 'Sales Person', Dsa: 'DSA User',
-  Partner: 'Partner', LoginTeam: 'Login Team', TeamLeader: 'Team Leader',
-  Accounts: 'Accounts', LocationHead: 'Location Head',
-  OperationManager: 'Operation Manager', ProductTeam: 'Product Team',
+  Admin: 'Chief Administrator', Manager: 'Business Development Manager',
+  Sales: 'Business Development Executive', Dsa: 'Mass Channel Partner', Partner: 'Channel Partner',
+  LoginTeam: 'Credit Evaluation Officer', TeamLeader: 'Deputy Sales Manager',
+  Accounts: 'Payout & Reconciliation Officer', LocationHead: 'Zonal Manager',
+  OperationManager: 'Credit Evaluation Manager', ProductTeam: 'Product & Risk Officer',
 }
+
+/** Display title of a backend role (falls back to the raw value). */
+export const roleTitle = (role?: string | null) => (role ? ROLE_LABELS[role] ?? role : '')
 
 // Role → colour. The generic <Badge> component only has 5 variants
 // (default/success/warning/danger/info), so mapping all 11 roles onto it

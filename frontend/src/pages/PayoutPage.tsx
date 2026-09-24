@@ -13,6 +13,10 @@ import type { ReactNode } from 'react'
 import { buildCsv, downloadCsv } from '@/utils/loanExport'
 import ClaimStatusModal from '@/components/shared/ClaimStatusModal'
 import PayoutRulesTab from '@/components/settings/PayoutRulesTab'
+import { Navigate } from 'react-router-dom'
+import { PageLoader } from '@/components/ui/LoadingSpinner'
+import { useToast } from '@/store/toastStore'
+import { usePartnerMappedToDsa } from '@/hooks/usePermissions'
 import { SkeletonText } from '@/components/ui/Skeleton'
 import { settingsApi } from '@/api/settingsApi'
 import { NumberInput } from '@/components/ui/NumberInput'
@@ -544,7 +548,21 @@ function EarningsModal({ onClose }: { onClose: () => void }) {
 }
 
 
+// Vanilla's showPage guard (efin-app.js:1839): a Partner mapped to a DSA has
+// no Payout of its own — the mapped DSA user tracks it.
 export default function PayoutPage() {
+  const mappedToDsa = usePartnerMappedToDsa()
+  const toast = useToast()
+  useEffect(() => {
+    if (mappedToDsa) toast.error('Access Denied — your Payout is managed by your linked DSA')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mappedToDsa])
+  if (mappedToDsa === undefined) return <PageLoader />
+  if (mappedToDsa) return <Navigate to="/dashboard" replace />
+  return <PayoutPageContent />
+}
+
+function PayoutPageContent() {
   const qc = useQueryClient()
   const user = useAuthStore(s => s.user)
   // Claim deletion is strictly Admin — the endpoint's own [Authorize(Roles =

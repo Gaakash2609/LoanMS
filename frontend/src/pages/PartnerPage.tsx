@@ -13,6 +13,8 @@ import PageHeader from '@/components/shared/PageHeader'
 import { formatDate } from '@/utils/format'
 import { buildCsv, downloadCsv } from '@/utils/loanExport'
 import { useAuthStore } from '@/store/authStore'
+import { DSA_FULL_DETAIL_ROLES } from '@/routes/pageAccess'
+import type { UserRole } from '@/types'
 
 // Partner Management — legacy page-partner-mgmt (efin-app.js's pm*
 // functions). Had NO React equivalent at all before this: DsaPage queried
@@ -39,10 +41,12 @@ export default function PartnerPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [error, setError] = useState('')
 
+  // Master prompt Part 6 — other roles receive only the lookup directory.
+  const fullDetail = DSA_FULL_DETAIL_ROLES.includes(user?.role as UserRole)
   // Matches DsaController's Create/Update/SetStatus [Authorize(Roles=...)].
-  const canManage = ['Admin', 'Sales', 'ProductTeam'].includes(user?.role ?? '')
+  const canManage = fullDetail && ['Admin', 'Sales', 'ProductTeam'].includes(user?.role ?? '')
   // Delete is narrower on the backend — [Authorize(Roles = "Admin,ProductTeam")].
-  const canDelete = ['Admin', 'ProductTeam'].includes(user?.role ?? '')
+  const canDelete = fullDetail && ['Admin', 'ProductTeam'].includes(user?.role ?? '')
   const [docsFor, setDocsFor] = useState<DsaPartner | null>(null)
   // Mapped-DSA badge → mapping overview (Vanilla pmRender's dsaCell button,
   // efin-app.js:30846: onclick="dsaOpenMappingOverview('${mappedDsa.id}')").
@@ -165,7 +169,7 @@ export default function PartnerPage() {
     ? partners.filter(p => p.mappedDsaId === mappedDsaPreview.id && p.id !== editingId).length
     : 0
 
-  const columns: Column<DsaPartner>[] = [
+  const allColumns: Column<DsaPartner>[] = [
     { key: 'name', label: 'Partner', render: p => (
       <div><p className="font-medium text-gray-900">{p.name}</p><p className="text-xs text-gray-500 font-mono">{p.code}</p></div>
     )},
@@ -207,6 +211,8 @@ export default function PartnerPage() {
     ) },
   ]
 
+  const columns = fullDetail ? allColumns : allColumns.filter(c => c.key === 'name')
+
   const activeCount = partners.filter(p => p.isActive).length
 
   return (
@@ -214,9 +220,11 @@ export default function PartnerPage() {
       <PageHeader title="Partner Management" subtitle={`${partners.length} partners`}
         action={
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="secondary" disabled={filtered.length === 0} onClick={exportCsv}>
-              <Download size={14} className="mr-1" />Export CSV
-            </Button>
+            {fullDetail && (
+              <Button size="sm" variant="secondary" disabled={filtered.length === 0} onClick={exportCsv}>
+                <Download size={14} className="mr-1" />Export CSV
+              </Button>
+            )}
             {canManage && (
               <Button size="sm" onClick={() => { setEditingId(null); setForm(EMPTY_FORM); setShowForm(true) }}>
                 <Plus size={14} className="mr-1" />Add Partner
@@ -231,13 +239,20 @@ export default function PartnerPage() {
           { label: 'Total Partners', value: partners.length, color: 'text-gray-900' },
           { label: 'Active', value: activeCount, color: 'text-green-600' },
           { label: 'Inactive', value: partners.length - activeCount, color: 'text-red-600' },
-        ].map(s => (
+        ].filter(s => fullDetail || s.label === 'Total Partners').map(s => (
           <Card key={s.label} className="py-4">
             <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
             <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
           </Card>
         ))}
       </div>
+
+      {!fullDetail && (
+        <p className="mb-4 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+          Directory view — PAN, contact details and KYC documents are shown only to Chief Administrator,
+          Product &amp; Risk Officer, Business Development Manager and Deputy Sales Manager.
+        </p>
+      )}
 
       {error && (
         <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
@@ -325,12 +340,14 @@ export default function PartnerPage() {
           <input value={search} onChange={e => { setSearch(e.target.value); setPage(1) }}
             placeholder="Search partners…"
             className="flex-1 max-w-xs border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-efin-blue" />
-          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as 'all'); setPage(1) }}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
+          {fullDetail && (
+            <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as 'all'); setPage(1) }}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          )}
         </div>
 
         <DataTable columns={columns} data={pageItems} isLoading={isLoading}

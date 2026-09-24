@@ -5,7 +5,6 @@ using LoanMS.Domain.Entities;
 using LoanMS.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
 
@@ -39,7 +38,6 @@ public class CibilPaymentHistoryIncludeTests
 
     private static CibilController CreateController(AppDbContext db) =>
         new(db,
-            new ConfigurationBuilder().Build(),
             new Mock<ICibilAnalysisService>().Object);
 
     [Fact]

@@ -52,7 +52,7 @@ public class WizardSaveDraftConcurrencyTests
             new Claim("role", "Sales")
         }, "TestAuth");
 
-        var controller = new WizardController(db, NullLogger<WizardController>.Instance, new FakeCacheService(),
+        var controller = new WizardController(db, NullLogger<WizardController>.Instance,
             RolePermissionTestDouble.AllowAll(), new LoanMS.API.Services.LoginUserAssignmentService(db))
         {
             ControllerContext = new ControllerContext

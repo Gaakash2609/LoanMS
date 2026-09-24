@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { roleTitle } from '@/pages/users/userConstants'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { UserPlus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -184,7 +185,7 @@ export default function TeamFormModal({
               className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-efin-blue">
               <option value="">— None —</option>
               {/* Legacy leader select shows "Name (Role)" (efin-app.js twPopulateUserSelect). */}
-              {users.map(u => <option key={u.id} value={u.id}>{u.fullName} ({u.role})</option>)}
+              {users.map(u => <option key={u.id} value={u.id}>{u.fullName} ({roleTitle(u.role)})</option>)}
             </select>
           </div>
 

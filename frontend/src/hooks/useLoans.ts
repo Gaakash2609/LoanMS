@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { loansApi } from '@/api/loansApi'
-import type { CreateLoanRequest, LoanFilter } from '@/types'
+import type { LoanFilter } from '@/types'
 import api from '@/api/axios'
 import type { ApiResponse } from '@/types'
 import { emailApi, lenderEmailThreadsApi } from '@/api/lenderEmailApi'
@@ -74,14 +74,6 @@ export function useDashboardBreakdown() {
     queryKey: ['loans', 'dashboard-breakdown'],
     queryFn:  () => loansApi.getAllPages({}),
     staleTime: 60_000,
-  })
-}
-
-export function useCreateLoan() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (data: CreateLoanRequest) => loansApi.create(data).then((r) => r.data),
-    onSuccess:  () => qc.invalidateQueries({ queryKey: LOAN_KEYS.all }),
   })
 }
 

@@ -50,15 +50,13 @@ public class WizardControllerTests
             .Options;
         var db = new AppDbContext(options);
 
-        var cache = new FakeCacheService();
-
         var claims = new ClaimsIdentity(new[]
         {
             new Claim("userId", currentUserId.ToString()),
             new Claim("role", currentUserRole)
         }, "TestAuth");
 
-        var controller = new WizardController(db, NullLogger<WizardController>.Instance, cache, RolePermissionTestDouble.AllowAll(),
+        var controller = new WizardController(db, NullLogger<WizardController>.Instance, RolePermissionTestDouble.AllowAll(),
             new LoanMS.API.Services.LoginUserAssignmentService(db))
         {
             ControllerContext = new ControllerContext

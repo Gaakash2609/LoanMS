@@ -186,11 +186,6 @@ export function advToServerFilter(f: AdvFilter): Partial<LoanFilter> {
   }
 }
 
-/** Distinct non-empty values for a dropdown, sorted. */
-export function distinct(values: (string | null | undefined)[]): string[] {
-  return Array.from(new Set(values.filter((v): v is string => !!v && v.trim() !== ''))).sort()
-}
-
 /** Maps an export scope onto the status the server should filter by. */
 export function scopeToStatus(scope: ExportScope): LoanStatus | undefined {
   if (scope === 'disbursed') return 'Disbursed' as LoanStatus

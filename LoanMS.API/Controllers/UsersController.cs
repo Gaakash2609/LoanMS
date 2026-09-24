@@ -21,21 +21,51 @@ public class UsersController : BaseController
     // rather than growing IUnitOfWork just for this one feature.
     private readonly AppDbContext _db;
     private readonly IEmailService _emailService;
+    private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
 
-    public UsersController(IUserService userService, AppDbContext db, IEmailService emailService)
+    public UsersController(IUserService userService, AppDbContext db, IEmailService emailService,
+        LoanMS.API.Services.IRolePermissionService rolePerm)
     {
         _userService = userService;
         _db = db;
         _emailService = emailService;
+        _rolePerm = rolePerm;
     }
 
-    /// <summary>Get all users [Admin only]</summary>
+    /// <summary>
+    /// Users list — Admin and ProductTeam see everyone; LocationHead sees,
+    /// read-only, the users mapped to its own Location(s) (master prompt Part 5).
+    /// </summary>
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = ReadRoles)]
     public async Task<IActionResult> GetAll()
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "users-mgmt"))
+            return Forbid();
+
         var result = await _userService.GetAllAsync();
-        return ApiResult(result);
+        if (!result.Success || result.Data == null || LoanMS.API.Services.OrgScope.IsOrgWide(CurrentUserRole))
+            return ApiResult(result);
+
+        var visible = (await LoanMS.API.Services.OrgScope.UserIdsInLocationsOf(_db, CurrentUserId).ToListAsync()).ToHashSet();
+        return ApiResult(ApiResponseDto<IEnumerable<UserDto>>.Ok(result.Data.Where(u => visible.Contains(u.Id)).ToList(), result.Message));
+    }
+
+    // Users-page readers, and who may manage accounts. ProductTeam manages
+    // users ("Onboard and manage Users" — DEFAULT_ROLES.product_team) but
+    // never an Admin account and never hands out the Admin role.
+    private const string ReadRoles = "Admin,ProductTeam,LocationHead";
+    private const string ManageRoles = "Admin,ProductTeam";
+
+    /// <summary>403 when a non-Admin caller targets an Admin account or the Admin role; null when allowed.</summary>
+    private async Task<IActionResult?> RefuseAdminEscalationAsync(int? targetUserId, LoanMS.Domain.Enums.UserRole? requestedRole)
+    {
+        if (LoanMS.API.Services.OrgScope.Is(CurrentUserRole, "Admin")) return null;
+        var touchesAdmin = requestedRole == LoanMS.Domain.Enums.UserRole.Admin ||
+            (targetUserId.HasValue && await _db.Users.AnyAsync(u => u.Id == targetUserId.Value && u.Role == LoanMS.Domain.Enums.UserRole.Admin));
+        return touchesAdmin
+            ? StatusCode(StatusCodes.Status403Forbidden, ApiResponseDto<bool>.Fail("Only an Admin can create or manage Admin accounts."))
+            : null;
     }
 
     /// <summary>Get minimal active-user list (id, name, role) for dropdowns like the wizard's
@@ -50,11 +80,17 @@ public class UsersController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Get user by ID [Admin only]</summary>
+    /// <summary>Get user by ID — same readers and scope as GetAll.</summary>
     [HttpGet("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = ReadRoles)]
     public async Task<IActionResult> GetById(int id)
     {
+        if (!await _rolePerm.IsMenuAllowedAsync(CurrentUserRole, "users-mgmt"))
+            return Forbid();
+        if (!LoanMS.API.Services.OrgScope.IsOrgWide(CurrentUserRole) &&
+            !await LoanMS.API.Services.OrgScope.UserIdsInLocationsOf(_db, CurrentUserId).AnyAsync(uid => uid == id))
+            return NotFound(ApiResponseDto<UserDto>.Fail("User not found."));
+
         var result = await _userService.GetByIdAsync(id);
         if (!result.Success) return NotFound(result);
         return Ok(result);
@@ -88,6 +124,16 @@ public class UsersController : BaseController
         return Ok(ApiResponseDto<object>.Ok(new { locations, salesTeams, opTeams }));
     }
 
+    /// <summary>
+    /// The signed-in user's own slice of the Admin-configured Roles &amp;
+    /// Permissions matrix and menu visibility (see
+    /// RolePermissionService.GetOwnPermissionsAsync). Lets every role's UI apply
+    /// what the Admin saved — the generic settings read stays Admin-only.
+    /// </summary>
+    [HttpGet("me/permissions")]
+    public async Task<IActionResult> GetMyPermissions() =>
+        Ok(ApiResponseDto<LoanMS.API.Services.OwnPermissions>.Ok(await _rolePerm.GetOwnPermissionsAsync(CurrentUserRole)));
+
     /// <summary>Get current user profile</summary>
     [HttpGet("profile")]
     public async Task<IActionResult> GetProfile()
@@ -113,14 +159,15 @@ public class UsersController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Create new user [Admin only]</summary>
+    /// <summary>Create new user [Admin, ProductTeam — only an Admin creates an Admin]</summary>
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = ManageRoles)]
     public async Task<IActionResult> Create([FromBody] CreateUserRequestDto request)
     {
         if (!ModelState.IsValid)
             return BadRequest(ApiResponseDto<UserDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
+        if (await RefuseAdminEscalationAsync(null, request.Role) is { } refused) return refused;
 
         ApiResponseDto<UserDto> result;
         try
@@ -237,14 +284,15 @@ public class UsersController : BaseController
         await _emailService.SendAsync(user.Email ?? "", user.FullName ?? "", subject, body);
     }
 
-    /// <summary>Update user [Admin only]</summary>
+    /// <summary>Update user [Admin, ProductTeam — only an Admin touches an Admin]</summary>
     [HttpPut("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = ManageRoles)]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateUserRequestDto request)
     {
         if (!ModelState.IsValid)
             return BadRequest(ApiResponseDto<UserDto>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
+        if (await RefuseAdminEscalationAsync(id, request.Role) is { } refused) return refused;
 
         // Capture the CURRENT SalesTeam/OpTeam before the service call
         // overwrites them — needed to correctly diff old→new (remove the
@@ -270,7 +318,7 @@ public class UsersController : BaseController
     }
 
     /// <summary>
-    /// Set another user's profile photo [Admin only]. Dedicated, minimal
+    /// Set another user's profile photo [Admin, ProductTeam]. Dedicated, minimal
     /// endpoint rather than reusing Update() above — Update()'s
     /// UpdateUserRequestDto requires FullName/Role/IsActive, and an Admin
     /// invitation-flow caller only ever has this one field to set safely,
@@ -279,9 +327,10 @@ public class UsersController : BaseController
     /// PhotoData, nothing else.
     /// </summary>
     [HttpPatch("{id:int}/photo")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = ManageRoles)]
     public async Task<IActionResult> SetPhoto(int id, [FromBody] SetUserPhotoRequestDto request)
     {
+        if (await RefuseAdminEscalationAsync(id, null) is { } refused) return refused;
         var user = await _db.Users.FindAsync(id);
         if (user == null) return NotFound(ApiResponseDto<bool>.Fail("User not found."));
         user.PhotoData = string.IsNullOrWhiteSpace(request.PhotoData) ? null : request.PhotoData;
@@ -291,7 +340,7 @@ public class UsersController : BaseController
     }
 
     /// <summary>
-    /// Activate/Deactivate a user [Admin only]. Same reasoning as SetPhoto
+    /// Activate/Deactivate a user [Admin, ProductTeam]. Same reasoning as SetPhoto
     /// above — dedicated, minimal endpoint rather than reusing Update(),
     /// which requires FullName/Role and carries the same frontend
     /// display-label vs backend-enum Role risk. Touches only IsActive.
@@ -300,9 +349,10 @@ public class UsersController : BaseController
     /// not just a display inconsistency.
     /// </summary>
     [HttpPatch("{id:int}/status")]
-    [Authorize(Roles = "Admin,ProductTeam")]
+    [Authorize(Roles = ManageRoles)]
     public async Task<IActionResult> SetStatus(int id, [FromBody] SetUserStatusRequestDto request)
     {
+        if (await RefuseAdminEscalationAsync(id, null) is { } refused) return refused;
         var user = await _db.Users.FindAsync(id);
         if (user == null) return NotFound(ApiResponseDto<bool>.Fail("User not found."));
         user.IsActive = request.IsActive;
@@ -353,9 +403,10 @@ public class UsersController : BaseController
     }
 
     [HttpPut("{id:int}/locations")]
-    [Authorize(Roles = "Admin,ProductTeam")]
+    [Authorize(Roles = ManageRoles)]
     public async Task<IActionResult> SetLocations(int id, [FromBody] List<int> locationIds)
     {
+        if (await RefuseAdminEscalationAsync(id, null) is { } refused) return refused;
         var user = await _db.Users.FindAsync(id);
         if (user == null) return NotFound(ApiResponseDto<bool>.Fail("User not found."));
 
@@ -398,9 +449,10 @@ public class UsersController : BaseController
     }
 
     [HttpPut("{id:int}/teams")]
-    [Authorize(Roles = "Admin,ProductTeam")]
+    [Authorize(Roles = ManageRoles)]
     public async Task<IActionResult> SetTeams(int id, [FromBody] SetTeamsRequestDto request)
     {
+        if (await RefuseAdminEscalationAsync(id, null) is { } refused) return refused;
         var user = await _db.Users.FindAsync(id);
         if (user == null) return NotFound(ApiResponseDto<bool>.Fail("User not found."));
 
@@ -540,13 +592,14 @@ public class UsersController : BaseController
         }
     }
 
-    /// <summary>Delete user [Admin only]</summary>
+    /// <summary>Delete user [Admin, ProductTeam — only an Admin deletes an Admin]</summary>
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = ManageRoles)]
     public async Task<IActionResult> Delete(int id)
     {
         if (id == CurrentUserId)
             return BadRequest(ApiResponseDto<bool>.Fail("Cannot delete your own account."));
+        if (await RefuseAdminEscalationAsync(id, null) is { } refused) return refused;
 
         var result = await _userService.DeleteAsync(id);
         return ApiResult(result);
@@ -564,17 +617,18 @@ public class UsersController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Admin resets another user's password [Admin only]. No current
-    /// password is required from the target user — Admin authorization is
-    /// enforced by the role check below, matching Create/Update/Delete on
-    /// this controller.</summary>
+    /// <summary>Resets another user's password [Admin, ProductTeam — only an
+    /// Admin resets an Admin's]. No current password is required from the
+    /// target user — authorization is the role check below, matching
+    /// Create/Update/Delete on this controller.</summary>
     [HttpPost("{id:int}/reset-password")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = ManageRoles)]
     public async Task<IActionResult> AdminResetPassword(int id, [FromBody] AdminResetPasswordRequestDto request)
     {
         if (!ModelState.IsValid)
             return BadRequest(ApiResponseDto<bool>.Fail(
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
+        if (await RefuseAdminEscalationAsync(id, null) is { } refused) return refused;
 
         var result = await _userService.AdminResetPasswordAsync(id, request);
         return ApiResult(result);

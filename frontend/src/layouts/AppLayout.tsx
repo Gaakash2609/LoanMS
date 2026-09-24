@@ -1,7 +1,8 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { useLoanStore } from '@/store/loanStore'
-import { useRolePermissionsQuery, useMenuVisibilityQuery, canAccessMenuItem } from '@/hooks/usePermissions'
+import { useRolePermissionsQuery, useMenuVisibilityQuery, isNavItemVisible, usePartnerMappedToDsa } from '@/hooks/usePermissions'
+import { PAGE_GUARDS } from '@/routes/pageAccess'
 
 import {
   LayoutDashboard, Users, CreditCard, Settings, Menu, X,
@@ -46,13 +47,12 @@ function useCloseOnOutsideClick<T extends HTMLElement>(ref: { current: T | null 
 const MOBILE_BREAKPOINT = 1101
 
 type NavIcon = React.ElementType
-// `menuId` links a nav item to its legacy Menu-Access-Control counterpart
-// (see constants/permissions.ts's ALL_MENU_ITEMS/NAV_PERM_KEY_BY_MENU_ID).
-// Items without one (Customers, CIBIL, Profile, Audit Log, Settings — none
-// of these existed as legacy sidebar entries) keep only the static `roles`
-// gate, unchanged from before. `menuId` as an array means "visible if ANY
-// of these legacy items would be visible" (Teams maps to three legacy
-// pages — team-overview/sales-teams/login-teams — collapsed into one link).
+// Each item's `roles` + `menuId` come from routes/pageAccess.ts PAGE_GUARDS —
+// the very entry its route's RouteGuard checks (master prompt Part 7), so the
+// sidebar and direct-URL access can't disagree. `menuId` links the item to its
+// legacy Menu-Access-Control counterpart (constants/permissions.ts
+// ALL_MENU_ITEMS / NAV_PERM_KEY_BY_MENU_ID); items without one (Audit Log,
+// Settings — never legacy sidebar entries) keep only the static `roles` gate.
 // Sidebar sections — mirror Vanilla's grouped .nav-section blocks
 // (index.html:381 Main Menu / Management / Team Management / Analytics /
 // Policy & Product / Settings). nav-text labels also match Vanilla.
@@ -65,40 +65,39 @@ const NAV_SECTIONS: { key: NavSectionKey; label: string }[] = [
   { key: 'policy',     label: 'Policy & Product' },
   { key: 'settings',   label: 'Settings' },
 ]
-interface NavItem { to: string; label: string; icon: NavIcon; section: NavSectionKey; roles?: UserRole[]; menuId?: string | string[] }
+interface NavItem { to: string; label: string; icon: NavIcon; section: NavSectionKey; roles?: readonly UserRole[]; menuId?: string | string[] }
 
 const NAV_ITEMS: NavItem[] = [
   // ── Main Menu (Vanilla order: Overview, Applications, Register New, EMI
   // Calculator, Tasks, Payout; React-only Customers/CIBIL appended). ──
-  { to: '/dashboard',      label: 'Overview',        icon: LayoutDashboard, section: 'main', menuId: 'dashboard' },
-  { to: '/loans',          label: 'Applications',    icon: CreditCard,      section: 'main', menuId: 'applications' },
-  { to: '/new-application',label: 'Register New',    icon: FilePlus,        section: 'main', menuId: 'new-application' },
-  { to: '/calculator',     label: 'EMI Calculator',  icon: Calculator,      section: 'main', menuId: 'calculator' },
-  { to: '/tasks',          label: 'Tasks',           icon: CheckSquare,     section: 'main', menuId: 'tasks-page' },
-  { to: '/payout',         label: 'Payout',          icon: IndianRupee,     section: 'main', roles: ['Admin','Manager','Accounts'], menuId: 'payout' },
+  { to: '/dashboard',      label: 'Overview',        icon: LayoutDashboard, section: 'main', ...PAGE_GUARDS['/dashboard'] },
+  { to: '/loans',          label: 'Applications',    icon: CreditCard,      section: 'main', ...PAGE_GUARDS['/loans'] },
+  { to: '/new-application',label: 'Register New',    icon: FilePlus,        section: 'main', ...PAGE_GUARDS['/new-application'] },
+  { to: '/calculator',     label: 'EMI Calculator',  icon: Calculator,      section: 'main', ...PAGE_GUARDS['/calculator'] },
+  { to: '/tasks',          label: 'Tasks',           icon: CheckSquare,     section: 'main', ...PAGE_GUARDS['/tasks'] },
+  { to: '/payout',         label: 'Payout',          icon: IndianRupee,     section: 'main', ...PAGE_GUARDS['/payout'] },
   // ── Management ──
-  { to: '/banks',          label: 'Banks / NBFC',        icon: BankIcon,      section: 'management', roles: ['Admin','Manager','ProductTeam'], menuId: 'banks' },
-  { to: '/incred',         label: 'InCred Integration',  icon: ExternalLink,  section: 'management', roles: ['Admin','Manager'], menuId: 'incred' },
-  { to: '/lender-config',  label: 'Lender Configuration',icon: Grid,          section: 'management', roles: ['Admin','Manager','ProductTeam'], menuId: 'lender-config' },
-  { to: '/dsa',            label: 'DSA Management',      icon: Briefcase,     section: 'management', roles: ['Admin','Manager','Sales','ProductTeam'], menuId: 'dsa-mgmt' },
-  { to: '/partners',       label: 'Partner Management',  icon: Handshake,     section: 'management', roles: ['Admin','Manager','Sales','ProductTeam'], menuId: 'partner-mgmt' },
+  { to: '/banks',          label: 'Banks / NBFC',        icon: BankIcon,      section: 'management', ...PAGE_GUARDS['/banks'] },
+  { to: '/incred',         label: 'InCred Integration',  icon: ExternalLink,  section: 'management', ...PAGE_GUARDS['/incred'] },
+  { to: '/lender-config',  label: 'Lender Configuration',icon: Grid,          section: 'management', ...PAGE_GUARDS['/lender-config'] },
+  { to: '/dsa',            label: 'DSA Management',      icon: Briefcase,     section: 'management', ...PAGE_GUARDS['/dsa'] },
+  { to: '/partners',       label: 'Partner Management',  icon: Handshake,     section: 'management', ...PAGE_GUARDS['/partners'] },
   // ── Team Management (Vanilla: three separate nav items — Team Overview 📊,
   // Sales Teams 👥, Login Teams 🔑 — not one consolidated link, efin-app.js
   // NAV config :785-787). Each is its own page/route now. ──
-  { to: '/teams',          label: 'Team Overview',   icon: Building2,     section: 'team', roles: ['Admin','Manager'], menuId: 'team-overview' },
-  { to: '/sales-teams',    label: 'Sales Teams',     icon: Users,         section: 'team', roles: ['Admin','Manager'], menuId: 'sales-teams' },
-  { to: '/login-teams',    label: 'Login Teams',     icon: KeyRound,      section: 'team', roles: ['Admin','Manager'], menuId: 'login-teams' },
-  { to: '/locations',      label: 'Locations',       icon: MapPin,        section: 'team', roles: ['Admin','Manager'], menuId: 'locations-mgmt' },
-  { to: '/users',          label: 'Users',           icon: UserCog,       section: 'team', roles: ['Admin'], menuId: 'users-mgmt' },
+  { to: '/teams',          label: 'Team Overview',   icon: Building2,     section: 'team', ...PAGE_GUARDS['/teams'] },
+  { to: '/sales-teams',    label: 'Sales Teams',     icon: Users,         section: 'team', ...PAGE_GUARDS['/sales-teams'] },
+  { to: '/login-teams',    label: 'Login Teams',     icon: KeyRound,      section: 'team', ...PAGE_GUARDS['/login-teams'] },
+  { to: '/locations',      label: 'Locations',       icon: MapPin,        section: 'team', ...PAGE_GUARDS['/locations'] },
+  { to: '/users',          label: 'Users',           icon: UserCog,       section: 'team', ...PAGE_GUARDS['/users'] },
   // ── Analytics ──
-  // roles MUST mirror the matching guard in AppRoutes.tsx exactly.
-  { to: '/reports',        label: 'Reports',           icon: BarChart3,   section: 'analytics', roles: ['Admin','Manager','TeamLeader','LoginTeam','LocationHead','OperationManager'], menuId: 'reports' },
-  { to: '/tickets',        label: 'Helpdesk Tickets',  icon: Ticket,      section: 'analytics', menuId: 'tickets' },
+  { to: '/reports',        label: 'Reports',           icon: BarChart3,   section: 'analytics', ...PAGE_GUARDS['/reports'] },
+  { to: '/tickets',        label: 'Helpdesk Tickets',  icon: Ticket,      section: 'analytics', ...PAGE_GUARDS['/tickets'] },
   // ── Policy & Product ──
-  { to: '/policy-product', label: 'Policy & Product', icon: Grid,         section: 'policy', roles: ['Admin','ProductTeam'], menuId: 'policy-product' },
+  { to: '/policy-product', label: 'Policy & Product', icon: Grid,         section: 'policy', ...PAGE_GUARDS['/policy-product'] },
   // ── Settings (React-only admin items + profile grouped here) ──
-  { to: '/settings',       label: 'Settings',        icon: Settings,      section: 'settings', roles: ['Admin'] },
-  { to: '/audit',          label: 'Audit Log',       icon: ClipboardList, section: 'settings', roles: ['Admin'] },
+  { to: '/settings',       label: 'Settings',        icon: Settings,      section: 'settings', ...PAGE_GUARDS['/settings'] },
+  { to: '/audit',          label: 'Audit Log',       icon: ClipboardList, section: 'settings', ...PAGE_GUARDS['/audit'] },
   // Security Roles is NOT a sidebar item in Vanilla — it's the Settings →
   // "Roles & Permissions" tab (SettingsPage hosts RolesPermissionsTab). The
   // /security-roles route still exists for direct access; removed from nav
@@ -259,26 +258,16 @@ export default function AppLayout() {
   // real legacy counterpart exists, it never removes the safety net.
   const { data: rolePermissions } = useRolePermissionsQuery()
   const { data: menuVisibility } = useMenuVisibilityQuery()
+  // Vanilla hides Payout from a Partner mapped to a DSA (unknown = hidden
+  // until that Partner's own record has loaded).
+  const partnerMappedToDsa = usePartnerMappedToDsa()
 
+  // The static `roles` list is a hard ceiling mirroring the route guard; the
+  // dynamic permission can only REMOVE an item an admin switched off, never
+  // reveal one the route would refuse (see isNavItemVisible).
   const items = NAV_ITEMS.filter(i => {
-    const staticAllowed = !i.roles || (user?.role && i.roles.includes(user.role as UserRole))
-    if (!i.menuId) return staticAllowed
-    const menuIds = Array.isArray(i.menuId) ? i.menuId : [i.menuId]
-    const dynamicResults = menuIds.map(id => canAccessMenuItem(id, user?.role, rolePermissions, menuVisibility))
-    if (dynamicResults.every(r => r === undefined)) return staticAllowed
-    // BUGFIX: this used to return `dynamicResults.some(...)` alone, letting a
-    // `true` from the permissions blob OVERRIDE the static `roles` list. Since
-    // that list mirrors the route guard in AppRoutes.tsx, any role whose
-    // canNav* flag was true saw a menu entry whose route then bounced it
-    // straight back to /dashboard — 29 such (role, route) pairs across 8
-    // roles, e.g. LocationHead seeing Users (canNavUsers=true) against a
-    // route guard of ['Admin'].
-    //
-    // The static list is now a hard ceiling: the dynamic permission can only
-    // ever REMOVE an item an admin has switched off, never reveal one the
-    // route would refuse. This strictly narrows what is shown — it grants
-    // nothing, and neither the route guards nor any API authorization change.
-    return staticAllowed && dynamicResults.some(r => r === true)
+    if (i.to === '/payout' && partnerMappedToDsa !== false) return false
+    return isNavItemVisible(i.roles, i.menuId, user?.role as UserRole | undefined, rolePermissions, menuVisibility)
   })
 
   // Sidebar hover-expand (legacy `.sidebar:hover`). Driven by explicit

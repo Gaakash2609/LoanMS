@@ -313,9 +313,3 @@ export const MANDATORY_DOC_KEY_BY_NAME: Record<string, string> = {
   'Last 6 Month Bank Statement': 'bankStatement6mo',
   'Business Vintage Proof': 'bizVintageProof',
 }
-
-// Money formatter (₹, no decimals) — shared across steps, doc rows and the
-// submission summary.
-export function fmtINR(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-}

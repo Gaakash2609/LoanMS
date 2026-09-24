@@ -577,76 +577,109 @@ public class LoanRepositoryTests
         result.Items.Should().NotContain(l => l.Id == 2);
     }
 
-    [Fact]
-    public async Task Manager_LocationAndTeam_Intersection_Enforced()
+    // ── Manager: Location OR Team (business-owner decision 2026-09-24) ─────────
+    // G-03 used to require BOTH the Manager's mapped Location AND mapped Team.
+    // The owner changed it to EITHER (a Manager must never see less than its own
+    // Team Leaders); a Manager with neither mapping still sees nothing.
+    private static async Task<(AppDbContext db, int managerId)> SeedManagerScopeAsync()
     {
-        // G-04→G-03 (confirmed final spec): Manager visibility is the
-        // INTERSECTION of mapped Location AND mapped Team. The Manager is mapped
-        // to Location 1 and leads Sales Team A. Loan 1 (team member's, at
-        // Location 1) is visible; Loan 2 (non-member's, same Location) is hidden
-        // by the Team leg.
         var db = CreateContext();
         var customer     = new Customer { Id = 1, FullName = "C1", Email = "c1@t.com", Phone = "9000000001" };
         var managerUser  = new User { Id = 1, FullName = "Mgr", Email = "mgr@efin.com", Role = UserRole.Manager };
         var memberUser   = new User { Id = 2, FullName = "Member", Email = "member@efin.com", Role = UserRole.Sales };
         var outsiderUser = new User { Id = 3, FullName = "Outsider", Email = "outsider@efin.com", Role = UserRole.Sales };
-        var location = new Location { Id = 1, Name = "Mumbai", City = "Mumbai", State = "MH" };
-        var team = new Team { Id = 1, Name = "Sales A", Type = "Sales", LocationId = location.Id, TeamLeadUserId = managerUser.Id };
-        db.AddRange(customer, managerUser, memberUser, outsiderUser, location, team);
-        await db.SaveChangesAsync();
-        db.Set<TeamMember>().Add(new TeamMember { TeamId = team.Id, UserId = memberUser.Id });
-        db.Set<UserLocation>().Add(new UserLocation { UserId = managerUser.Id, LocationId = location.Id });
-        db.Loans.Add(new Loan
-        {
-            Id = 1, LoanNumber = "EFIN2026TEST015", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
-            RequestedAmount = 100000, InterestRate = 10, TenureMonths = 12,
-            CustomerId = customer.Id, CreatedByUserId = memberUser.Id, LocationId = location.Id
-        });
-        db.Loans.Add(new Loan
-        {
-            Id = 2, LoanNumber = "EFIN2026TEST016", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
-            RequestedAmount = 100000, InterestRate = 10, TenureMonths = 12,
-            CustomerId = customer.Id, CreatedByUserId = outsiderUser.Id, LocationId = location.Id
-        });
-        await db.SaveChangesAsync();
-
-        var repo = new LoanRepository(db);
-        var result = await repo.GetPagedAsync(new LoanFilterDto(), currentUserId: managerUser.Id, currentUserRole: "Manager");
-
-        result.Items.Should().Contain(l => l.Id == 1);
-        result.Items.Should().NotContain(l => l.Id == 2);
-    }
-
-    [Fact]
-    public async Task Manager_TeamMemberLoan_ButLocationNotMapped_Hidden()
-    {
-        // Negative leg of G-03: even a team member's loan is hidden if its
-        // Location is NOT one of the Manager's mapped Locations. Proves the AND
-        // (intersection) — a mapped Team alone is not enough.
-        var db = CreateContext();
-        var customer    = new Customer { Id = 1, FullName = "C1", Email = "c1@t.com", Phone = "9000000001" };
-        var managerUser = new User { Id = 1, FullName = "Mgr", Email = "mgr@efin.com", Role = UserRole.Manager };
-        var memberUser  = new User { Id = 2, FullName = "Member", Email = "member@efin.com", Role = UserRole.Sales };
-        var mappedLoc   = new Location { Id = 1, Name = "Mumbai", City = "Mumbai", State = "MH" };
-        var otherLoc    = new Location { Id = 2, Name = "Delhi",  City = "Delhi",  State = "DL" };
+        var mappedLoc = new Location { Id = 1, Name = "Mumbai", City = "Mumbai", State = "MH" };
+        var otherLoc  = new Location { Id = 2, Name = "Delhi",  City = "Delhi",  State = "DL" };
         var team = new Team { Id = 1, Name = "Sales A", Type = "Sales", LocationId = mappedLoc.Id, TeamLeadUserId = managerUser.Id };
-        db.AddRange(customer, managerUser, memberUser, mappedLoc, otherLoc, team);
+        db.AddRange(customer, managerUser, memberUser, outsiderUser, mappedLoc, otherLoc, team);
         await db.SaveChangesAsync();
         db.Set<TeamMember>().Add(new TeamMember { TeamId = team.Id, UserId = memberUser.Id });
         db.Set<UserLocation>().Add(new UserLocation { UserId = managerUser.Id, LocationId = mappedLoc.Id });
-        // Loan is by a team member but at the UNMAPPED location → hidden.
-        db.Loans.Add(new Loan
+        Loan L(int id, int creator, int loc) => new()
         {
-            Id = 1, LoanNumber = "EFIN2026TEST017", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
+            Id = id, LoanNumber = $"EFIN2026MGR{id:000}", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
             RequestedAmount = 100000, InterestRate = 10, TenureMonths = 12,
-            CustomerId = customer.Id, CreatedByUserId = memberUser.Id, LocationId = otherLoc.Id
-        });
+            CustomerId = customer.Id, CreatedByUserId = creator, LocationId = loc
+        };
+        db.Loans.AddRange(
+            L(1, memberUser.Id,   mappedLoc.Id),   // team AND location
+            L(2, outsiderUser.Id, mappedLoc.Id),   // location only
+            L(3, memberUser.Id,   otherLoc.Id),    // team only
+            L(4, outsiderUser.Id, otherLoc.Id));   // neither
         await db.SaveChangesAsync();
+        return (db, managerUser.Id);
+    }
 
-        var repo = new LoanRepository(db);
-        var result = await repo.GetPagedAsync(new LoanFilterDto(), currentUserId: managerUser.Id, currentUserRole: "Manager");
+    [Fact]
+    public async Task Manager_SeesLoan_WhenLocationOrTeamMatches()
+    {
+        var (db, managerId) = await SeedManagerScopeAsync();
+        var result = await new LoanRepository(db).GetPagedAsync(new LoanFilterDto(), currentUserId: managerId, currentUserRole: "Manager");
+        result.Items.Select(l => l.Id).Should().BeEquivalentTo(new[] { 1, 2, 3 });
+    }
 
-        result.Items.Should().NotContain(l => l.Id == 1);
+    [Fact]
+    public async Task Manager_DoesNotSeeLoan_WhenNeitherLocationNorTeamMatches()
+    {
+        var (db, managerId) = await SeedManagerScopeAsync();
+        var result = await new LoanRepository(db).GetPagedAsync(new LoanFilterDto(), currentUserId: managerId, currentUserRole: "Manager");
+        result.Items.Should().NotContain(l => l.Id == 4);
+    }
+
+    [Fact]
+    public async Task Manager_WithNoLocationAndNoTeam_SeesNothing()
+    {
+        var (db, _) = await SeedManagerScopeAsync();
+        db.Users.Add(new User { Id = 50, FullName = "Unmapped Mgr", Email = "um@efin.com", Role = UserRole.Manager });
+        await db.SaveChangesAsync();
+        var result = await new LoanRepository(db).GetPagedAsync(new LoanFilterDto(), currentUserId: 50, currentUserRole: "Manager");
+        result.Items.Should().BeEmpty();
+    }
+
+    // ── TeamLeader: + DSA/Partner-sourced loans in own Location(s) ─────────────
+    private static async Task<(AppDbContext db, int tlId)> SeedTeamLeaderDsaAsync()
+    {
+        var db = CreateContext();
+        var customer = new Customer { Id = 1, FullName = "C1", Email = "c1@t.com", Phone = "9000000001" };
+        var tl       = new User { Id = 1, FullName = "TL", Email = "tl@efin.com", Role = UserRole.TeamLeader };
+        var stranger = new User { Id = 3, FullName = "Other team", Email = "o@efin.com", Role = UserRole.Sales };
+        var myLoc    = new Location { Id = 1, Name = "Mumbai", City = "Mumbai", State = "MH" };
+        var otherLoc = new Location { Id = 2, Name = "Delhi",  City = "Delhi",  State = "DL" };
+        var dsa      = new DsaPartner { Id = 5, Name = "DSA One", Code = "D1", PartnerType = PartnerType.Dsa };
+        var partner  = new DsaPartner { Id = 6, Name = "Partner One", Code = "P1", PartnerType = PartnerType.Partner };
+        db.AddRange(customer, tl, stranger, myLoc, otherLoc, dsa, partner);
+        await db.SaveChangesAsync();
+        db.Set<UserLocation>().Add(new UserLocation { UserId = tl.Id, LocationId = myLoc.Id });
+        Loan L(int id, int loc, int? dsaId, int? partnerId) => new()
+        {
+            Id = id, LoanNumber = $"EFIN2026TLD{id:000}", LoanType = LoanType.Personal, Status = LoanStatus.Draft,
+            RequestedAmount = 100000, InterestRate = 10, TenureMonths = 12,
+            CustomerId = customer.Id, CreatedByUserId = stranger.Id, LocationId = loc, DsaId = dsaId, PartnerId = partnerId
+        };
+        db.Loans.AddRange(
+            L(1, myLoc.Id,    dsa.Id, null),        // DSA-sourced, own location
+            L(2, myLoc.Id,    null, partner.Id),    // Partner-sourced, own location
+            L(3, otherLoc.Id, dsa.Id, null),        // DSA-sourced, other location
+            L(4, myLoc.Id,    null, null));         // another team's own loan, own location
+        await db.SaveChangesAsync();
+        return (db, tl.Id);
+    }
+
+    [Fact]
+    public async Task TeamLeader_SeesDsaAndPartnerLoans_InOwnLocation()
+    {
+        var (db, tlId) = await SeedTeamLeaderDsaAsync();
+        var result = await new LoanRepository(db).GetPagedAsync(new LoanFilterDto(), currentUserId: tlId, currentUserRole: "TeamLeader");
+        result.Items.Select(l => l.Id).Should().BeEquivalentTo(new[] { 1, 2 });
+    }
+
+    [Fact]
+    public async Task TeamLeader_DoesNotSee_DsaLoansElsewhere_Or_OtherTeamsLoans()
+    {
+        var (db, tlId) = await SeedTeamLeaderDsaAsync();
+        var result = await new LoanRepository(db).GetPagedAsync(new LoanFilterDto(), currentUserId: tlId, currentUserRole: "TeamLeader");
+        result.Items.Should().NotContain(l => l.Id == 3, "DSA loan outside the Team Leader's location");
+        result.Items.Should().NotContain(l => l.Id == 4, "non-DSA loan of another Sales Team stays hidden (G-15)");
     }
 
     [Fact]

@@ -30,8 +30,9 @@ import {
   STEP_LABELS, DEFAULT_WIZARD, WIZARD_PRODUCT_CONFIG,
   WIZ_STEP_COLORS, STEP_ICONS, CHECK_ICON_SVG, STEPPER_LABELS,
   normalizeReactLoanType, normalizeReactEmpType,
-  getWizardDocs, WIZ_MANDATORY_DOC_NAMES, MANDATORY_DOC_KEY_BY_NAME, fmtINR,
+  getWizardDocs, WIZ_MANDATORY_DOC_NAMES, MANDATORY_DOC_KEY_BY_NAME,
 } from '@/pages/wizard/wizardConstants'
+import { formatCurrency as fmtINR } from '@/utils/format'
 import { type WizardData, emptyData, type UploadedDocInfo } from '@/pages/wizard/wizardTypes'
 // Step-8 document machinery — extracted to its own module. Re-exported below so
 // the existing tests keep importing these from '@/pages/NewApplicationPage'.

@@ -77,9 +77,6 @@ export const incomeVerificationApi = {
       params: { applicantRole, applicantKey },
     }),
 
-  history: (loanId: number) =>
-    api.get<ApiResponse<IncomeVerificationResult[]>>(`/api/loans/${loanId}/income-verification/history`),
-
   manualReview: (loanId: number, verificationId: number, body: ManualReviewBody) =>
     api.post<ApiResponse<IncomeVerificationResult>>(
       `/api/loans/${loanId}/income-verification/${verificationId}/manual-review`, body),

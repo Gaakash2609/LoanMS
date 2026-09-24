@@ -27,13 +27,11 @@ namespace LoanMS.API.Controllers;
 public class CibilController : BaseController
 {
     private readonly AppDbContext _db;
-    private readonly IConfiguration _cfg;
     private readonly ICibilAnalysisService _cibilService;
 
-    public CibilController(AppDbContext db, IConfiguration cfg, ICibilAnalysisService cibilService)
+    public CibilController(AppDbContext db, ICibilAnalysisService cibilService)
     {
         _db            = db;
-        _cfg           = cfg;
         _cibilService  = cibilService;
     }
 

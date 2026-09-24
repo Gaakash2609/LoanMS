@@ -7,12 +7,10 @@ namespace LoanMS.Application.Services;
 public class CustomerService : ICustomerService
 {
     private readonly IUnitOfWork   _uow;
-    private readonly ICacheService _cache;
 
-    public CustomerService(IUnitOfWork uow, ICacheService cache)
+    public CustomerService(IUnitOfWork uow)
     {
         _uow   = uow;
-        _cache = cache;
     }
 
     public async Task<ApiResponseDto<CustomerDto>> GetByIdAsync(int id, int currentUserId, string callerRole = "Sales")

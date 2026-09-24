@@ -247,10 +247,6 @@ export interface LoginResponse {
   accessToken: string; refreshToken: string; expiresAt: string; user: User
 }
 
-export interface AIInsightResponse {
-  success: boolean; insight?: string; error?: string; aiEnabled: boolean
-}
-
 export interface LoanFilter {
   page?: number; pageSize?: number; search?: string; status?: LoanStatus
   // Gap 1 — multi-status filtering (Dashboard "In Process" drill-down).
@@ -283,12 +279,6 @@ export interface LoanFilterOptions {
   salesPeople: string[]; locations: string[]; channels: string[]; banks: string[]
   purposes: string[]; empTypes: string[]; cities: string[]; states: string[]
   genders: string[]; dsaNames: string[]; partners: string[]; companies: string[]
-}
-
-export interface CreateLoanRequest {
-  customerId: number; loanType: number; requestedAmount: number
-  interestRate: number; tenureMonths: number; purpose?: string
-  remarks?: string; assignedToUserId?: number
 }
 
 export interface CreateCustomerRequest {

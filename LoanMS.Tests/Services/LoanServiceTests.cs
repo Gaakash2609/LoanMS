@@ -16,7 +16,6 @@ public class LoanServiceTests
     private readonly Mock<ICustomerRepository>      _custRepoMock = new();
     private readonly Mock<IUserRepository>          _userRepoMock = new();
     private readonly Mock<ILoanStatusHistoryRepository> _histRepoMock = new();
-    private readonly Mock<ICacheService>            _cacheMock    = new();
     private readonly Mock<IEmailService>             _emailMock    = new();
     private readonly Mock<IEmailTemplateProvider>    _emailTplMock = new();
 
@@ -28,16 +27,6 @@ public class LoanServiceTests
         _uowMock.Setup(u => u.LoanStatusHistories).Returns(_histRepoMock.Object);
         _uowMock.Setup(u => u.SaveChangesAsync()).ReturnsAsync(1);
 
-        // Cache mock: GetAsync returns null (cache miss), SetAsync and RemoveByPrefix are no-ops
-        _cacheMock.Setup(c => c.GetAsync<DashboardStatsDto>(It.IsAny<string>()))
-                  .ReturnsAsync((DashboardStatsDto?)null);
-        _cacheMock.Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<DashboardStatsDto>(), It.IsAny<TimeSpan?>()))
-                  .Returns(Task.CompletedTask);
-        _cacheMock.Setup(c => c.RemoveByPrefixAsync(It.IsAny<string>()))
-                  .Returns(Task.CompletedTask);
-        _cacheMock.Setup(c => c.RemoveAsync(It.IsAny<string>()))
-                  .Returns(Task.CompletedTask);
-
         // Email mocks: no-op sends, template lookups return "no override" —
         // the stage-notification email trigger added to UpdateStatusAsync
         // should never fail a test that isn't specifically about it.
@@ -46,7 +35,7 @@ public class LoanServiceTests
         _emailTplMock.Setup(t => t.GetTemplateAsync(It.IsAny<string>()))
                   .ReturnsAsync(((string?)null, (string?)null));
 
-        return new LoanService(_uowMock.Object, _cacheMock.Object, _emailMock.Object, _emailTplMock.Object);
+        return new LoanService(_uowMock.Object, _emailMock.Object, _emailTplMock.Object);
     }
 
     [Fact]
@@ -307,10 +296,6 @@ public class LoanServiceTests
             new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Submitted, Comment = "Submitting" }, 1, "Admin");
 
         result.Success.Should().BeTrue();
-        // Phase 3 — status changes no longer touch the cache at all (there's no
-        // "dashboard:" or "loans:list:" cache left to invalidate); the repository
-        // save is what makes the change visible on the next read.
-        _cacheMock.Verify(c => c.RemoveByPrefixAsync(It.IsAny<string>()), Times.Never);
     }
 
     // ── Verified InCred disbursement gate ────────────────────────────────────
@@ -426,8 +411,7 @@ public class LoanServiceTests
         result1.Success.Should().BeTrue();
         result2.Success.Should().BeTrue();
         _loanRepoMock.Verify(r => r.GetDashboardStatsAsync(1, "Admin"), Times.Exactly(2));
-        _cacheMock.Verify(c => c.GetAsync<DashboardStatsDto>(It.IsAny<string>()), Times.Never);
-        _cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<DashboardStatsDto>(), It.IsAny<TimeSpan?>()), Times.Never);
+        LoanServiceHasNoCacheDependency();
     }
 
     [Fact]
@@ -443,11 +427,17 @@ public class LoanServiceTests
         var svc = CreateService();
         await svc.GetAllAsync(filter, 1, "Admin");
 
-        _cacheMock.Verify(c => c.GetAsync<PagedResultDto<LoanListDto>>(It.IsAny<string>()), Times.Never);
-        _cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<PagedResultDto<LoanListDto>>(), It.IsAny<TimeSpan?>()), Times.Never);
+        LoanServiceHasNoCacheDependency();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    // LoanService takes no ICacheService at all, so it cannot serve anything
+    // from a cache — guard against one being re-introduced.
+    private static void LoanServiceHasNoCacheDependency() =>
+        typeof(LoanService).GetConstructors()
+            .SelectMany(c => c.GetParameters())
+            .Should().NotContain(p => p.ParameterType == typeof(ICacheService));
 
     private static Loan CreateTestLoan() => new()
     {

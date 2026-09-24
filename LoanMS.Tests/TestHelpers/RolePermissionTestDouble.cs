@@ -8,11 +8,10 @@ namespace LoanMS.Tests.TestHelpers;
 ///
 /// IRolePermissionService layers the Admin-configurable Roles-and-Permissions
 /// matrix on top of (never instead of) the fixed [Authorize(Roles = ...)]
-/// attributes, and it is fail-open by contract: a key absent from
-/// GetDeniedPermissionsAsync means "allowed". Allowing everything therefore
-/// reproduces the default state of a system whose permission matrix has not
-/// been narrowed, and keeps each suite focused on the behaviour it actually
-/// asserts rather than on permission-matrix configuration.
+/// attributes. Allowing everything reproduces a matrix saved with every
+/// permission switched on, and keeps each suite focused on the behaviour it
+/// actually asserts rather than on permission-matrix configuration. (The real
+/// service fails CLOSED to per-role defaults — see RolePermissionFailClosedTests.)
 ///
 /// Controllers that take this dependency gained it after these suites were
 /// written, which is what left the test project unable to compile.

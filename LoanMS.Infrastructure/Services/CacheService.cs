@@ -59,27 +59,16 @@ public class DistributedCacheService : ICacheService
         try { await _cache.RemoveAsync(key); }
         catch (Exception ex) { _log.LogWarning(ex, "Cache REMOVE failed for key {Key}", key); }
     }
-
-    public async Task RemoveByPrefixAsync(string prefix)
-    {
-        // For distributed cache, prefix removal requires key tracking
-        // Simple implementation: individual remove per known key pattern
-        _log.LogDebug("RemoveByPrefix called for {Prefix} (use Redis SCAN in production)", prefix);
-        await Task.CompletedTask;
-    }
 }
 
 public class MemoryCacheService : ICacheService
 {
-    private readonly IMemoryCache                _cache;
-    private readonly ILogger<MemoryCacheService> _log;
-    private readonly HashSet<string>             _keys = new();
+    private readonly IMemoryCache _cache;
     private static readonly TimeSpan DefaultExpiry = TimeSpan.FromMinutes(10);
 
-    public MemoryCacheService(IMemoryCache cache, ILogger<MemoryCacheService> log)
+    public MemoryCacheService(IMemoryCache cache)
     {
         _cache = cache;
-        _log   = log;
     }
 
     public Task<T?> GetAsync<T>(string key) where T : class
@@ -94,27 +83,13 @@ public class MemoryCacheService : ICacheService
         {
             AbsoluteExpirationRelativeToNow = expiry ?? DefaultExpiry
         };
-        lock (_keys) { _keys.Add(key); }
         _cache.Set(key, value, opts);
         return Task.CompletedTask;
     }
 
     public Task RemoveAsync(string key)
     {
-        lock (_keys) { _keys.Remove(key); }
         _cache.Remove(key);
-        return Task.CompletedTask;
-    }
-
-    public Task RemoveByPrefixAsync(string prefix)
-    {
-        List<string> toRemove;
-        lock (_keys) { toRemove = _keys.Where(k => k.StartsWith(prefix)).ToList(); }
-        foreach (var key in toRemove)
-        {
-            lock (_keys) { _keys.Remove(key); }
-            _cache.Remove(key);
-        }
         return Task.CompletedTask;
     }
 }

@@ -41,6 +41,13 @@ export default function UsersPage() {
   const [viewUser, setViewUser] = useState<User | null>(null)
   const [actionError, setActionError] = useState('')
   const signedInUser = useAuthStore(s => s.user)
+  // Master prompt Part 5 — Admin and ProductTeam manage accounts (UsersController
+  // ManageRoles); LocationHead only reads its own Location's users. Only an
+  // Admin may touch an Admin account or hand out the Admin role.
+  const isAdmin = signedInUser?.role === 'Admin'
+  const canManage = isAdmin || signedInUser?.role === 'ProductTeam'
+  const mayManage = (u: User) => canManage && (isAdmin || u.role !== 'Admin')
+  const roleOptions = ALL_ROLES.filter(r => isAdmin || r !== 'Admin')
 
   // BUGFIX (confirmed real, pre-existing gap — Phase 4 Part C audit): see
   // usersApi.ts's getAll() doc-comment. UsersController.GetAll() takes no
@@ -67,11 +74,13 @@ export default function UsersPage() {
     queryKey: ['team-options', 'Sales'],
     queryFn: () => usersApi.getAllTeams('Sales').then(r => r.data.data ?? []),
     staleTime: 300_000,
+    enabled: canManage,
   })
   const { data: opTeamOptions } = useQuery({
     queryKey: ['team-options', 'Login'],
     queryFn: () => usersApi.getAllTeams('Login').then(r => r.data.data ?? []),
     staleTime: 300_000,
+    enabled: canManage,
   })
 
   // Location filter — legacy's twApplyUserFilters matches on the user's
@@ -245,13 +254,13 @@ export default function UsersPage() {
         <UserActionsMenu
           isActive={u.isActive}
           onView={() => setViewUser(u)}
-          onEdit={() => openEditForm(u)}
-          onMap={() => setMappingUser(u)}
-          onToggle={() => toggle.mutate(u)}
-          onReset={() => setResetUser(u)}
+          onEdit={mayManage(u) ? () => openEditForm(u) : undefined}
+          onMap={mayManage(u) ? () => setMappingUser(u) : undefined}
+          onToggle={mayManage(u) ? () => toggle.mutate(u) : undefined}
+          onReset={mayManage(u) ? () => setResetUser(u) : undefined}
           // Hidden for the signed-in user — the backend rejects deleting your
           // own account, so offering it would only ever error.
-          onDelete={u.id !== signedInUser?.id
+          onDelete={mayManage(u) && u.id !== signedInUser?.id
             ? () => { if (confirm(`Delete "${u.fullName}"? This cannot be undone.`)) remove.mutate(u.id) }
             : undefined}
         />
@@ -268,7 +277,7 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader title="Users" subtitle="User accounts, roles, locations and team assignments"
-        action={<Button size="sm" onClick={openCreateForm}><Plus size={14} className="mr-1" />Add User</Button>} />
+        action={canManage ? <Button size="sm" onClick={openCreateForm}><Plus size={14} className="mr-1" />Add User</Button> : undefined} />
 
       {/* At-a-glance summary strip — same .kpi-card language as the Reports
           page, computed client-side from the already-fetched user list (no
@@ -328,7 +337,7 @@ export default function UsersPage() {
               <label className="text-xs font-medium text-gray-600 block mb-1">Role *</label>
               <select value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value as UserRole }))}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
-                {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                {roleOptions.map(r => <option key={r} value={r}>{ROLE_LABELS[r] ?? r}</option>)}
               </select>
             </div>
             <div>

@@ -328,14 +328,7 @@ try
     else
     {
         builder.Services.AddMemoryCache();
-        // Must be a singleton (not Scoped): MemoryCacheService tracks every cache
-        // key it sets in an in-memory _keys set so RemoveByPrefixAsync can find
-        // and evict them later (e.g. "loans:list:*" / "dashboard:*" after a new
-        // application is created). A Scoped registration hands out a brand-new,
-        // empty _keys set on every request, so RemoveByPrefixAsync always finds
-        // nothing to remove and cached dashboard/list results never get
-        // invalidated — the underlying IMemoryCache is itself already a
-        // singleton, so this only aligns the tracking set's lifetime with it.
+        // Singleton, matching the lifetime of the underlying IMemoryCache.
         builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
         Log.Information("Using in-memory cache (set Redis:Enabled=true for production)");
     }
@@ -763,28 +756,11 @@ try
     }
 
     // ── Middleware Pipeline ───────────────────────────────────────────────────
-    // ROOT CAUSE FIX (/app/assets/* 404s even though the files exist on disk):
-    // this app never called app.UseRouting() explicitly. Without it, ASP.NET
-    // Core's minimal hosting model auto-inserts BOTH routing AND endpoint
-    // EXECUTION at the position of the FIRST app.Map...() call — here, that
-    // was app.MapHealthChecks("/health") below. Every plain app.Use...()
-    // middleware registered AFTER that point in source (including the /app
-    // UseStaticFiles(...) further down, which serves the built React
-    // assets) was therefore running AFTER routing had already matched and
-    // fully executed an endpoint for the request — and app.MapFallback(
-    // "/app/{**path}", ...) matches every "/app/**" URL, so it always won
-    // that race and returned its own 404 before the static-file middleware
-    // ever got a chance to serve the real file. Confirmed directly from the
-    // server log: "Executing endpoint 'Fallback /app/{**path}'" appears for
-    // /app/assets/index-nsD2V_5W.js, /router-BIqs5oAk.js, /query-C-zbL-AZ.js
-    // and /index-91yS91os.css — never a static-file hit.
-    //
-    // Fix: call UseRouting() explicitly, here, before anything else in the
-    // pipeline (including Swagger/health checks below). This defers actual
-    // endpoint execution to the end of the pipeline as usual, so every
-    // regular middleware registered in between (static files, security
-    // headers, rate limiting, etc.) runs first, exactly in the order it's
-    // written below — no other reordering needed.
+    // UseRouting() is called explicitly and first so endpoint execution stays at
+    // the end of the pipeline and every middleware below (static files, security
+    // headers, rate limiting, ...) runs first, in the order written. Without it,
+    // minimal hosting inserts routing at the first Map*() call (MapHealthChecks)
+    // and endpoints would run before — and shadow — the static-file middleware.
     app.UseRouting();
 
     if (app.Environment.IsDevelopment())
@@ -814,18 +790,15 @@ try
     app.UseCors("RestrictedCors");
 
     // ── Static files MUST come before Auth/Security middleware ─────────────
-    // ROOT CUTOVER: UseDefaultFiles() used to be here, which is what mapped
-    // "/" to wwwroot/index.html — the legacy vanilla shell. It is deliberately
-    // NOT registered any more: "/" now falls through to the MapFallback at the
-    // bottom, which serves the React shell. The legacy file itself is left on
-    // disk and stays reachable at its explicit path "/index.html" (served by
-    // the static middleware below) as a grace-period escape hatch.
-
-    // Legacy shell retired (owner confirmed 2026-09-23: nobody uses it). Its
-    // api-bridge.js kept a localStorage mirror that never dropped rows deleted
-    // on the server (locations, payout claims), so deleted data could reappear
-    // on another device. Send the explicit "/index.html" to the React app
-    // instead; the legacy files stay on disk only as a code reference.
+    // No UseDefaultFiles(): bare "/" falls through to the MapFallback at the
+    // bottom, which serves the React shell.
+    //
+    // Legacy vanilla shell retired (owner confirmed 2026-09-23: nobody uses it).
+    // Its api-bridge.js kept a localStorage mirror that never dropped rows
+    // deleted on the server, so deleted data could reappear on another device.
+    // The explicit "/index.html" is therefore redirected to the React app. The
+    // legacy files stay on disk only as a code reference; their /js, /css and
+    // /perfios assets are still served by the wwwroot static-file middleware.
     app.Use(async (context, next) =>
     {
         if (string.Equals(context.Request.Path.Value, "/index.html", StringComparison.OrdinalIgnoreCase))
@@ -873,85 +846,30 @@ try
         return lastSegment.Contains('.');
     }
 
-    // Serve the React app. (This comment previously claimed the legacy shell
-    // had been retired, that wwwroot/index.html no longer existed and that "/"
-    // 302'd to "/app" — none of which was ever true. As of the root cutover the
-    // accurate statement is: React is served from "/", "/app/**" 301-redirects
-    // to the root equivalent, and the legacy shell is still on disk, reachable
-    // only at its explicit "/index.html" path.)
-    //
-    // ROOT CAUSE FIX (blank /app + 404s on /app/assets/*.js + empty-MIME CSS):
-    // this block used to be gated behind `if (Directory.Exists(wwwroot/react))`,
-    // checked ONCE at startup. Middleware registration only happens while the
-    // pipeline is being built — if `dotnet run` started before `npm run build`
-    // had produced wwwroot/react (or a later frontend rebuild happened without
-    // restarting the API), this entire block silently never got wired up for
-    // the rest of that process's life. Every /app/assets/* request then fell
-    // through, unmatched, to the generic bottom MapFallback further down,
-    // which correctly refuses to serve *.js/*.css as index.html and instead
-    // returns a bare 404 with no Content-Type set — exactly the "404 on the
-    // JS bundles" / "CSS refused, MIME type is empty" errors reported (Chrome
-    // phrases the same contentless 404 differently for a <script type=module>
-    // vs a <link rel=stylesheet>). Meanwhile bare "/app" (no dot in the path)
-    // still resolved to index.html via that same bottom fallback, which is
-    // why the page loaded (blank) instead of 404ing outright.
-    //
-    // Fix: always register this middleware — never make it conditional on
-    // build timing. PhysicalFileProvider throws if its root directory is
-    // missing at construction time, so we just ensure the directory exists
-    // first (harmless no-op if it's already there from a build). Because
-    // PhysicalFileProvider reads from disk on every request, a later
-    // `npm run build` is picked up immediately with no backend restart
-    // needed — only a truly empty/missing wwwroot/react (nothing built yet)
-    // will 404, which is correct behavior.
+    // Serve the React build (wwwroot/react). Always registered — never gated on
+    // the directory existing at startup — so a later `npm run build` is picked
+    // up without restarting the API. PhysicalFileProvider needs its root to
+    // exist, hence CreateDirectory (a no-op once the frontend has been built).
     var reactRoot = Path.Combine(app.Environment.WebRootPath, "react");
     Directory.CreateDirectory(reactRoot);
 
-    // ROOT CUTOVER: the React build is now served from the site ROOT, not from
-    // "/app". RequestPath is empty, so wwwroot/react/assets/* answers
-    // /assets/* — which is exactly what the built index.html references after
-    // vite.config.ts's base was switched to '/'.
-    //
-    // Registered AFTER the wwwroot provider above, which is what keeps the two
-    // trees from fighting: the only filename present in both is index.html, and
-    // wwwroot's copy (legacy) wins for the explicit "/index.html" request — the
-    // escape hatch. Everything else is disjoint: legacy owns /js, /css,
-    // /perfios; React owns /assets. Bare "/" matches neither provider (no
-    // UseDefaultFiles any more) and falls through to MapFallback -> React.
+    // React is served from the site root: wwwroot/react/assets/* answers
+    // /assets/* (vite.config.ts base '/'). The wwwroot and react trees are
+    // disjoint (legacy: /js, /css, /perfios; React: /assets) apart from
+    // index.html, and "/index.html" never reaches either provider because it
+    // is redirected above. Bare "/" matches neither and falls through to
+    // MapFallback -> React.
     app.UseStaticFiles(new StaticFileOptions
     {
         FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(reactRoot),
         RequestPath = ""
     });
 
-    // ROOT CAUSE FIX #2 (still 404ing after the UseRouting() fix above):
-    // confirmed by actually running this exact pipeline shape against a
-    // live Kestrel server and curl-testing it directly. A MapGet/MapFallback
-    // registered under "/app" are ENDPOINTS (resolved via routing), and an
-    // endpoint that matches — MapFallback("/app/{**path}") matches every
-    // "/app/**" URL — always wins the request over the earlier
-    // UseStaticFiles(/app) middleware above, no matter the registration
-    // order or whether UseRouting() is called explicitly. Verified: with
-    // MapFallback in place, a request for a file that genuinely exists on
-    // disk under wwwroot/react/assets still gets a bare 404 from the
-    // fallback, never reaching the static file middleware. Removing the
-    // Map*() endpoints entirely and replacing them with a plain
-    // app.Use(...) middleware — not routing/endpoints at all — removes
-    // that conflict: verified serving the same real file returns
-    // 200 + correct Content-Type, a missing file still correctly 404s, and
-    // a client-side route like "/app/dashboard" still correctly falls back
-    // to index.html.
-    // ROOT CUTOVER: "/app/**" is no longer a mount point, it is a permanent
-    // redirect to the same path at the root. This is what keeps every bookmark,
-    // browser-history entry and previously-sent link working — "/app/loans/42"
-    // becomes "/loans/42", and bare "/app" becomes "/". Query strings are
-    // carried across unchanged.
-    //
-    // 301 (not 302) because this move is permanent and we want browsers and
-    // proxies to stop asking for the old path. Kept as plain middleware rather
-    // than a Map*() endpoint for the same reason the previous implementation
-    // was: an endpoint registered under "/app" wins over the static-file
-    // middleware and would shadow real files.
+    // "/app/**" (the old React mount point) permanently redirects (301) to the
+    // same path at the root, query string included, so old bookmarks and links
+    // keep working: "/app/loans/42" -> "/loans/42", "/app" -> "/". Plain
+    // middleware rather than a Map*() endpoint: an endpoint under "/app" would
+    // win over the static-file middleware and shadow real files.
     app.Use(async (context, next) =>
     {
         if (!context.Request.Path.StartsWithSegments("/app", out var remainder))
@@ -969,10 +887,8 @@ try
     app.UseAuthorization();
     app.MapControllers();
     // Final catch-all for any request that matched no static file and no API
-    // controller. After the root cutover this serves the REACT shell, which is
-    // what makes "/" and every client-side route (and a hard refresh on one)
-    // work. The legacy shell is not deleted — it is simply no longer the
-    // fallback, and is reached only via the explicit "/index.html" path.
+    // controller: serves the React shell, which is what makes "/" and every
+    // client-side route (and a hard refresh on one) work.
     app.MapFallback(context =>
     {
         // BUGFIX (confirmed at runtime): an unmatched /api/* path fell straight
@@ -1011,10 +927,8 @@ try
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return Task.CompletedTask;
         }
-        // ROOT CUTOVER: unmatched client-side routes now fall back to the React
-        // shell, not the legacy one. This is what makes "/loans/42" survive a
-        // hard refresh and what serves bare "/". The legacy shell is still on
-        // disk and still reachable at its explicit "/index.html" path.
+        // Unmatched client-side routes fall back to the React shell — this is
+        // what makes "/loans/42" survive a hard refresh and what serves bare "/".
         context.Response.ContentType = "text/html";
         return context.Response.SendFileAsync(Path.Combine(reactRoot, "index.html"));
     });

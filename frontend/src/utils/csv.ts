@@ -1,6 +1,6 @@
-// Shared CSV helpers for bulk-import modals (eligibility lines, bank master).
-// Kept in one place so the line- and bank-import flows don't each carry their
-// own copy of the parser.
+// Shared CSV helpers for bulk-import modals (eligibility lines, bank master)
+// and the cell escaping used by every CSV export (loanExport, reportExport).
+// Kept in one place so the flows don't each carry their own copy.
 
 /** Minimal RFC-4180-ish CSV split: handles quoted fields containing commas. */
 export function parseCsvLine(line: string): string[] {
@@ -27,6 +27,11 @@ export function parseCsvRows(text: string, headerFirstCell?: string): string[][]
   const first = parseCsvLine(lines[0]).map(s => s.toLowerCase())
   const skipHeader = headerFirstCell ? first[0]?.includes(headerFirstCell.toLowerCase()) : false
   return lines.slice(skipHeader ? 1 : 0).map(parseCsvLine)
+}
+
+/** Quotes one CSV cell, doubling embedded quotes (shared by every CSV export). */
+export function csvEscape(v: string | number) {
+  return '"' + String(v ?? '').replace(/"/g, '""') + '"'
 }
 
 /** Truthy CSV boolean tokens: yes / true / 1 / y. */

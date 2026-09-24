@@ -16,9 +16,6 @@ export const authApi = {
   logout: () =>
     api.post<ApiResponse<boolean>>('/api/auth/logout'),
 
-  refresh: (refreshToken: string) =>
-    api.post<ApiResponse<LoginResponse>>('/api/auth/refresh', { refreshToken }),
-
   // Backend has always had these two endpoints (AuthController.cs /
   // PasswordResetService.cs) — the frontend just never called them, so
   // "Forgot password?" had nowhere to go. Wiring them up here.

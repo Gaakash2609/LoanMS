@@ -13,7 +13,6 @@ public class CustomerServiceTests
     private readonly Mock<IUnitOfWork>         _uowMock     = new();
     private readonly Mock<ICustomerRepository> _repoMock    = new();
     private readonly Mock<ILoanRepository>     _loanMock    = new();
-    private readonly Mock<ICacheService>        _cacheMock   = new();
 
     private CustomerService CreateService()
     {
@@ -21,17 +20,7 @@ public class CustomerServiceTests
         _uowMock.Setup(u => u.Loans).Returns(_loanMock.Object);
         _uowMock.Setup(u => u.SaveChangesAsync()).ReturnsAsync(1);
 
-        // Cache mock: always returns null (cache miss) — tests run against real data
-        _cacheMock.Setup(c => c.GetAsync<PagedResultDto<CustomerDto>>(It.IsAny<string>()))
-                  .ReturnsAsync((PagedResultDto<CustomerDto>?)null);
-        _cacheMock.Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<PagedResultDto<CustomerDto>>(), It.IsAny<TimeSpan?>()))
-                  .Returns(Task.CompletedTask);
-        _cacheMock.Setup(c => c.RemoveByPrefixAsync(It.IsAny<string>()))
-                  .Returns(Task.CompletedTask);
-        _cacheMock.Setup(c => c.RemoveAsync(It.IsAny<string>()))
-                  .Returns(Task.CompletedTask);
-
-        return new CustomerService(_uowMock.Object, _cacheMock.Object);
+        return new CustomerService(_uowMock.Object);
     }
 
     [Fact]
@@ -122,8 +111,10 @@ public class CustomerServiceTests
         await svc.GetAllAsync(1, 20, null, 1, "Admin");
 
         _repoMock.Verify(r => r.GetPagedAsync(1, 20, null, 1, "Admin"), Times.Exactly(2));
-        _cacheMock.Verify(c => c.GetAsync<PagedResultDto<CustomerDto>>(It.IsAny<string>()), Times.Never);
-        _cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<PagedResultDto<CustomerDto>>(), It.IsAny<TimeSpan?>()), Times.Never);
-        _cacheMock.Verify(c => c.RemoveByPrefixAsync(It.IsAny<string>()), Times.Never);
+        // CustomerService takes no ICacheService at all, so it cannot reach a
+        // cache — guard against one being re-introduced.
+        typeof(CustomerService).GetConstructors()
+            .SelectMany(c => c.GetParameters())
+            .Should().NotContain(p => p.ParameterType == typeof(ICacheService));
     }
 }
