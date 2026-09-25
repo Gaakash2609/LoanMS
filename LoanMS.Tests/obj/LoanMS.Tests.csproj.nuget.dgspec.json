@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj": {}
+    "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj": {}
   },
   "projects": {
-    "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.API\\LoanMS.API.csproj": {
+    "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.API\\LoanMS.API.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.API\\LoanMS.API.csproj",
+        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.API\\LoanMS.API.csproj",
         "projectName": "LoanMS.API",
-        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.API\\LoanMS.API.csproj",
+        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.API\\LoanMS.API.csproj",
         "packagesPath": "C:\\Users\\Aakash Gupta\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.API\\obj\\",
+        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.API\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Aakash Gupta\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -27,11 +27,11 @@
             "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj": {
-                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj"
+              "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj": {
+                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj"
               },
-              "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj": {
-                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj"
+              "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj": {
+                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj"
               }
             }
           }
@@ -50,7 +50,7 @@
           "auditLevel": "low",
           "auditMode": "all"
         },
-        "SdkAnalysisLevel": "10.0.300"
+        "SdkAnalysisLevel": "10.0.400"
       },
       "frameworks": {
         "net10.0": {
@@ -125,7 +125,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.302/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.AspNetCore": "(,10.0.32767]",
             "Microsoft.AspNetCore.Antiforgery": "(,10.0.32767]",
@@ -543,14 +543,14 @@
         }
       }
     },
-    "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj": {
+    "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj",
+        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj",
         "projectName": "LoanMS.Application",
-        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj",
+        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj",
         "packagesPath": "C:\\Users\\Aakash Gupta\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\obj\\",
+        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Aakash Gupta\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -566,8 +566,8 @@
             "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj": {
-                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj"
+              "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj": {
+                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj"
               }
             }
           }
@@ -585,7 +585,7 @@
           "auditLevel": "low",
           "auditMode": "all"
         },
-        "SdkAnalysisLevel": "10.0.300"
+        "SdkAnalysisLevel": "10.0.400"
       },
       "frameworks": {
         "net10.0": {
@@ -653,7 +653,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.302/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.CSharp": "(,4.7.32767]",
             "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -931,14 +931,14 @@
         }
       }
     },
-    "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj": {
+    "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj",
+        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj",
         "projectName": "LoanMS.Domain",
-        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj",
+        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj",
         "packagesPath": "C:\\Users\\Aakash Gupta\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\obj\\",
+        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Aakash Gupta\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -966,7 +966,7 @@
           "auditLevel": "low",
           "auditMode": "all"
         },
-        "SdkAnalysisLevel": "10.0.300"
+        "SdkAnalysisLevel": "10.0.400"
       },
       "frameworks": {
         "net10.0": {
@@ -988,7 +988,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.302/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.CSharp": "(,4.7.32767]",
             "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -1266,14 +1266,14 @@
         }
       }
     },
-    "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj": {
+    "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj",
+        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj",
         "projectName": "LoanMS.Infrastructure",
-        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj",
+        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj",
         "packagesPath": "C:\\Users\\Aakash Gupta\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\obj\\",
+        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Infrastructure\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Aakash Gupta\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -1289,11 +1289,11 @@
             "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj": {
-                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj"
+              "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj": {
+                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj"
               },
-              "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj": {
-                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj"
+              "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj": {
+                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj"
               }
             }
           }
@@ -1311,7 +1311,7 @@
           "auditLevel": "low",
           "auditMode": "all"
         },
-        "SdkAnalysisLevel": "10.0.300"
+        "SdkAnalysisLevel": "10.0.400"
       },
       "frameworks": {
         "net10.0": {
@@ -1387,7 +1387,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.302/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.CSharp": "(,4.7.32767]",
             "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -1665,14 +1665,14 @@
         }
       }
     },
-    "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj": {
+    "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj",
+        "projectUniqueName": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj",
         "projectName": "LoanMS.Tests",
-        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj",
+        "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Tests\\LoanMS.Tests.csproj",
         "packagesPath": "C:\\Users\\Aakash Gupta\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Tests\\obj\\",
+        "outputPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Tests\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Aakash Gupta\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -1688,17 +1688,17 @@
             "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.API\\LoanMS.API.csproj": {
-                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.API\\LoanMS.API.csproj"
+              "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.API\\LoanMS.API.csproj": {
+                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.API\\LoanMS.API.csproj"
               },
-              "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj": {
-                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj"
+              "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj": {
+                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Application\\LoanMS.Application.csproj"
               },
-              "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj": {
-                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj"
+              "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj": {
+                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Domain\\LoanMS.Domain.csproj"
               },
-              "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj": {
-                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\D\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj"
+              "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj": {
+                "projectPath": "C:\\Users\\Aakash Gupta\\Downloads\\New folder\\LoanMS\\LoanMS.Infrastructure\\LoanMS.Infrastructure.csproj"
               }
             }
           }
@@ -1716,7 +1716,7 @@
           "auditLevel": "low",
           "auditMode": "all"
         },
-        "SdkAnalysisLevel": "10.0.300"
+        "SdkAnalysisLevel": "10.0.400"
       },
       "frameworks": {
         "net10.0": {
@@ -1780,7 +1780,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.302/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.CSharp": "(,4.7.32767]",
             "Microsoft.VisualBasic": "(,10.4.32767]",
