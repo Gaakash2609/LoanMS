@@ -188,6 +188,11 @@ try
     builder.Services.AddScoped<IUserService, UserService>();
     builder.Services.AddScoped<ICustomerService, CustomerService>();
     builder.Services.AddScoped<ILoanService, LoanService>();
+    // Offer → Deviation → Credit Approval → Sanction → Disbursement. One scoped
+    // instance serves both the workflow API and LoanService's cascade hooks.
+    builder.Services.AddScoped<LoanMS.API.Services.OfferWorkflowService>();
+    builder.Services.AddScoped<LoanMS.API.Services.IOfferWorkflowService>(sp => sp.GetRequiredService<LoanMS.API.Services.OfferWorkflowService>());
+    builder.Services.AddScoped<LoanMS.Application.Interfaces.IOfferWorkflowHooks>(sp => sp.GetRequiredService<LoanMS.API.Services.OfferWorkflowService>());
     builder.Services.AddScoped<LoanMS.API.Services.IRolePermissionService, LoanMS.API.Services.RolePermissionService>();
     // Phase 2 RBAC — G-05 Login-User auto-assignment engine.
     builder.Services.AddScoped<LoanMS.API.Services.ILoginUserAssignmentService, LoanMS.API.Services.LoginUserAssignmentService>();
@@ -591,6 +596,29 @@ try
         }});
     });
 
+    // ── Forwarded headers (ALB / reverse proxy) ───────────────────────────────
+    // Behind the AWS load balancer every request reaches the container from the
+    // ALB's private IP, so Connection.RemoteIpAddress was the SAME for every user.
+    // The per-IP rate-limit policies above ("LoginPolicy" 5/15min, "RefreshPolicy"
+    // 60/15min, "GlobalPolicy" 200/min on AuthController) therefore behaved as ONE
+    // bucket shared by the whole company: a few logins/token-refreshes from
+    // different users/tabs could exhaust it and every other user then got sporadic
+    // 429s on login/refresh — data "sometimes" failing to load with the same
+    // account. Trusting X-Forwarded-For (ForwardLimit = 1 → only the entry the ALB
+    // itself appended, so a client cannot spoof its own IP) restores true per-client
+    // partitioning.
+    builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                           | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+        o.ForwardLimit = 1;
+        // Tasks sit in private subnets and are reachable only through the ALB,
+        // whose address is not fixed — so the default loopback-only trust list
+        // must be cleared for the header to be honoured at all.
+        o.KnownNetworks.Clear();
+        o.KnownProxies.Clear();
+    });
+
     var app = builder.Build();
 
     // ── AutoMapper configuration validation (dev only — catches mapping bugs) ─
@@ -761,6 +789,7 @@ try
     // headers, rate limiting, ...) runs first, in the order written. Without it,
     // minimal hosting inserts routing at the first Map*() call (MapHealthChecks)
     // and endpoints would run before — and shadow — the static-file middleware.
+    app.UseForwardedHeaders();
     app.UseRouting();
 
     if (app.Environment.IsDevelopment())

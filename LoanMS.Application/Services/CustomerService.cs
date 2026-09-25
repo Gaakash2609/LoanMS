@@ -42,11 +42,119 @@ public class CustomerService : ICustomerService
         // bug this mirrors. Reading straight through removes the staleness
         // window entirely.
         var result = await _uow.Customers.GetPagedAsync(page, pageSize, search, currentUserId, callerRole);
-        return ApiResponseDto<PagedResultDto<CustomerDto>>.Ok(result);
+        return ApiResponseDto<PagedResultDto<CustomerDto>>.Ok(MaskForRole(result, callerRole));
     }
+
+    // ── Global customer identification ────────────────────────────────────────
+    // The ONE place that decides which existing customer a PAN / mobile / email
+    // belongs to — used by the wizard (draft + submit), the customer create API,
+    // the duplicate/eligibility checks and check-pan. Global on purpose (a
+    // customer created by user A is found for user B); never merges records.
+
+    public async Task<CustomerIdentityMatchDto> ResolveIdentityAsync(string? pan, string? mobile, string? email,
+        int? ownCustomerId = null, int? ownLoanId = null, bool lockIdentifiers = false)
+    {
+        var panKey = Customer.NormalizePan(pan);
+        var mobileKey = Customer.NormalizeMobile(mobile);
+        var emailKey = Customer.NormalizeEmail(email);
+        // Serialise concurrent identification/creation for the same person, so
+        // two simultaneous first saves can't each create a customer for them.
+        if (lockIdentifiers) await _uow.Customers.LockIdentityKeysAsync(panKey, mobileKey, emailKey);
+        var rows = await _uow.Customers.FindByIdentityKeysAsync(panKey, mobileKey, emailKey) ?? new List<CustomerIdentityRow>();
+
+        CustomerIdentityRow? own = null;
+        var ownProvisional = false;
+        if (ownCustomerId is int ownId)
+        {
+            own = rows.FirstOrDefault(r => r.Id == ownId) ?? await _uow.Customers.GetIdentityRowAsync(ownId);
+            ownProvisional = own != null && ownLoanId is int loanId
+                && await _uow.Customers.IsProvisionalForLoanAsync(ownId, loanId);
+        }
+        return ResolveIdentity(panKey, rows, own, ownProvisional);
+    }
+
+    /// <summary>
+    /// Pure resolution rule. <paramref name="own"/> is the customer a draft being
+    /// saved/submitted is already linked to; when it is provisional (exists only
+    /// for that draft) it is the draft's own working record, not a competing
+    /// identity, and is superseded if the typed identifiers belong to someone else.
+    /// </summary>
+    public static CustomerIdentityMatchDto ResolveIdentity(string? panKey, IEnumerable<CustomerIdentityRow> matches,
+        CustomerIdentityRow? own, bool ownProvisional)
+    {
+        var candidates = matches
+            .Where(r => !(ownProvisional && own != null && r.Id == own.Id))
+            .GroupBy(r => r.Id).Select(g => g.First()).ToList();
+        var ids = candidates.Select(c => c.Id).OrderBy(i => i).ToList();
+
+        if (candidates.Count == 0)
+        {
+            if (own == null) return new CustomerIdentityMatchDto { Outcome = CustomerIdentityOutcome.New };
+            if (!ownProvisional && PanContradicts(panKey, own))
+                return Review(CustomerIdentityOutcome.Conflict, new List<int> { own.Id }, DraftOtherCustomerMessage);
+            return new CustomerIdentityMatchDto
+            {
+                Outcome = CustomerIdentityOutcome.Matched, CustomerId = own.Id,
+                IsExistingMaster = !ownProvisional, MatchedCustomerIds = new List<int> { own.Id },
+            };
+        }
+
+        if (candidates.Count > 1)
+            return Review(CustomerIdentityOutcome.Conflict, ids,
+                "These details match more than one existing customer (for example the PAN belongs to one customer " +
+                "and the mobile or email to another). The records were not merged — admin review required.");
+
+        var match = candidates[0];
+        if (match.IsDeleted)
+            return Review(CustomerIdentityOutcome.DeletedMatch, ids,
+                "These details match a customer record that was deleted earlier. It was not restored " +
+                "automatically — admin review required.");
+        if (PanContradicts(panKey, match))
+            return Review(CustomerIdentityOutcome.Conflict, ids,
+                "The mobile number or email belongs to an existing customer with a different PAN. The records " +
+                "were not merged — admin review required.");
+
+        if (own != null && own.Id != match.Id)
+        {
+            if (!ownProvisional)
+                return Review(CustomerIdentityOutcome.Conflict, new List<int> { own.Id, match.Id }, DraftOtherCustomerMessage);
+            return new CustomerIdentityMatchDto
+            {
+                Outcome = CustomerIdentityOutcome.Matched, CustomerId = match.Id, IsExistingMaster = true,
+                SupersededProvisionalCustomerId = own.Id, MatchedCustomerIds = ids,
+            };
+        }
+
+        return new CustomerIdentityMatchDto
+        {
+            Outcome = CustomerIdentityOutcome.Matched, CustomerId = match.Id,
+            IsExistingMaster = !(ownProvisional && own?.Id == match.Id), MatchedCustomerIds = ids,
+        };
+    }
+
+    private const string DraftOtherCustomerMessage =
+        "This application is linked to a different customer record than the PAN/mobile/email now entered. " +
+        "The records were not merged — admin review required.";
+
+    // A valid PAN typed on the form that differs from the PAN already on the
+    // matched record means a different person (or a wrong PAN) — never the same customer.
+    private static bool PanContradicts(string? panKey, CustomerIdentityRow row) =>
+        panKey != null && row.PanNormalized != null && !string.Equals(row.PanNormalized, panKey, StringComparison.Ordinal);
+
+    private static CustomerIdentityMatchDto Review(CustomerIdentityOutcome outcome, List<int> ids, string message) =>
+        new() { Outcome = outcome, MatchedCustomerIds = ids, Message = message };
 
     public async Task<ApiResponseDto<CustomerDto>> CreateAsync(CreateCustomerRequestDto request)
     {
+        // Global identity check first — the same rule the wizard uses, so this
+        // endpoint can never create a silent duplicate (or resurrect a deleted one).
+        var identity = await ResolveIdentityAsync(request.PanNumber, request.Phone, request.Email);
+        if (identity.NeedsReview)
+            return ApiResponseDto<CustomerDto>.Fail(identity.Message!, ApiErrorCodes.CustomerNeedsReview);
+        if (identity.Outcome == CustomerIdentityOutcome.Matched)
+            return ApiResponseDto<CustomerDto>.Fail(
+                "A customer with this PAN, mobile number or email already exists.", ApiErrorCodes.CustomerExists);
+
         // Including soft-deleted rows: the unique indexes on Email/PanNumber
         // still hold a deleted customer's values, so a filtered check passed
         // and the INSERT then failed with an unhandled duplicate-key 500.
@@ -218,7 +326,20 @@ public class CustomerService : ICustomerService
         => await _uow.Customers.PanExistsAsync(pan.ToUpper().Trim(), excludeId);
 
     public async Task<PagedResultDto<CustomerDto>> GetPagedAsync(int page, int pageSize, string? search, int currentUserId, string callerRole)
-        => await _uow.Customers.GetPagedAsync(page, pageSize, search, currentUserId, callerRole);
+        => MaskForRole(await _uow.Customers.GetPagedAsync(page, pageSize, search, currentUserId, callerRole), callerRole);
+
+    // The paged/search projection returned raw PAN and Aadhaar to every role;
+    // apply the same role rule MapToDto (detail) already uses.
+    private static PagedResultDto<CustomerDto> MaskForRole(PagedResultDto<CustomerDto> page, string callerRole)
+    {
+        if (page?.Items == null || _sensitiveRoles.Contains(callerRole ?? string.Empty)) return page!;
+        foreach (var c in page.Items)
+        {
+            c.PanNumber     = MaskPan(c.PanNumber);
+            c.AadhaarNumber = MaskAadhaar(c.AadhaarNumber);
+        }
+        return page;
+    }
 
     // Boundary check, not the primary fix (that is the gender <select> in
     // NewApplicationPage.tsx, which now sends 'M'/'F'/'O' -- exactly what

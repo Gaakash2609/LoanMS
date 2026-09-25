@@ -1,0 +1,59 @@
+run=4513 logged in: admin, manager, sales, sales2, zonal, risk
+PASS B1 first application for a new customer → 200
+PASS B2 other user, same PAN (lower/space) + same mobile → 409 ACTIVE_APPLICATION_EXISTS
+PASS B2b message is user-friendly and hides another user's application number
+PASS B3 draft autosave for the same customer → 409
+PASS B4 duplicate-check (UX) reports the block, no loan number for another user
+PASS B5 POST /api/loans for a customer with an active application → 409
+PASS B6 check-pan is global + normalised, and returns no customer data
+PASS B7 check-mobile (normalised +91) → exists
+PASS B8 exactly one customer for PAN P1
+PASS B9 blocked submit was audited (ApplicationBlocked)
+PASS C1 reject → 200
+PASS C2 RejectedAt set server-side NOW (payload's 2020 date ignored)
+PASS C3 new application right after rejection → 409 REAPPLY_COOLDOWN with date
+PASS C4 day 44 after rejection → still 409
+PASS C5 45 days after rejection → 200
+PASS C6 re-application reused the SAME customer (no duplicate)
+PASS D1 Sales archive → 403
+PASS D1b Manager archive → 403
+PASS D2 archive an ACTIVE application → 409 ARCHIVE_NOT_ALLOWED
+PASS D3 archive without a reason → 400
+PASS D4 ProductTeam → 404 (existing RBAC: ProductTeam has no loan visibility)
+PASS D5 Zonal Manager (own location) archives the rejected application → 200
+PASS D6 archive persisted in DB (flag, who, reason); status + RejectedAt untouched
+PASS D7 audit row (who/why) + timeline row written
+PASS D8 archive twice → 409
+PASS D9 default list (another user) hides the archived application
+PASS D10 Archived view lists it
+PASS D11 export excludes archived; archived export includes it
+PASS D12 dashboard totals exclude archived
+PASS D13 archived application still opens (history view) with archive info
+PASS D14 archived application cannot be re-opened → 409
+PASS D15 reports endpoint works with the archive scope
+PASS D16 archived + rejected < 45 days → new application still 409
+PASS D17 archived + rejected ≥ 45 days → 200
+PASS D18 only archived CLOSED application → new application allowed immediately
+PASS D19 archived + another active: archived one can't be reactivated → 409
+PASS E1 PAN of one customer + mobile of another → 409 CUSTOMER_NEEDS_REVIEW
+PASS E2 nothing merged / no new customer; both records unchanged
+PASS E3 needs-review attempt audited (identifiers masked)
+PASS E4 soft-deleted customer match → 409 needs review, record stays deleted
+PASS F1 resuming an old draft cannot bypass a 5-day-old rejection → 409
+PASS F2 soft-deleting the rejected application does NOT lift the cooldown → 409
+PASS F3a permanent customer delete with an active draft → refused (existing rule)
+PASS F4 discarding the draft (soft delete) → 200
+PASS F5 soft-deleted DRAFT no longer counts as active (still cooldown from rejection)
+PASS F3b permanent customer delete refused inside the 45-day window (new rule)
+PASS G1 Disbursed (running loan) blocks a new application
+PASS G2 after Close a new application is allowed at once
+PASS G3 reopen → 200 and RejectedAt history kept
+PASS G4 admin override Closed→active while another is active → 409
+PASS H1 12 parallel submits, brand-new customer → exactly 1×200, 11×409, 0×5xx (got 1/11/0)
+PASS H2 DB: exactly one customer and one active application for that person
+PASS H3 10 parallel POST /api/loans for one customer → 1×201, 9×409 (got [201, 409, 409, 409, 409, 409, 409, 409, 409, 409])
+PASS H4 8 parallel NEW drafts for one person → 1×200, 7×409 (got [200, 409, 409, 409, 409, 409, 409, 409])
+PASS H5 DB: one customer, one draft
+PASS Z1 no 5xx in 91 API calls
+
+SUMMARY: 56/56 checks passed

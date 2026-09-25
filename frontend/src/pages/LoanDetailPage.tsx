@@ -15,7 +15,7 @@ import {
   ArrowLeft,
   XCircle, Lock, Wallet,
   PauseCircle, PlayCircle,
-  Lightbulb, Copy, Check, Ellipsis, ChevronDown,
+  Lightbulb, Copy, Check, Ellipsis, ChevronDown, Archive,
 } from 'lucide-react'
 import type { Loan, ApiResponse } from '@/types'
 import { useState, useMemo, useEffect, lazy, Suspense } from 'react'
@@ -29,6 +29,8 @@ import { perfiosApi } from '@/api/perfiosApi'
 import { deserializePerfiosReport } from '@/utils/perfios/persist'
 import { FileCheck, LifeBuoy } from 'lucide-react'
 import LoanVerificationChecks from '@/components/shared/LoanVerificationChecks'
+import OffersTab, { workflowKey } from '@/components/shared/OffersTab'
+import { offerWorkflowApi } from '@/api/offerWorkflowApi'
 import { loansApi } from '@/api/loansApi'
 import api from '@/api/axios'
 
@@ -63,7 +65,7 @@ import { SkeletonText } from '@/components/ui/Skeleton'
 // Details / Disburse / Deviation / checks) live in Timeline → Actions
 // (LoanVerificationChecks). Each header action asks for a reason in one shared
 // modal and calls the existing dedicated endpoint.
-type HeaderAction = 'Reject' | 'Hold' | 'Un-hold' | 'Re-open'
+type HeaderAction = 'Reject' | 'Hold' | 'Un-hold' | 'Re-open' | 'Archive'
 const HEADER_ACTION_META: Record<HeaderAction, {
   title: string; hint: string; placeholder: string; required: boolean
   variant: 'primary' | 'danger' | 'secondary'; confirm: string
@@ -76,7 +78,13 @@ const HEADER_ACTION_META: Record<HeaderAction, {
               placeholder: 'Comment (optional)', required: false, variant: 'primary', confirm: 'Un-hold' },
   'Re-open': { title: 'Re-open Application', hint: 'Resumes processing from the stage this loan was in before rejection.',
               placeholder: 'Remarks (required)', required: true, variant: 'primary', confirm: 'Re-open' },
+  Archive:  { title: 'Archive Application',
+              hint: 'Moves it out of the active lists into Applications → Archived. The customer, documents and history are kept. It does not reset the 45-day re-application rule and cannot be undone.',
+              placeholder: 'Archive reason (required)', required: true, variant: 'secondary', confirm: 'Archive' },
 }
+
+// PATCH /api/loans/{id}/archive [Authorize(Roles=...)] — mirrored for the button.
+const ARCHIVE_ROLES = ['Admin', 'ProductTeam', 'LocationHead']
 
 // Vanilla header empNote (efin-app.js:27179) — the employment-keyed
 // verification hint. Matched on the applicant's employment type.
@@ -394,12 +402,14 @@ function LoanTasksTab({ loanId }: { loanId: number }) {
         <div className="space-y-2">
           {list.map(t => (
             <div key={t.id} className="flex items-center gap-3 p-3 rounded-lg border" style={{ borderColor: 'var(--border)' }}>
-              <input type="checkbox" checked={t.isCompleted} onChange={() => toggle.mutate(t.id)} aria-label={`Complete ${t.title}`} />
+              <input type="checkbox" checked={t.isCompleted} disabled={t.isPaused && !t.isCompleted} onChange={() => toggle.mutate(t.id)} aria-label={`Complete ${t.title}`}
+                title={t.isPaused && !t.isCompleted ? 'Paused — the application is on hold' : undefined} />
               <div className="flex-1 min-w-0">
                 <p className={`text-sm font-medium ${t.isCompleted ? 'line-through opacity-60' : ''}`} style={{ color: 'var(--text)' }}>{t.title}</p>
                 <p className="text-xs" style={{ color: 'var(--text3)' }}>
                   {t.assignedTo ? `Assigned to ${t.assignedTo}` : 'Unassigned'}{t.dueDate ? ` · due ${formatDate(t.dueDate)}` : ''}
                 </p>
+                {t.isPaused && !t.isCompleted && <p className="text-xs font-semibold" style={{ color: 'var(--warn)' }}>⏸ Paused{t.pauseReason ? ` — ${t.pauseReason}` : ''}</p>}
               </div>
               <span className="info-pill">{t.priority}</span>
             </div>
@@ -415,7 +425,7 @@ function LoanTasksTab({ loanId }: { loanId: number }) {
 // lender-details / tracking-tab / reports (index.html #page-app-detail).
 type DetailTabKey =
   | 'overview' | 'personal' | 'address' | 'employment' | 'references'
-  | 'documents' | 'lender-details' | 'tracking' | 'reports'
+  | 'documents' | 'lender-details' | 'offers' | 'tracking' | 'reports'
   | 'tasks' | 'obligations'
 
 // ── Reports tab ─────────────────────────────────────────────────────────
@@ -620,6 +630,10 @@ export default function LoanDetailPage() {
   const canTimelineTab   = useHasPermission('canTabTimeline')
   const canReportsTab    = useHasPermission('canTabReports')
   const canObligationsTab = useHasPermission('canTabObligations')
+  // Offers = this application's lender offers → deviation → credit approval →
+  // sanction → disbursement. Separate from Lender Details (lender master /
+  // processing lines), never stored there.
+  const canOffersTab     = useHasPermission('canTabOffers')
   // Vanilla gates the Overview verification-check badges (Doc/Income/Bank/ECS/
   // FI) on rd.canViewBanks (efin-app.js:2495) — external/limited roles don't
   // see internal processing flags. React previously showed them to everyone.
@@ -644,6 +658,7 @@ export default function LoanDetailPage() {
     { key: 'references',     label: 'References',       emoji: '🤝', allowed: canReferencesTab },
     { key: 'documents',      label: 'Documents',        emoji: '📁', allowed: canDocumentsTab },
     { key: 'lender-details', label: 'Lender Details',   emoji: '🏦', allowed: canLenderTab },
+    { key: 'offers',         label: 'Offers',           emoji: '📑', allowed: canOffersTab },
     { key: 'tracking',       label: 'Timeline',         emoji: '🔵', allowed: canTimelineTab },
     { key: 'reports',        label: 'Reports',          emoji: '📊', allowed: canReportsTab },
     // Vanilla has Tasks + Obligations as their own top-level detail tabs
@@ -658,11 +673,7 @@ export default function LoanDetailPage() {
   const activeDetailTab = visibleTabs.some(t => t.key === tab) ? tab : visibleTabs[0]?.key
   const canChangeStatus = useHasPermission('canChangeStatus')
   const canRejectApp    = useHasPermission('canRejectApp')
-  const canDisburse     = useHasPermission('canDisburse')
   const canHoldApp      = useHasPermission('canHoldApp')
-  // Drives the Timeline actions bar's Deviation / Skip / Approved-Deviation
-  // buttons (Vanilla buildTimelineActionButtons deviation branch).
-  const canDeviation    = useHasPermission('canDeviation')
   const closeAction = () => { setPendingAction(null); setActionReason(''); setActionError('') }
 
   // Header actions → each hits its own dedicated backend endpoint (unchanged):
@@ -675,18 +686,35 @@ export default function LoanDetailPage() {
         case 'Hold':    return loansApi.hold(loanId, reason)
         case 'Un-hold': return loansApi.unhold(loanId, reason || undefined)
         case 'Re-open': return loansApi.reopen(loanId, reason)
+        case 'Archive': return loansApi.archive(loanId, reason)
       }
     },
     onSuccess: () => {
       closeAction()
       qc.invalidateQueries({ queryKey: LOAN_KEYS.detail(Number(id)) })
       qc.invalidateQueries({ queryKey: ['loans'] })
+      // Reject / hold / un-hold / re-open cascade server-side into the offer
+      // workflow (deviations, sanction) and the application's tasks (pause, close).
+      qc.invalidateQueries({ queryKey: workflowKey(Number(id)) })
+      qc.invalidateQueries({ queryKey: ['tasks'] })
     },
     onError: (err: unknown) => {
       const d = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
       setActionError(d?.message || d?.errors?.join(' ') || 'This action could not be completed.')
     },
   })
+
+  // The lender the application is actually going with: the active sanction's
+  // lender, else the selected final offer's. Falls back to the first Lender
+  // Details (bank) line before any offer is final.
+  const { data: offerWorkflow } = useQuery({
+    queryKey: workflowKey(Number(id)),
+    queryFn: () => offerWorkflowApi.get(Number(id)).then(r => r.data.data ?? null),
+    enabled: !!loan && ['Offer', 'Decision', 'Approved', 'Acceptance', 'Disbursed', 'Closed'].includes(loan.status),
+    staleTime: 30_000,
+  })
+  const workflowLender = offerWorkflow?.sanctions.find(s => s.status === 'Active')?.lenderName
+    ?? offerWorkflow?.offers.find(o => o.status === 'Final')?.lenderName
 
   if (isLoading) return <PageLoader />
   if (!loan) return <div className="p-8 text-center text-gray-500">Loan not found</div>
@@ -704,21 +732,28 @@ export default function LoanDetailPage() {
   // Reject — same stages the old Actions card offered it at, still gated on
   // the Roles & Permissions canRejectApp flag.
   const canReject = canAct && canRejectApp
-    && ['Draft', 'Submitted', 'UnderReview', 'Approved', 'Acceptance'].includes(loan.status)
+    && ['Draft', 'Submitted', 'UnderReview', 'Offer', 'Decision', 'Approved', 'Acceptance'].includes(loan.status)
 
   // Hold / Un-hold — gated on canHoldApp (Roles & Permissions matrix) on top
   // of the same canAct role gate the transitions use, and on the loan's own
   // state: Hold only from an in-flight status, Un-hold only when held. The
   // backend enforces all of this independently (LoansController.Hold/Unhold).
-  const canHold   = canAct && canHoldApp && ['Submitted', 'UnderReview', 'Approved', 'Acceptance'].includes(loan.status)
+  const canHold   = canAct && canHoldApp && ['Submitted', 'UnderReview', 'Offer', 'Decision', 'Approved', 'Acceptance'].includes(loan.status)
   const canUnhold = canAct && canHoldApp && loan.status === 'OnHold'
 
   // Re-open window (45 days from creation) — same rule the old Re-open card
   // showed; the backend re-enforces it.
   const reopenDaysElapsed = (Date.now() - new Date(loan.createdAt).getTime()) / (1000 * 60 * 60 * 24)
   const reopenDaysLeft = Math.max(0, Math.ceil(45 - reopenDaysElapsed))
-  const showReopen = isAdmin && loan.status === 'Rejected'
+  // An archived application is final (no unarchive) — the backend refuses a
+  // re-open, so the button isn't offered.
+  const showReopen = isAdmin && loan.status === 'Rejected' && !loan.isArchived
   const reopenExpired = showReopen && reopenDaysElapsed > 45
+
+  // Archive — only closed/rejected applications (the backend refuses an
+  // active one with 409), only the roles PATCH /archive authorises.
+  const canArchive = ARCHIVE_ROLES.includes(user?.role ?? '') && !loan.isArchived
+    && (loan.status === 'Rejected' || loan.status === 'Closed')
 
   const copyLoanNumber = async () => {
     try {
@@ -732,7 +767,7 @@ export default function LoanDetailPage() {
   // placeholder until one is assigned, the rest are hidden when empty.
   const tip = employmentTip(loan.customer.employmentType)
   const salesPerson = loan.assignedTo?.fullName ?? loan.createdBy?.fullName
-  const lender = loan.bankLines?.[0]?.bankName
+  const lender = workflowLender ?? loan.bankLines?.[0]?.bankName
   const headerFacts: { label: string; value: string; muted?: boolean }[] = [
     { label: 'Requested amount', value: formatCurrency(loan.requestedAmount) },
     ...(loan.approvedAmount ? [{ label: 'Approved amount', value: formatCurrency(loan.approvedAmount) }] : []),
@@ -754,15 +789,46 @@ export default function LoanDetailPage() {
                     created) — read straight from the loan, empty ones hidden.
              Row 4: employment verification hint (Vanilla's header empNote).
              All handlers and permission gates are unchanged. */}
-      <header className="relative bg-surface rounded-[18px] border border-token p-5 md:p-6" style={{ boxShadow: '0 2px 12px rgba(10,88,154,.05)' }}>
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+      <header className="relative bg-surface rounded-[18px] border border-token px-5 py-3.5 md:px-6 md:py-4" style={{ boxShadow: '0 2px 12px rgba(10,88,154,.05)' }}>
+        {/* Row: Back (left) · ID + status + applicant (centre-left) · actions (right) — all on one line */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button onClick={() => navigate(-1)}
             className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold transition-colors hover:bg-[color:var(--surface2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]"
             style={{ color: 'var(--text2)' }}>
             <ArrowLeft size={16} /> Back
           </button>
 
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Identity — loan number + copy + status inline, applicant below */}
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h1 className="break-all text-xl md:text-2xl font-black leading-tight"
+                style={{ fontFamily: 'var(--font-head)', color: 'var(--text)', letterSpacing: '-.4px' }}>
+                {loan.loanNumber}
+              </h1>
+              <button type="button" onClick={copyLoanNumber}
+                aria-label={copied ? 'Application ID copied' : 'Copy application ID'} title={copied ? 'Copied' : 'Copy application ID'}
+                className="grid h-6 w-6 place-items-center rounded-lg border border-token transition-colors hover:bg-[color:var(--surface2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]"
+                style={{ color: copied ? 'var(--success)' : 'var(--text3)' }}>
+                {copied ? <Check size={13} /> : <Copy size={13} />}
+              </button>
+              <StatusBadge status={loan.status} />
+              {loan.isArchived && (
+                <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold"
+                  style={{ background: 'var(--surface2)', color: 'var(--text2)' }}>
+                  <Archive size={12} /> Archived
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <span className="rounded-md px-2 py-0.5 text-xs font-semibold" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
+                {loan.loanType} Loan
+              </span>
+              <span className="font-semibold" style={{ color: 'var(--text2)' }}>{loan.customer.fullName}</span>
+            </p>
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
             {/* Raise Ticket — parity with legacy openRaiseTicketFromApp
                 (efin-app.js:7805): a helpdesk ticket pre-linked to this loan. */}
             <Button size="sm" variant="secondary"
@@ -785,7 +851,7 @@ export default function LoanDetailPage() {
                 <Lock size={12} /> Re-open window expired
               </span>
             )}
-            {(canHold || canReject || isAdmin) && (
+            {(canHold || canReject || canArchive || isAdmin) && (
               <div className="relative">
                 <Button size="sm" variant="secondary" aria-haspopup="menu" aria-expanded={moreOpen}
                   onClick={() => setMoreOpen(o => !o)}>
@@ -797,7 +863,7 @@ export default function LoanDetailPage() {
                     <button type="button" aria-label="Close menu" tabIndex={-1} className="fixed inset-0 z-20 cursor-default" onClick={() => setMoreOpen(false)} />
                     <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-[270px] max-w-[calc(100vw-2rem)] rounded-2xl border border-token bg-surface p-1.5"
                       style={{ boxShadow: '0 14px 36px rgba(10,40,90,.16), 0 2px 6px rgba(10,40,90,.06)' }}>
-                      {(canHold || canReject) && (
+                      {(canHold || canReject || canArchive) && (
                         <p className="px-2.5 pb-1 pt-1.5 text-[11.5px] font-semibold" style={{ color: 'var(--text3)' }}>Application</p>
                       )}
                       {canHold && (
@@ -824,6 +890,18 @@ export default function LoanDetailPage() {
                           </span>
                         </button>
                       )}
+                      {canArchive && (
+                        <button type="button" role="menuitem" onClick={() => openAction('Archive')}
+                          className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-[color:var(--surface2)] focus:outline-none focus-visible:bg-[color:var(--surface2)]">
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: 'var(--surface2)', color: 'var(--text2)' }}>
+                            <Archive size={16} />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold" style={{ color: 'var(--text)' }}>Archive Application</span>
+                            <span className="block text-[11.5px] leading-snug" style={{ color: 'var(--text3)' }}>Hide from active lists — history is kept</span>
+                          </span>
+                        </button>
+                      )}
                       {/* Permanent customer delete — Admin only, same as DELETE /api/customers/{id}. */}
                       {isAdmin && (<>
                         <div className="my-1.5 border-t border-token" />
@@ -847,47 +925,38 @@ export default function LoanDetailPage() {
           </div>
         </div>
 
-        {/* Identity */}
-        <div className="mt-4 min-w-0">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h1 className="break-all text-2xl md:text-[28px] font-black leading-tight"
-              style={{ fontFamily: 'var(--font-head)', color: 'var(--text)', letterSpacing: '-.4px' }}>
-              {loan.loanNumber}
-            </h1>
-            <button type="button" onClick={copyLoanNumber}
-              aria-label={copied ? 'Application ID copied' : 'Copy application ID'} title={copied ? 'Copied' : 'Copy application ID'}
-              className="grid h-7 w-7 place-items-center rounded-lg border border-token transition-colors hover:bg-[color:var(--surface2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]"
-              style={{ color: copied ? 'var(--success)' : 'var(--text3)' }}>
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-            </button>
-            <StatusBadge status={loan.status} />
-          </div>
-          <p className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-sm">
-            <span className="rounded-md px-2 py-0.5 text-xs font-semibold" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
-              {loan.loanType} Loan
-            </span>
-            <span className="font-semibold" style={{ color: 'var(--text2)' }}>{loan.customer.fullName}</span>
-          </p>
-        </div>
-
         {/* Key facts */}
         {headerFacts.length > 0 && (
-          <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-3 border-t border-token pt-4">
+          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-token pt-3">
             {headerFacts.map(f => (
-              <div key={f.label} className="min-w-[120px]">
-                <dt className="text-[11.5px] font-medium" style={{ color: 'var(--text3)' }}>{f.label}</dt>
-                <dd className="mt-0.5 text-sm font-bold" style={{ color: f.muted ? 'var(--text3)' : 'var(--text)' }}>{f.value}</dd>
+              <div key={f.label} className="min-w-[100px]">
+                <dt className="text-[11px] font-medium" style={{ color: 'var(--text3)' }}>{f.label}</dt>
+                <dd className="mt-0 text-sm font-bold" style={{ color: f.muted ? 'var(--text3)' : 'var(--text)' }}>{f.value}</dd>
               </div>
             ))}
           </dl>
         )}
 
+        {/* Archived — who / when / why, straight from the loan record. */}
+        {loan.isArchived && (
+          <div className="mt-2.5 flex items-start gap-2.5 rounded-lg py-1.5 pl-3 pr-4 text-[12.5px]"
+            style={{ background: 'var(--surface2)', borderLeft: '3px solid var(--text3)', color: 'var(--text2)' }}>
+            <Archive size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--text3)' }} />
+            <span>
+              <strong style={{ color: 'var(--text)' }}>Archived</strong>
+              {loan.archivedAt ? ` on ${formatDate(loan.archivedAt)}` : ''}
+              {loan.archivedByName ? ` by ${loan.archivedByName}` : ''}
+              {loan.archiveReason ? ` — ${loan.archiveReason}` : ''}
+            </span>
+          </div>
+        )}
+
         {/* Employment tip — Vanilla's header empNote (efin-app.js:27179),
             keyed by the applicant's employment type. */}
         {tip && (
-          <div className="mt-4 flex items-start gap-3 rounded-xl py-2.5 pl-3 pr-4 text-[13px] leading-relaxed"
+          <div className="mt-2.5 flex items-center gap-2.5 rounded-lg py-1.5 pl-3 pr-4 text-[12.5px]"
             style={{ background: 'var(--accent-subtle)', borderLeft: '3px solid var(--accent)', color: 'var(--text2)' }}>
-            <Lightbulb size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
+            <Lightbulb size={14} className="shrink-0" style={{ color: 'var(--accent)' }} />
             <span>
               {tip.includes(':')
                 ? <><strong style={{ color: 'var(--text)' }}>{tip.slice(0, tip.indexOf(':') + 1)}</strong>{tip.slice(tip.indexOf(':') + 1)}</>
@@ -930,7 +999,7 @@ export default function LoanDetailPage() {
               <FVal emoji="🟣" label="Status" node={<StatusBadge status={loan.status} />} />
               <FVal emoji="💰" label="Loan Type" value={`${loan.loanType} Loan`} />
               <FVal emoji="💵" label="Loan Amount" value={formatCurrency(loan.requestedAmount)} />
-              <FVal emoji="🏦" label="Bank/NBFC" value={loan.bankLines?.[0]?.bankName} />
+              <FVal emoji="🏦" label="Bank/NBFC" value={workflowLender ?? loan.bankLines?.[0]?.bankName} />
               {/* Sales Person = the wizard's resolved Sales Person dropdown
                   choice (Loan.AssignedToUserId, ResolveSalesPersonAsync), not
                   whoever physically submitted the form (CreatedByUserId) —
@@ -1009,6 +1078,12 @@ export default function LoanDetailPage() {
           {/* Lender Details — bank rows / InCred / obligations / emails */}
           {activeDetailTab === 'lender-details' && <BankIncredTabs loan={loan} />}
 
+          {/* Offers — lender offers, deviation, credit approval, sanction and
+              disbursement (all actions and figures from the API). */}
+          {activeDetailTab === 'offers' && canOffersTab && (
+            <OffersTab loanId={loan.id} requestedAmount={loan.requestedAmount} tenureMonths={loan.tenureMonths} />
+          )}
+
           {/* Reports — Perfios + CIBIL */}
           {activeDetailTab === 'reports' && <ReportsPanel loan={loan} />}
 
@@ -1073,13 +1148,7 @@ export default function LoanDetailPage() {
                         loanStatus={String(loan.status)}
                         loanType={loan.loanType}
                         canChangeStatus={canChangeStatus}
-                        canDisburse={canDisburse}
-                        canDeviation={canDeviation}
-                        requestedAmount={loan.requestedAmount}
-                        approvedAmount={loan.approvedAmount}
-                        tenureMonths={loan.tenureMonths}
-                        interestRate={loan.interestRate}
-                        sanctionDetail={loan.sanctionDetail}
+                        onOpenOffers={canOffersTab ? () => setTab('offers') : undefined}
                         documentChecked={loan.documentChecked}
                         incomeChecked={loan.incomeChecked}
                         bankChecked={loan.bankChecked}

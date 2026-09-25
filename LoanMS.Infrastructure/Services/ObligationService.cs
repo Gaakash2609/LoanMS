@@ -39,7 +39,7 @@ public sealed class ObligationService : IObligationService
     // Reverse of WizardController._loanTypeMap (enum → canonical frontend product
     // key) so a loan's product can be matched to a BankProductRule. Car maps to the
     // canonical "new_car_loan"; a used-car rule simply falls back to the bank default.
-    private static string ProductKeyFor(LoanType t) => t switch
+    public static string ProductKeyFor(LoanType t) => t switch
     {
         LoanType.Personal   => "personal_loan",
         LoanType.Business   => "business_loan",

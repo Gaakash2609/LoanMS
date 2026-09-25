@@ -1,0 +1,182 @@
+NOTICE:  database "loanms_dup_legacy" does not exist, skipping
+### 1. Copy of loanms_audit (pre-migration schema) + legacy seed
+ customers | loans | history | new_columns | migration_rows | unique_guards 
+-----------+-------+---------+-------------+----------------+---------------
+        22 |    15 |       0 |           0 |              0 |             0
+
+legacy seed inserted
+ customers | loans | history | new_columns | migration_rows | unique_guards 
+-----------+-------+---------+-------------+----------------+---------------
+        32 |    19 |       2 |           0 |              0 |             0
+
+
+### 2. UP migration (legacy duplicates present)
+psql:/home/aakash_gupta/dupwork/mig_up.sql:85: WARNING:  LoanMS AddCustomerIdentityKeysAndApplicationArchive: 1 PAN value(s) are shared by more than one customer. UX_Customers_PanNormalized was NOT created and nothing was merged. Review scripts/db/dup-reapply-archive-report.sql, resolve, then run scripts/db/dup-reapply-archive-apply-constraints.sql.
+psql:/home/aakash_gupta/dupwork/mig_up.sql:85: WARNING:  LoanMS AddCustomerIdentityKeysAndApplicationArchive: 1 customer(s) already have more than one active application. UX_Loans_CustomerId_ActiveApplication was NOT created and no application was changed. Review scripts/db/dup-reapply-archive-report.sql, resolve, then run scripts/db/dup-reapply-archive-apply-constraints.sql.
+psql:/home/aakash_gupta/dupwork/mig_up.sql:85: WARNING:  LoanMS AddCustomerIdentityKeysAndApplicationArchive: 1 rejected application(s) have no recorded rejection date (no RejectedAt, no status history). New applications for those customers are blocked for admin review; see scripts/db/dup-reapply-archive-report.sql.
+UP exit=0
+-- head migration
+                            head                             
+-------------------------------------------------------------
+ 20260924143037_AddCustomerIdentityKeysAndApplicationArchive
+
+-- indexes present
+          indexname           
+------------------------------
+ IX_Customers_EmailNormalized
+ IX_Customers_PanNormalized
+ IX_Customers_PhoneNormalized
+ IX_Loans_ArchivedByUserId
+
+-- raw values untouched, normalised keys derived (legacy rows)
+     FullName     |  raw_pan   | PanNormalized |    raw_phone    | PhoneNormalized |       raw_email        |    EmailNormalized     | IsDeleted 
+------------------+------------+---------------+-----------------+-----------------+------------------------+------------------------+-----------
+ L1 Legacy Upper  | LGCYP1234A | LGCYP1234A    | 9811111111      | 9811111111      | l1.upper@legacy.test   | l1.upper@legacy.test   | f
+ L1 Legacy Lower  | lgcyp1234a | LGCYP1234A    | +91 98111 11112 | 9811111112      | l1.lower@legacy.test   | l1.lower@legacy.test   | f
+ L2 Phone FmtA    |            |               | +91 98222 22222 | 9822222222      | l2a@legacy.test        | l2a@legacy.test        | f
+ L2 Phone FmtB    |            |               | 09822222222     | 9822222222      | l2b@legacy.test        | l2b@legacy.test        | f
+ L3 Double Active | DUPAC1234D | DUPAC1234D    | 9844444444      | 9844444444      | l3@legacy.test         | l3@legacy.test         | f
+ L4 History Only  | HISTR1234H | HISTR1234H    | 9855555555      | 9855555555      | l4@legacy.test         | l4@legacy.test         | f
+ L5 Unknown Date  | UNKNW1234U | UNKNW1234U    | 9866666666      | 9866666666      | l5@legacy.test         | l5@legacy.test         | f
+ L6 Soft Deleted  | DELET1234E | DELET1234E    | 9833333333      | 9833333333      | l6@legacy.test         | l6@legacy.test         | t
+ L7 Mixed Email   |            |               | 9877777777      | 9877777777      | Mixed.Case@Legacy.TEST | mixed.case@legacy.test | f
+ L7 Lower Email   |            |               | 9877777778      | 9877777778      | mixed.case@legacy.test | mixed.case@legacy.test | f
+
+-- RejectedAt backfill: L4 from exact history (~20d, not the 1d note); L5 stays NULL
+ LoanNumber |          RejectedAt           | age_days 
+------------+-------------------------------+----------
+ LEG0004A   | 2026-09-04 14:50:44.115208+00 |       20
+ LEG0005A   |                               |         
+
+-- archive columns defaulted
+ loans | archived 
+-------+----------
+    19 |        0
+
+ customers | loans | history | new_columns | migration_rows | unique_guards 
+-----------+-------+---------+-------------+----------------+---------------
+        32 |    19 |       2 |           7 |              1 |             0
+
+
+### 3. Legacy-data report (read-only)
+== 0. Unique guarantees present? (missing = legacy duplicates below must be resolved first)
+         index_name         | is_unique 
+----------------------------+-----------
+ IX_Customers_PanNormalized | f
+(1 row)
+
+== 1. Customers sharing one normalised PAN (blocks UX_Customers_PanNormalized)
+ PanNormalized | customers | customer_ids 
+---------------+-----------+--------------
+ LGCYP1234A    |         2 | 25, 26
+(1 row)
+
+== 2. Customers sharing one normalised mobile (allowed — shared family phones — but a new application matching several is sent to admin review)
+ PhoneNormalized | customers | customer_ids 
+-----------------+-----------+--------------
+ 9822222222      |         2 | 27, 28
+(1 row)
+
+== 3. Customers sharing one normalised email (differs only by case/spaces)
+    EmailNormalized     | customers | customer_ids 
+------------------------+-----------+--------------
+ mixed.case@legacy.test |         2 | 33, 34
+(1 row)
+
+== 4. Customers with more than one ACTIVE application (blocks UX_Loans_CustomerId_ActiveApplication)
+ CustomerId | active_applications |               applications               
+------------+---------------------+------------------------------------------
+         29 |                   2 | LEG0003B:UnderReview, LEG0003A:Submitted
+(1 row)
+
+== 5. Rejected applications with NO recorded rejection date (new applications for these customers are blocked: admin review)
+ Id | LoanNumber | CustomerId | IsDeleted | IsArchived |           CreatedAt           | UpdatedAt 
+----+------------+------------+-----------+------------+-------------------------------+-----------
+ 20 | LEG0005A   |         31 | f         | f          | 2026-06-26 14:50:44.109146+00 | 
+(1 row)
+
+== 6. Rejected applications whose RejectedAt is OLDER than their last history transition into Rejected (runtime uses the later one)
+ Id | LoanNumber | RejectedAt | last_history_rejection 
+----+------------+------------+------------------------
+(0 rows)
+
+== 7. Soft-deleted customers (a new application matching one is sent to admin review, never silently restored)
+ soft_deleted_customers 
+------------------------
+                      4
+(1 row)
+
+== 8. Customers whose PAN / mobile is present but not usable as an identifier (bad format)
+ invalid_pan | invalid_mobile 
+-------------+----------------
+           0 |              0
+(1 row)
+
+== 9. Summary
+ customers | applications | rejected | rejected_without_rejectedat | archived 
+-----------+--------------+----------+-----------------------------+----------
+        32 |           19 |        2 |                           1 |        0
+(1 row)
+
+
+### 4. Idempotency: re-run the UP body (history insert stripped)
+re-run exit=0
+ customers | loans | history | new_columns | migration_rows | unique_guards 
+-----------+-------+---------+-------------+----------------+---------------
+        32 |    19 |       2 |           7 |              1 |             0
+
+
+### 5. DOWN (rollback)
+psql:/home/aakash_gupta/dupwork/mig_down.sql:4: NOTICE:  index "UX_Loans_CustomerId_ActiveApplication" does not exist, skipping
+psql:/home/aakash_gupta/dupwork/mig_down.sql:6: NOTICE:  index "UX_Customers_PanNormalized" does not exist, skipping
+DOWN exit=0
+ customers | loans | history | new_columns | migration_rows | unique_guards 
+-----------+-------+---------+-------------+----------------+---------------
+        32 |    19 |       2 |           0 |              0 |             0
+
+L4 RejectedAt after DOWN (backfill kept by design):
+LEG0004A 2026-09-04 14:50:44.115208+00
+LEG0005A NULL
+
+### 6. UP again after rollback
+UP#2 exit=0
+ customers | loans | history | new_columns | migration_rows | unique_guards 
+-----------+-------+---------+-------------+----------------+---------------
+        32 |    19 |       2 |           7 |              1 |             0
+
+
+### 7. apply-constraints BEFORE resolution (must refuse, change nothing)
+psql:/home/aakash_gupta/dupwork/dup-reapply-archive-apply-constraints.sql:47: ERROR:  Not applied: 1 shared PAN value(s), 1 customer(s) with >1 active application remain. Resolve them first (see dup-reapply-archive-report.sql).
+ customers | loans | history | new_columns | migration_rows | unique_guards 
+-----------+-------+---------+-------------+----------------+---------------
+        32 |    19 |       2 |           7 |              1 |             0
+
+
+### 8. Simulated admin resolution, then apply-constraints
+resolution applied
+psql:/home/aakash_gupta/dupwork/dup-reapply-archive-apply-constraints.sql:47: NOTICE:  Unique guarantees in place.
+ customers | loans | history | new_columns | migration_rows | unique_guards 
+-----------+-------+---------+-------------+----------------+---------------
+        32 |    19 |       2 |           7 |              1 |             2
+
+
+### 9. DB-level guarantees (direct SQL)
+-- a) second ACTIVE application for L3 (expect: unique violation UX_Loans_CustomerId_ActiveApplication)
+psql:/home/aakash_gupta/dupwork/mig_dblevel.sql:5: ERROR:  duplicate key value violates unique constraint "UX_Loans_CustomerId_ActiveApplication"
+DETAIL:  Key ("CustomerId")=(29) already exists.
+-- b) extra REJECTED application for L3 (expect: allowed)
+-- c) soft-deleted extra ACTIVE application for L3 (expect: allowed — outside the guarantee)
+-- d) customer with a duplicate normalised PAN (expect: unique violation UX_Customers_PanNormalized)
+psql:/home/aakash_gupta/dupwork/mig_dblevel.sql:14: ERROR:  duplicate key value violates unique constraint "UX_Customers_PanNormalized"
+DETAIL:  Key ("PanNormalized")=(DUPAC1234D) already exists.
+-- e) two customers with NO PAN (expect: allowed)
+-- f) resulting L3 applications
+ LoanNumber |   Status    | IsDeleted 
+------------+-------------+-----------
+ LEG0003A   | Closed      | f
+ LEG0003B   | UnderReview | f
+ LEGOK01    | Rejected    | f
+ LEGOK02    | Draft       | t
+(4 rows)
+
+### done

@@ -67,14 +67,6 @@ public class LoansTransitionAuthorizationTests
             .ReturnsAsync(ApiResponseDto<LoanDto>.Ok(new LoanDto()));
         mock.Setup(s => s.UnholdAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<string>()))
             .ReturnsAsync(ApiResponseDto<LoanDto>.Ok(new LoanDto()));
-        mock.Setup(s => s.GetDeviationsAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
-            .ReturnsAsync(ApiResponseDto<System.Collections.Generic.List<LoanDeviationDto>>.Ok(new()));
-        mock.Setup(s => s.RaiseDeviationAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
-            .ReturnsAsync(ApiResponseDto<LoanDto>.Ok(new LoanDto()));
-        mock.Setup(s => s.DecideDeviationAsync(It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<string>()))
-            .ReturnsAsync(ApiResponseDto<LoanDto>.Ok(new LoanDto()));
-        mock.Setup(s => s.SkipDeviationAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<string>()))
-            .ReturnsAsync(ApiResponseDto<LoanDto>.Ok(new LoanDto()));
         return mock;
     }
 
@@ -86,19 +78,6 @@ public class LoansTransitionAuthorizationTests
         { ControllerContext = ContextFor("Sales") };
 
         var result = await controller.Submit(1);
-
-        result.Should().BeOfType<ForbidResult>();
-        loanService.Verify(s => s.UpdateStatusAsync(It.IsAny<int>(), It.IsAny<UpdateLoanStatusRequestDto>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task Approve_Denied_ReturnsForbid_AndNeverCallsLoanService()
-    {
-        var loanService = LoanServiceReturning();
-        var controller = new LoansController(loanService.Object, CreateContext(), Mock.Of<IFileStorageService>(), DenyOnly("canChangeStatus").Object)
-        { ControllerContext = ContextFor("Manager") };
-
-        var result = await controller.Approve(1, new ApproveRequestDto());
 
         result.Should().BeOfType<ForbidResult>();
         loanService.Verify(s => s.UpdateStatusAsync(It.IsAny<int>(), It.IsAny<UpdateLoanStatusRequestDto>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
@@ -117,24 +96,30 @@ public class LoansTransitionAuthorizationTests
         loanService.Verify(s => s.UpdateStatusAsync(It.IsAny<int>(), It.IsAny<UpdateLoanStatusRequestDto>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
     }
 
-    [Fact]
-    public async Task Disburse_Denied_ReturnsForbid_AndNeverCallsLoanService()
+    // Approve / Disburse / loan-level deviation endpoints are retired in favour
+    // of the Offer workflow: they answer 409 with directions for every role and
+    // never move the loan (no bypass of offer → deviation → credit approval →
+    // sanction → disbursement).
+    [Theory]
+    [InlineData("Admin")]
+    [InlineData("Manager")]
+    [InlineData("LoginTeam")]
+    public async Task RetiredOfferChainEndpoints_Return409_AndNeverCallLoanService(string role)
     {
         var loanService = LoanServiceReturning();
-        var controller = new LoansController(loanService.Object, CreateContext(), Mock.Of<IFileStorageService>(), DenyOnly("canDisburse").Object)
-        { ControllerContext = ContextFor("Manager") };
+        var allowAll = LoanMS.Tests.TestHelpers.RolePermissionTestDouble.AllowAll();
+        var controller = new LoansController(loanService.Object, CreateContext(), Mock.Of<IFileStorageService>(), allowAll)
+        { ControllerContext = ContextFor(role) };
 
-        var result = await controller.Disburse(1);
-
-        result.Should().BeOfType<ForbidResult>();
+        foreach (var r in new[] { controller.Approve(1), controller.Disburse(1), controller.GetDeviations(1),
+                                  controller.RaiseDeviation(1), controller.DecideDeviation(1), controller.SkipDeviation(1) })
+            r.Should().BeOfType<ConflictObjectResult>();
         loanService.Verify(s => s.UpdateStatusAsync(It.IsAny<int>(), It.IsAny<UpdateLoanStatusRequestDto>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
     }
 
     [Theory]
     [InlineData("canCreateApp")]
-    [InlineData("canChangeStatus")]
     [InlineData("canRejectApp")]
-    [InlineData("canDisburse")]
     public async Task Allowed_TransitionsStillReachLoanService(string permKey)
     {
         var loanService = LoanServiceReturning();
@@ -145,9 +130,7 @@ public class LoansTransitionAuthorizationTests
         IActionResult result = permKey switch
         {
             "canCreateApp" => await controller.Submit(1),
-            "canChangeStatus" => await controller.Approve(1, new ApproveRequestDto()),
             "canRejectApp" => await controller.Reject(1, new RejectRequestDto()),
-            "canDisburse" => await controller.Disburse(1),
             _ => throw new InvalidOperationException()
         };
 
@@ -195,74 +178,5 @@ public class LoansTransitionAuthorizationTests
 
         result.Should().NotBeOfType<ForbidResult>();
         loanService.Verify(s => s.HoldAsync(1, "Docs pending", It.IsAny<int>(), It.IsAny<string>()), Times.Once);
-    }
-
-    // ── Deviations — canDeviation gate ───────────────────────────────────────
-
-    [Fact]
-    public async Task GetDeviations_Denied_ReturnsForbid_AndNeverCallsLoanService()
-    {
-        var loanService = LoanServiceReturning();
-        var controller = new LoansController(loanService.Object, CreateContext(), Mock.Of<IFileStorageService>(), DenyOnly("canDeviation").Object)
-        { ControllerContext = ContextFor("Sales") };
-
-        var result = await controller.GetDeviations(1);
-
-        result.Should().BeOfType<ForbidResult>();
-        loanService.Verify(s => s.GetDeviationsAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task GetDeviations_Allowed_ReachesLoanService()
-    {
-        var loanService = LoanServiceReturning();
-        var allowAll = LoanMS.Tests.TestHelpers.RolePermissionTestDouble.AllowAll();
-        var controller = new LoansController(loanService.Object, CreateContext(), Mock.Of<IFileStorageService>(), allowAll)
-        { ControllerContext = ContextFor("Manager") };
-
-        var result = await controller.GetDeviations(1);
-
-        result.Should().NotBeOfType<ForbidResult>();
-        loanService.Verify(s => s.GetDeviationsAsync(1, It.IsAny<int>(), It.IsAny<string>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task RaiseDeviation_Denied_ReturnsForbid_AndNeverCallsService()
-    {
-        var loanService = LoanServiceReturning();
-        var controller = new LoansController(loanService.Object, CreateContext(), Mock.Of<IFileStorageService>(), DenyOnly("canDeviation").Object)
-        { ControllerContext = ContextFor("Manager") };
-
-        var result = await controller.RaiseDeviation(1, new RaiseDeviationRequestDto { DeviationType = "FOIR", Reason = "x" });
-
-        result.Should().BeOfType<ForbidResult>();
-        loanService.Verify(s => s.RaiseDeviationAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task DecideDeviation_Denied_ReturnsForbid_AndNeverCallsService()
-    {
-        var loanService = LoanServiceReturning();
-        var controller = new LoansController(loanService.Object, CreateContext(), Mock.Of<IFileStorageService>(), DenyOnly("canDeviation").Object)
-        { ControllerContext = ContextFor("Manager") };
-
-        var result = await controller.DecideDeviation(1, new DecideDeviationRequestDto { Approve = true });
-
-        result.Should().BeOfType<ForbidResult>();
-        loanService.Verify(s => s.DecideDeviationAsync(It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task RaiseDeviation_Allowed_ReachesService()
-    {
-        var loanService = LoanServiceReturning();
-        var allowAll = LoanMS.Tests.TestHelpers.RolePermissionTestDouble.AllowAll();
-        var controller = new LoansController(loanService.Object, CreateContext(), Mock.Of<IFileStorageService>(), allowAll)
-        { ControllerContext = ContextFor("TeamLeader") };
-
-        var result = await controller.RaiseDeviation(1, new RaiseDeviationRequestDto { DeviationType = "FOIR Deviation", Reason = "EMI high" });
-
-        result.Should().NotBeOfType<ForbidResult>();
-        loanService.Verify(s => s.RaiseDeviationAsync(1, "FOIR Deviation", "EMI high", It.IsAny<int>(), It.IsAny<string>()), Times.Once);
     }
 }

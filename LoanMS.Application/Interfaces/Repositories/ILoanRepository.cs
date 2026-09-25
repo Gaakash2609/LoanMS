@@ -45,4 +45,13 @@ public interface ILoanRepository : IGenericRepository<Loan>
     // whole new repository for one bounded, loan-scoped collection.
     Task ReplaceBankLinesAsync(int loanId, List<LoanBankLine> newLines);
     Task ReplaceReferencesAsync(int loanId, List<LoanReference> newRefs);
+
+    /// <summary>Every application of a customer as the eligibility guard needs
+    /// it — soft-deleted rows included (see LoanEligibilityRow).</summary>
+    Task<List<LoanEligibilityRow>> GetEligibilityRowsAsync(int customerId);
+
+    /// <summary>Serialises application create/reactivate for one customer
+    /// (PostgreSQL transaction-scoped advisory lock; released on commit or
+    /// rollback). No-op outside a transaction or on non-PostgreSQL providers.</summary>
+    Task LockCustomerForApplicationAsync(int customerId);
 }

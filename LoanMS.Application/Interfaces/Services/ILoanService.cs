@@ -13,7 +13,16 @@ public interface ILoanService
     // Applications → Export: same filters/visibility scope as GetAllAsync,
     // capped, unpaginated — see LoanRepository.GetForExportAsync.
     Task<List<LoanListDto>> ExportAsync(LoanFilterDto filter, int currentUserId, string currentUserRole);
-    Task<ApiResponseDto<LoanDto>> CreateAsync(CreateLoanRequestDto request, int createdByUserId);
+    Task<ApiResponseDto<LoanDto>> CreateAsync(CreateLoanRequestDto request, int createdByUserId, string? callerRole = null);
+    /// <summary>Central duplicate-application + 45-day guard (read-only
+    /// evaluation). excludeLoanId = the application being submitted/reopened.</summary>
+    Task<ApplicationEligibilityDto> CheckApplicationEligibilityAsync(int customerId, int? excludeLoanId = null);
+    /// <summary>Same guard, but first takes the per-customer application lock —
+    /// call inside the transaction that performs the create/reactivate write.</summary>
+    Task<ApplicationEligibilityDto> GuardApplicationAsync(int customerId, int? excludeLoanId = null);
+    /// <summary>Soft-archive a closed/rejected application (reason mandatory;
+    /// Admin / ProductTeam / LocationHead within their scope).</summary>
+    Task<ApiResponseDto<LoanDto>> ArchiveAsync(int id, string? reason, int userId, string role);
     // Phase 3A: every action on an existing loan now takes the caller's id/role
     // (always sourced from the JWT via BaseController — never from the request
     // body) and verifies access via ILoanRepository.HasAccessAsync before acting.
@@ -31,14 +40,8 @@ public interface ILoanService
     Task<ApiResponseDto<LoanDto>> HoldAsync(int id, string reason, int changedByUserId, string changedByUserRole);
     /// <summary>Resume a held loan, restoring the status it had before it was put OnHold.</summary>
     Task<ApiResponseDto<LoanDto>> UnholdAsync(int id, string? comment, int changedByUserId, string changedByUserRole);
-    /// <summary>Policy-band deviation flags for a loan (empty = within policy). Ported from legacy laCheckDeviations.</summary>
-    Task<ApiResponseDto<List<LoanDeviationDto>>> GetDeviationsAsync(int id, int currentUserId, string currentUserRole);
-    /// <summary>Raise a policy deviation on an UnderReview loan (type + reason required) → Decision.</summary>
-    Task<ApiResponseDto<LoanDto>> RaiseDeviationAsync(int id, string deviationType, string reason, int changedByUserId, string changedByUserRole);
-    /// <summary>Decide a raised deviation (Decision → Approved on approve, → Rejected otherwise). The raiser cannot approve their own deviation unless they are Admin.</summary>
-    Task<ApiResponseDto<LoanDto>> DecideDeviationAsync(int id, bool approve, string? comment, int changedByUserId, string changedByUserRole);
-    /// <summary>Skip the deviation routing on an UnderReview loan → Approved, recording that deviations were acknowledged and skipped.</summary>
-    Task<ApiResponseDto<LoanDto>> SkipDeviationAsync(int id, string? comment, int changedByUserId, string changedByUserRole);
+    /// <summary>Stage notification email for a transition made by the offer workflow (non-fatal).</summary>
+    Task NotifyStageChangeAsync(int loanId, LoanMS.Domain.Enums.LoanStatus newStatus, string? comment);
     Task<ApiResponseDto<LoanDto>> UpdateAssignmentAsync(int id, UpdateLoanAssignmentRequestDto request, int currentUserId, string currentUserRole);
     Task<ApiResponseDto<LoanDto>> UpdateLenderRmAsync(int id, UpdateLenderRmRequestDto request, int currentUserId, string currentUserRole);
     Task<ApiResponseDto<LoanDto>> UpdateOverviewAsync(int id, UpdateLoanOverviewRequestDto request, int currentUserId, string currentUserRole);

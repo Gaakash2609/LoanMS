@@ -22,19 +22,27 @@ public class MappingProfile : Profile
         CreateMap<Customer, CustomerDto>()
             .ForMember(d => d.TotalLoans, o => o.MapFrom(s => s.Loans != null ? s.Loans.Count : 0));
 
+        // PanNormalized/PhoneNormalized/EmailNormalized are derived identity keys
+        // (AppDbContext recomputes them on save) — never taken from a request.
         CreateMap<CreateCustomerRequestDto, Customer>()
             .ForMember(d => d.Id,        o => o.Ignore())
             .ForMember(d => d.CreatedAt, o => o.Ignore())
             .ForMember(d => d.UpdatedAt, o => o.Ignore())
             .ForMember(d => d.IsDeleted, o => o.Ignore())
-            .ForMember(d => d.Loans,     o => o.Ignore());
+            .ForMember(d => d.Loans,     o => o.Ignore())
+            .ForMember(d => d.PanNormalized,   o => o.Ignore())
+            .ForMember(d => d.PhoneNormalized, o => o.Ignore())
+            .ForMember(d => d.EmailNormalized, o => o.Ignore());
 
         CreateMap<UpdateCustomerRequestDto, Customer>()
             .ForMember(d => d.Id,        o => o.Ignore())
             .ForMember(d => d.CreatedAt, o => o.Ignore())
             .ForMember(d => d.UpdatedAt, o => o.Ignore())
             .ForMember(d => d.IsDeleted, o => o.Ignore())
-            .ForMember(d => d.Loans,     o => o.Ignore());
+            .ForMember(d => d.Loans,     o => o.Ignore())
+            .ForMember(d => d.PanNormalized,   o => o.Ignore())
+            .ForMember(d => d.PhoneNormalized, o => o.Ignore())
+            .ForMember(d => d.EmailNormalized, o => o.Ignore());
 
         // ── LoanStatusHistory — FIXED: field is "ChangedBy", NOT "ChangedByName"
         CreateMap<LoanStatusHistory, LoanStatusHistoryDto>()
@@ -65,6 +73,7 @@ public class MappingProfile : Profile
             .ForMember(d => d.References,    o => o.MapFrom(s => s.References))
             .ForMember(d => d.SalesTeamName, o => o.MapFrom(s => s.SalesTeamName))
             .ForMember(d => d.OpsManager,    o => o.MapFrom(s => s.OpsManager))
+            .ForMember(d => d.ArchivedByName, o => o.MapFrom(s => s.ArchivedBy != null ? s.ArchivedBy.FullName : null))
             // RiskGrade isn't a Loan property at all (it lives on BureauReport,
             // a different entity, keyed by CustomerId) — LoanService.GetByIdAsync
             // sets it manually after mapping, via ILoanRepository.GetLatestRiskGradeAsync.

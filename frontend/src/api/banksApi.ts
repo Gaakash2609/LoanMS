@@ -81,6 +81,8 @@ export interface BankConfig {
   loanTypesJson?: string | null
   serviceablePinsJson?: string | null
   homeTypesJson?: string | null
+  /** Default offer validity (days) for Offers of this lender; null = no default. */
+  offerValidityDays?: number | null
   productRules?: BankProductRule[]
   lines?: { id: number; companyId: number; categoryId: number; pinCode?: string; pf?: boolean }[]
   createdAt?: string
@@ -108,6 +110,8 @@ export interface BankSaveRequest {
   loanTypes?: string[] | null
   serviceablePins?: string[] | null
   homeTypes?: string[] | null
+  /** 1–365 sets the lender's default offer validity; 0 clears it. */
+  offerValidityDays?: number | null
 }
 
 // Matches BankProductRuleDto.

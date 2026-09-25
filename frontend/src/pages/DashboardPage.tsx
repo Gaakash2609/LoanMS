@@ -56,7 +56,7 @@ export default function DashboardPage() {
   // used to send, which silently dropped every Submitted loan from the
   // filtered list even though the card's own number included them.
   const goToInProcess = () => {
-    setLoanFilter({ statuses: ['Submitted', 'UnderReview'] })
+    setLoanFilter({ statuses: ['Submitted', 'UnderReview', 'Offer'] })
     navigate('/loans')
   }
 

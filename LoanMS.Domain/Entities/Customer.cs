@@ -58,6 +58,58 @@ public class Customer : BaseEntity
     public string? OfficeAddress { get; set; }
     public string? OfficePinCode { get; set; }
 
+    // ── Normalised identity keys (global customer identification) ────────────
+    // Derived values, never user input: RefreshIdentityKeys() recomputes them
+    // from PanNumber / Phone / Email, and AppDbContext calls it for every added
+    // or modified Customer on SaveChanges, so every write path keeps them in
+    // step. Customer matching runs on these indexed columns instead of the raw
+    // values, which legacy rows store in mixed formats (+91 / spaces / case).
+    // PanNormalized carries the unique guarantee for the customer-create race.
+    public string? PanNormalized { get; set; }
+    public string? PhoneNormalized { get; set; }
+    public string? EmailNormalized { get; set; }
+
     // Navigation
     public ICollection<Loan> Loans { get; set; } = new List<Loan>();
+
+    public void RefreshIdentityKeys()
+    {
+        PanNormalized   = NormalizePan(PanNumber);
+        PhoneNormalized = NormalizeMobile(Phone);
+        EmailNormalized = NormalizeEmail(Email);
+    }
+
+    /// <summary>PAN: trim + uppercase. Only a complete, well-formed PAN
+    /// (ABCDE1234F) identifies a customer — a half-typed autosave value must
+    /// never match, or collide with, somebody else.</summary>
+    public static string? NormalizePan(string? pan)
+    {
+        var p = pan?.Trim().ToUpperInvariant();
+        if (string.IsNullOrEmpty(p) || p.Length != 10) return null;
+        for (var i = 0; i < 10; i++)
+        {
+            var ok = i is >= 5 and <= 8 ? char.IsAsciiDigit(p[i]) : char.IsAsciiLetterUpper(p[i]);
+            if (!ok) return null;
+        }
+        return p;
+    }
+
+    /// <summary>Mobile: digits only, last 10 digits (drops +91 / 0 / spaces /
+    /// dashes). Fewer than 10 digits is not an identifier.</summary>
+    public static string? NormalizeMobile(string? mobile)
+    {
+        if (string.IsNullOrWhiteSpace(mobile)) return null;
+        var digits = new string(mobile.Where(char.IsAsciiDigit).ToArray());
+        return digits.Length >= 10 ? digits[^10..] : null;
+    }
+
+    /// <summary>Email: trim + lowercase. The wizard's system placeholders
+    /// (<c>…@efin.auto</c>) are not real addresses and never identify anyone.</summary>
+    public static string? NormalizeEmail(string? email)
+    {
+        var e = email?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(e) || !e.Contains('@') || e.EndsWith("@efin.auto", StringComparison.Ordinal))
+            return null;
+        return e;
+    }
 }

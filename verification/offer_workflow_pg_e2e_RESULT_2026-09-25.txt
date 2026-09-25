@@ -1,0 +1,110 @@
+# Run: 2026-09-25 09:46 UTC — WSL, API dotnet run (Database__Provider=postgresql), PostgreSQL 18 on 127.0.0.1:5433/loanms_offer_e2e
+PASS PG: latest migration applied = AddBureauUploadOfferValidityTaskPause
+PASS PG: completion columns present (6)
+PASS PG: 13 workflow triggers installed
+PASS PG: CK_Loans_Status excludes NI/Cancelled
+PASS API: rule create (Admin) 200
+PASS API: BDE cannot manage rules (403)
+PASS API: overlapping duplicate rule refused (409)
+PASS API: IDFC CIBIL rule created
+PASS API: lender offer validity saved
+PASS API: offer validity > 365 refused (400)
+PASS PG: Banks.OfferValidityDays = 30
+PASS API: customer created
+PASS API: loan created
+PASS API: loan in UnderReview
+PASS API: move-to-offer blocked until checks done (409)
+PASS API: IncomeChecked is not client-settable (still blocked on Income check)
+PASS API: move-to-offer 200
+PASS PG: Loans.Status = Offer
+PASS API: 3 offers created
+PASS API: 4th active offer blocked (409 OFFER_LIMIT)
+PASS API: second active offer same lender blocked (409)
+PASS API: EMI computed by backend = 16607.15
+PASS PG: revision money columns exact (numeric)
+PASS API: ICICI deviation Required, HDFC NotRequired
+PASS API: HDFC offer valid-until pre-set from lender validity (today + 30)
+PASS API: IDFC offer without validity config has none
+PASS API: no bureau report -> IDFC CIBIL check MissingData, deviation Required (customer-typed CIBIL 780 ignored)
+PASS API: BDE cannot upload a bureau report (403/404)
+PASS API: score outside 300-900 refused (400)
+PASS API: file whose bytes are not a PDF refused (400)
+PASS API: bureau report uploaded by Credit Evaluation Officer
+PASS API: re-check bumps the version only where the outcome changed
+PASS API: IDFC re-checked -> deviation NotRequired after bureau 780
+PASS PG: one active BureauReports row, score 780, uploader recorded
+PASS PG: report file registered in LoanDocuments
+PASS PG: IDFC offer DeviationStatus NotRequired + LatestEvaluatedAt set
+PASS PG trigger: 4th active offer refused at DB level
+PASS PG trigger: offer revision UPDATE refused
+PASS PG trigger: offer revision DELETE refused
+PASS PG CHECK: application status 'NI' impossible
+PASS PG CHECK: status history 'Cancelled' impossible
+PASS API: final offer selected
+PASS API: second final selection refused (409)
+PASS PG: exactly one Final offer
+PASS API: credit approval blocked while deviation unresolved (409)
+PASS API: deviation raised -> Decision
+PASS API+PG: idempotent raise (same key) -> 1 row
+PASS API: approver assigned is not the raiser
+PASS API: raiser self-approval refused (403)
+PASS API: BDM cannot decide deviation (403/404)
+PASS API: BDM cannot list approvers for reassignment (403/404)
+PASS API: eligible approvers exclude the raiser, include the second Chief Admin
+PASS API: reassign to the raiser refused (400)
+PASS API: deviation reassigned
+PASS PG: approval task moved to the new approver (old one closed)
+PASS API: deviation approved -> back to Offer
+PASS PG trigger: decided deviation is final
+PASS API: maker (terms creator) cannot credit-approve (403)
+PASS API: credit approval -> Approved
+PASS PG: loan approved terms persisted
+PASS PG trigger: credit approval immutable
+PASS API: BDM cannot generate sanction (403/404)
+PASS API: sanction generated
+PASS API: second active sanction refused (409)
+PASS PG trigger: sanction snapshot immutable
+PASS PG trigger: sanction delete refused
+PASS API: sanction-detail edit locked while sanction active (409)
+PASS API: retired /approve answers 409 with directions
+PASS API: retired /disburse answers 409
+PASS API: disbursement blocked until NACH + agreement (409)
+PASS API: disbursement blocked until Bank Details Check is 'Okay to Process' (409)
+PASS API: bank details check posted to the timeline
+PASS API: disbursement to an account other than the verified one refused (409)
+PASS API: Payout officer cannot disburse (403)
+PASS API: disbursed
+PASS API+PG: idempotent disbursement replay -> 1 row
+PASS API: second disbursement refused (409)
+PASS API: account masked in response
+PASS PG trigger: disbursement amount immutable
+PASS API: disbursed sanction cannot be revoked (409)
+PASS API: disbursement reversed -> Approved
+PASS PG: original kept (Reversed) + reversal row
+PASS PG timeline: EFIN-Offer Created
+PASS PG timeline: EFIN-Offer Selected
+PASS PG timeline: EFIN-Deviation
+PASS PG timeline: EFIN-Approved Deviation
+PASS PG timeline: EFIN-Approved
+PASS PG timeline: EFIN-Sanction Generated
+PASS PG timeline: EFIN-Disbursed
+PASS PG timeline: EFIN-Disbursement Reversed
+PASS PG timeline: EFIN-Bureau Report Uploaded
+PASS PG timeline: EFIN-Deviation Re-evaluated
+PASS PG timeline: EFIN-Deviation Reassigned
+PASS PG history: ...UnderReview>Offer>Decision>Offer>Approved>Disbursed>Approved
+PASS PG audit rows written
+PASS API: rule new version
+PASS PG trigger: rule version content immutable
+PASS API: IDFC CIBIL rule v2
+PASS PG: rule change re-evaluated only the IDFC offer
+PASS PG: no timeline noise when the outcome did not change
+PASS API: task created on loan2
+PASS API: loan2 on hold
+PASS PG: open task paused with the hold reason
+PASS API: paused task cannot be completed (409)
+PASS API+PG: unhold resumes the task
+PASS PG concurrency: 2 simultaneous selections -> exactly one wins (200 + 409), one Final row
+PASS PG: idempotency-key unique indexes present (5)
+
+RESULT: 107/107 passed on real PostgreSQL (loan id 6)

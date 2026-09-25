@@ -49,10 +49,15 @@ public class CustomerRepository : GenericRepository<Customer>, ICustomerReposito
         if (!string.IsNullOrEmpty(search))
         {
             var s = search.ToLower();
+            // A mobile typed as "+91 98765-43210" should find "9876543210":
+            // also match the digits against the normalised phone key.
+            var digits = new string(search.Where(char.IsAsciiDigit).ToArray());
+            var hasDigits = digits.Length >= 3;
             query = query.Where(c =>
                 c.FullName.ToLower().Contains(s) ||
                 c.Email.ToLower().Contains(s) ||
                 c.Phone.Contains(s) ||
+                (hasDigits && c.PhoneNormalized != null && c.PhoneNormalized.Contains(digits)) ||
                 (c.PanNumber != null && c.PanNumber.ToLower().Contains(s)));
         }
 
@@ -113,7 +118,53 @@ public class CustomerRepository : GenericRepository<Customer>, ICustomerReposito
     public async Task<bool> PanTakenIncludingDeletedAsync(string pan, int? excludeId = null)
     {
         var normalized = pan.ToUpper().Trim();
+        // Normalised key too, so a legacy "abcde1234f " row still counts as taken.
+        var key = Customer.NormalizePan(pan);
         return await _set.IgnoreQueryFilters()
-            .AnyAsync(c => c.PanNumber == normalized && (!excludeId.HasValue || c.Id != excludeId.Value));
+            .AnyAsync(c => (c.PanNumber == normalized || (key != null && c.PanNormalized == key))
+                           && (!excludeId.HasValue || c.Id != excludeId.Value));
+    }
+
+    public async Task<List<CustomerIdentityRow>> FindByIdentityKeysAsync(string? pan, string? mobile, string? email)
+    {
+        if (pan == null && mobile == null && email == null) return new List<CustomerIdentityRow>();
+        return await _set.IgnoreQueryFilters().AsNoTracking()
+            .Where(c => (pan != null && c.PanNormalized == pan)
+                     || (mobile != null && c.PhoneNormalized == mobile)
+                     || (email != null && c.EmailNormalized == email))
+            .Select(c => new CustomerIdentityRow
+            {
+                Id = c.Id, IsDeleted = c.IsDeleted,
+                PanNormalized = c.PanNormalized, PhoneNormalized = c.PhoneNormalized, EmailNormalized = c.EmailNormalized,
+            })
+            .ToListAsync();
+    }
+
+    public async Task<CustomerIdentityRow?> GetIdentityRowAsync(int customerId) =>
+        await _set.IgnoreQueryFilters().AsNoTracking()
+            .Where(c => c.Id == customerId)
+            .Select(c => new CustomerIdentityRow
+            {
+                Id = c.Id, IsDeleted = c.IsDeleted,
+                PanNormalized = c.PanNormalized, PhoneNormalized = c.PhoneNormalized, EmailNormalized = c.EmailNormalized,
+            })
+            .FirstOrDefaultAsync();
+
+    public async Task<bool> IsProvisionalForLoanAsync(int customerId, int loanId) =>
+        !await _ctx.Set<Loan>().IgnoreQueryFilters().AnyAsync(l => l.CustomerId == customerId && l.Id != loanId)
+        && !await _ctx.Set<BureauReport>().IgnoreQueryFilters().AnyAsync(b => b.CustomerId == customerId);
+
+    private const int IdentityLockClass = 7102;
+
+    public async Task LockIdentityKeysAsync(string? pan, string? mobile, string? email)
+    {
+        if (!_ctx.Database.IsNpgsql() || _ctx.Database.CurrentTransaction == null) return;
+        // Fixed (ordinal) order, so two sessions locking overlapping key sets
+        // can never deadlock on each other.
+        var keys = new[] { pan is null ? null : "P:" + pan, mobile is null ? null : "M:" + mobile, email is null ? null : "E:" + email }
+            .Where(k => k != null).Select(k => k!).OrderBy(k => k, StringComparer.Ordinal);
+        foreach (var key in keys)
+            await _ctx.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock({IdentityLockClass}, hashtext({key}))");
     }
 }

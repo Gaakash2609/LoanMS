@@ -51,10 +51,10 @@ describe('computePipelineStages — Vanilla PIPELINE_STAGE_META parity', () => {
     expect(stages).toHaveLength(0)
   })
 
-  it('orders stages Submitted, UnderReview, Approved, Disbursed, OnHold, Rejected — Vanilla array order', () => {
-    const loans: LoanStatus[] = ['Rejected', 'OnHold', 'Disbursed', 'Approved', 'UnderReview', 'Submitted']
+  it('orders stages Submitted, UnderReview, Offer, Approved, Disbursed, OnHold, Rejected — Vanilla array order', () => {
+    const loans: LoanStatus[] = ['Rejected', 'OnHold', 'Disbursed', 'Approved', 'Offer', 'UnderReview', 'Submitted']
     const stages = computePipelineStages(loans.map(makeLoan))
-    expect(stages.map(s => s.status)).toEqual(['Submitted', 'UnderReview', 'Approved', 'Disbursed', 'OnHold', 'Rejected'])
+    expect(stages.map(s => s.status)).toEqual(['Submitted', 'UnderReview', 'Offer', 'Approved', 'Disbursed', 'OnHold', 'Rejected'])
   })
 
   it('counts each stage correctly and excludes drafts from every count', () => {

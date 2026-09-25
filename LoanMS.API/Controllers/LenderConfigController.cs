@@ -544,7 +544,7 @@ public class LenderConfigController : BaseController
         }));
     }
 
-    private static List<string> SafeDeserializeStringList(string? json)
+    internal static List<string> SafeDeserializeStringList(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return new List<string>();
         try { return System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>(); }
@@ -558,7 +558,7 @@ public class LenderConfigController : BaseController
     // enum ('Personal','NewCar','AgainstProperty'). Lower-case, strip
     // non-alphanumerics, drop a trailing "loan", then alias the LAP variants.
     // Must mirror the frontend normalizeLoanType (banksApi.ts).
-    private static string NormalizeLoanType(string? s)
+    internal static string NormalizeLoanType(string? s)
     {
         if (string.IsNullOrWhiteSpace(s)) return "";
         var x = new string(s.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());

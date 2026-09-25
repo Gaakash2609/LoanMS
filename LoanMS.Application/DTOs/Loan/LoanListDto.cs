@@ -69,5 +69,8 @@ public class LoanListDto
     public int CreatedByUserId { get; set; }
     public int? AssignedToUserId { get; set; }
     public decimal? CustomerMonthlyIncome { get; set; }
+    // Application archive — shown in the Archived view / export.
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
     public DateTime CreatedAt { get; set; }
 }

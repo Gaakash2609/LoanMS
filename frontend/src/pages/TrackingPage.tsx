@@ -10,7 +10,7 @@ import { StatusBadge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { ErrorBanner } from '@/components/ui/States'
 import { formatDateTime } from '@/utils/format'
-import { stageBadgeClass, trackingStatusClass, routeDisplay, classifyComment, buildFormattedComment, PENDING_DOC_OPTIONS, type CommentType } from '@/utils/timelineFormat'
+import { stageBadgeClass, trackingStatusClass, routeDisplay, classifyComment, buildFormattedComment, PENDING_DOC_OPTIONS, isSystemTimelineEntry, type CommentType } from '@/utils/timelineFormat'
 import { useHasPermission, useCurrentUserDept, useCurrentRole } from '@/hooks/usePermissions'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 
@@ -157,14 +157,17 @@ function TrackingTable({
                 <td><div className="tracking-subnote">{subNote}</div></td>
                 {showActions && (
                   <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                    {canEdit && (
+                    {isSystemTimelineEntry(e.name) && (
+                      <span className="text-[11px]" style={{ color: 'var(--text3)' }} title="Recorded by the Offers workflow — part of the audit trail">🔒</span>
+                    )}
+                    {canEdit && !isSystemTimelineEntry(e.name) && (
                       <button title="Edit entry" onClick={() => onEdit(e)}
                         className="p-1.5 rounded-md border text-[color:var(--accent)] hover:bg-[color:var(--accent-subtle)]"
                         style={{ borderColor: 'rgba(10,88,154,.25)' }}>
                         <Pencil size={13} />
                       </button>
                     )}
-                    {canDelete && (
+                    {canDelete && !isSystemTimelineEntry(e.name) && (
                       <button title="Delete entry" onClick={() => onDelete(e.id)}
                         className="p-1.5 rounded-md border text-[color:var(--danger)] hover:bg-[rgba(227,30,37,.08)] ml-1"
                         style={{ borderColor: 'rgba(227,30,37,.25)' }}>

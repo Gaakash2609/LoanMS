@@ -242,6 +242,218 @@ namespace LoanMS.Infrastructure.Migrations
                     b.ToTable("AppSettings");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.ApplicationOffer", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ApprovalStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("BankId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CurrentRevisionNo")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeviationStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LatestEvaluatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LatestEvaluationJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("LenderName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("LoanId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LoanType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ProductKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("SelectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("SelectedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SelectedRevisionNo")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("StatusReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ValidUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("LoanId");
+
+                    b.HasIndex(new[] { "LoanId", "BankId" }, "UX_ApplicationOffers_Loan_Bank_Active")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = false AND \"Status\" IN ('Available', 'Final', 'NotSelected')");
+
+                    b.HasIndex(new[] { "LoanId" }, "UX_ApplicationOffers_Loan_Final")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = false AND \"Status\" = 'Final'");
+
+                    b.ToTable("ApplicationOffers", t =>
+                        {
+                            t.HasCheckConstraint("CK_ApplicationOffers_ApprovalStatus", "\"ApprovalStatus\" IN ('Pending', 'Approved', 'Rejected')");
+
+                            t.HasCheckConstraint("CK_ApplicationOffers_DeviationStatus", "\"DeviationStatus\" IN ('NotRequired', 'Required', 'Raised', 'Approved', 'Rejected', 'Skipped')");
+
+                            t.HasCheckConstraint("CK_ApplicationOffers_FinalSelection", "\"Status\" <> 'Final' OR (\"SelectedAt\" IS NOT NULL AND \"SelectedRevisionNo\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ApplicationOffers_Status", "\"Status\" IN ('Available', 'Final', 'NotSelected', 'Withdrawn', 'Expired')");
+                        });
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.ApplicationOfferRevision", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("BaseRoi")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<decimal>("BtAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ChangeReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("Emi")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("EvaluationJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EvaluationOutcome")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<decimal>("FinancedPrincipal")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("GstAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("GstPct")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<decimal>("InsuranceAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("InsuranceInBundled")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("LoanAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("NetDisbursement")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("OfferId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("OfferedRoi")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<bool>("PfInBundled")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("ProcessingFeeAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("ProcessingFeePct")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<string>("RateType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("RevisionNo")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("StampDuty")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("TenureMonths")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OfferId", "RevisionNo")
+                        .IsUnique();
+
+                    b.ToTable("ApplicationOfferRevisions", t =>
+                        {
+                            t.HasCheckConstraint("CK_OfferRevisions_Positive", "\"LoanAmount\" > 0 AND \"TenureMonths\" > 0 AND \"OfferedRoi\" >= 0 AND \"NetDisbursement\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.AssignmentAuditLog", b =>
                 {
                     b.Property<int>("Id")
@@ -562,6 +774,9 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     b.Property<int>("MinTenure")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("OfferValidityDays")
                         .HasColumnType("integer");
 
                     b.Property<bool>("PfRequired")
@@ -1279,11 +1494,91 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("UploadedByUserId")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerId");
 
                     b.ToTable("BureauReports");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.CreditApproval", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ApproverUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("BankId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("DeviationRefsJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DeviationStatusAtApproval")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LenderName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("LoanId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("OfferId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RevisionNo")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TermsSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApproverUserId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
+                    b.HasIndex("LoanId");
+
+                    b.HasIndex("OfferId");
+
+                    b.ToTable("CreditApprovals", t =>
+                        {
+                            t.HasCheckConstraint("CK_CreditApprovals_Decision", "\"Decision\" IN ('Approved', 'Rejected')");
+                        });
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.Customer", b =>
@@ -1330,6 +1625,10 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("EmailNormalized")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<string>("EmploymentType")
                         .HasColumnType("text");
 
@@ -1370,6 +1669,10 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<string>("OfficialEmail")
                         .HasColumnType("text");
 
+                    b.Property<string>("PanNormalized")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<string>("PanNumber")
                         .HasMaxLength(10)
                         .HasColumnType("character varying(10)");
@@ -1397,6 +1700,10 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasMaxLength(15)
                         .HasColumnType("character varying(15)");
 
+                    b.Property<string>("PhoneNormalized")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<string>("PinCode")
                         .HasColumnType("text");
 
@@ -1415,10 +1722,229 @@ namespace LoanMS.Infrastructure.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
+                    b.HasIndex("EmailNormalized");
+
                     b.HasIndex("PanNumber")
                         .IsUnique();
 
+                    b.HasIndex("PhoneNormalized");
+
+                    b.HasIndex(new[] { "PanNormalized" }, "UX_Customers_PanNormalized")
+                        .IsUnique()
+                        .HasFilter("\"PanNormalized\" IS NOT NULL");
+
                     b.ToTable("Customers");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.DeviationRule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("BankId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ConditionLogic")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<string>("ConditionsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DeactivatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DeactivatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeviationType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("LimitValue")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("LoanType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<decimal?>("MaxApprovableDeviation")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Metric")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ProductKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("RuleKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("SupersededAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankId", "DeviationType");
+
+                    b.HasIndex("RuleKey", "Version")
+                        .IsUnique();
+
+                    b.ToTable("DeviationRules", t =>
+                        {
+                            t.HasCheckConstraint("CK_DeviationRules_Dates", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" >= \"EffectiveFrom\"");
+
+                            t.HasCheckConstraint("CK_DeviationRules_Logic", "\"ConditionLogic\" IN ('AND', 'OR')");
+                        });
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.Disbursement", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccountHolderName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("BankAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(34)
+                        .HasColumnType("character varying(34)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("DisbursementDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Ifsc")
+                        .IsRequired()
+                        .HasMaxLength(11)
+                        .HasColumnType("character varying(11)");
+
+                    b.Property<string>("LenderReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("LoanId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("PreviousLoanStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("ReversalOfId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SanctionId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Utr")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
+                    b.HasIndex("ReversalOfId");
+
+                    b.HasIndex("SanctionId");
+
+                    b.HasIndex(new[] { "LoanId" }, "UX_Disbursements_Loan_Completed")
+                        .IsUnique()
+                        .HasFilter("\"Type\" = 'Disbursement' AND \"Status\" = 'Completed'");
+
+                    b.ToTable("Disbursements", t =>
+                        {
+                            t.HasCheckConstraint("CK_Disbursements_Amount", "\"Amount\" > 0");
+
+                            t.HasCheckConstraint("CK_Disbursements_ReversalRef", "\"Type\" <> 'Reversal' OR (\"ReversalOfId\" IS NOT NULL AND \"Reason\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_Disbursements_Status", "\"Status\" IN ('Completed', 'Reversed')");
+
+                            t.HasCheckConstraint("CK_Disbursements_Type", "\"Type\" IN ('Disbursement', 'Reversal')");
+                        });
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.DsaDocument", b =>
@@ -1894,6 +2420,16 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<DateTime?>("ApprovedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ArchiveReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ArchivedByUserId")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("AssignedToUserId")
                         .HasColumnType("integer");
 
@@ -1973,6 +2509,9 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Property<decimal>("InterestRate")
                         .HasColumnType("decimal(5,2)");
 
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -2041,6 +2580,7 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Status")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasColumnType("text");
 
@@ -2054,6 +2594,8 @@ namespace LoanMS.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ArchivedByUserId");
 
                     b.HasIndex("AssignedToUserId");
 
@@ -2082,7 +2624,16 @@ namespace LoanMS.Infrastructure.Migrations
 
                     b.HasIndex("Status", "CreatedAt");
 
-                    b.ToTable("Loans");
+                    b.HasIndex(new[] { "CustomerId" }, "UX_Loans_CustomerId_ActiveApplication")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = false AND \"Status\" NOT IN ('Rejected', 'Closed')");
+
+                    b.ToTable("Loans", t =>
+                        {
+                            t.HasCheckConstraint("CK_Loans_PreRejectedStatus", "\"PreRejectedStatus\" IS NULL OR \"PreRejectedStatus\" IN ('Draft', 'Submitted', 'UnderReview', 'Approved', 'Rejected', 'Disbursed', 'Closed', 'OnHold', 'Decision', 'Acceptance', 'Offer')");
+
+                            t.HasCheckConstraint("CK_Loans_Status", "\"Status\" IN ('Draft', 'Submitted', 'UnderReview', 'Approved', 'Rejected', 'Disbursed', 'Closed', 'OnHold', 'Decision', 'Acceptance', 'Offer')");
+                        });
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.LoanBankLine", b =>
@@ -2554,7 +3105,12 @@ namespace LoanMS.Infrastructure.Migrations
 
                     b.HasIndex("LoanId");
 
-                    b.ToTable("LoanStatusHistories");
+                    b.ToTable("LoanStatusHistories", t =>
+                        {
+                            t.HasCheckConstraint("CK_LoanStatusHistories_FromStatus", "\"FromStatus\" IN ('Draft', 'Submitted', 'UnderReview', 'Approved', 'Rejected', 'Disbursed', 'Closed', 'OnHold', 'Decision', 'Acceptance', 'Offer')");
+
+                            t.HasCheckConstraint("CK_LoanStatusHistories_ToStatus", "\"ToStatus\" IN ('Draft', 'Submitted', 'UnderReview', 'Approved', 'Rejected', 'Disbursed', 'Closed', 'OnHold', 'Decision', 'Acceptance', 'Offer')");
+                        });
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.LoanTask", b =>
@@ -2588,6 +3144,13 @@ namespace LoanMS.Infrastructure.Migrations
 
                     b.Property<int?>("LoanId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("PauseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("PausedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Priority")
                         .IsRequired()
@@ -2691,6 +3254,117 @@ namespace LoanMS.Infrastructure.Migrations
                     b.HasIndex("IpAddress", "CreatedAt");
 
                     b.ToTable("LoginAttempts");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.OfferDeviation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AssignedApproverId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AssignmentState")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("BankId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ClosedReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DecisionComment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("DecisionIdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("DeviationType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("LoanId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("OfferId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OfferSnapshotJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("RaisedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RaisedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("RevisionNo")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RuleSnapshotJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int?>("TaskId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DecisionIdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"DecisionIdempotencyKey\" IS NOT NULL");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
+                    b.HasIndex("LoanId");
+
+                    b.HasIndex("RaisedByUserId");
+
+                    b.HasIndex(new[] { "OfferId" }, "UX_OfferDeviations_Offer_Raised")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Raised'");
+
+                    b.ToTable("OfferDeviations", t =>
+                        {
+                            t.HasCheckConstraint("CK_OfferDeviations_NoSelfApproval", "\"Status\" <> 'Approved' OR \"DecidedByUserId\" <> \"RaisedByUserId\"");
+
+                            t.HasCheckConstraint("CK_OfferDeviations_Status", "\"Status\" IN ('Raised', 'Approved', 'Rejected', 'Skipped', 'Closed')");
+                        });
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.PasswordResetToken", b =>
@@ -3207,6 +3881,143 @@ namespace LoanMS.Infrastructure.Migrations
                     b.ToTable("SalarySlipExtractions");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.Sanction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BankId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("BtAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("CancellationType")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CancelledByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CreditApprovalId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeviationRefsJson")
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("Emi")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("FinancedPrincipal")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("GeneratedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("GeneratedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("GstAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("GstPct")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("InsuranceAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("LenderName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("LoanAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("LoanId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("NetDisbursement")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("OfferId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PreviousSanctionId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("ProcessingFeeAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("ProcessingFeePct")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<int>("RevisionNo")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("Roi")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<string>("SanctionNumber")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<int>("SanctionVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("StampDuty")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("TenureMonths")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreditApprovalId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
+                    b.HasIndex("OfferId");
+
+                    b.HasIndex("PreviousSanctionId");
+
+                    b.HasIndex("SanctionNumber")
+                        .IsUnique();
+
+                    b.HasIndex(new[] { "LoanId" }, "UX_Sanctions_Loan_Active")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Active'");
+
+                    b.ToTable("Sanctions", t =>
+                        {
+                            t.HasCheckConstraint("CK_Sanctions_CancelReason", "\"Status\" <> 'Cancelled' OR (\"CancelReason\" IS NOT NULL AND \"CancelledAt\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_Sanctions_Status", "\"Status\" IN ('Active', 'Cancelled')");
+                        });
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.ScoreFactor", b =>
                 {
                     b.Property<int>("Id")
@@ -3637,6 +4448,42 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Navigation("LoanApplication");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.ApplicationOffer", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.BankMaster", "Bank")
+                        .WithMany()
+                        .HasForeignKey("BankId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.Loan", "Loan")
+                        .WithMany()
+                        .HasForeignKey("LoanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Bank");
+
+                    b.Navigation("Loan");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.ApplicationOfferRevision", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.ApplicationOffer", "Offer")
+                        .WithMany("Revisions")
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Offer");
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.AssignmentAuditLog", b =>
                 {
                     b.HasOne("LoanMS.Domain.Entities.Loan", "LoanApplication")
@@ -3773,6 +4620,58 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Navigation("Account");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.CreditApproval", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ApproverUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.Loan", null)
+                        .WithMany()
+                        .HasForeignKey("LoanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.ApplicationOffer", null)
+                        .WithMany()
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.DeviationRule", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.BankMaster", "Bank")
+                        .WithMany()
+                        .HasForeignKey("BankId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Bank");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.Disbursement", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.Loan", null)
+                        .WithMany()
+                        .HasForeignKey("LoanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.Disbursement", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalOfId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("LoanMS.Domain.Entities.Sanction", null)
+                        .WithMany()
+                        .HasForeignKey("SanctionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.DsaDocument", b =>
                 {
                     b.HasOne("LoanMS.Domain.Entities.DsaPartner", "DsaPartner")
@@ -3843,6 +4742,11 @@ namespace LoanMS.Infrastructure.Migrations
 
             modelBuilder.Entity("LoanMS.Domain.Entities.Loan", b =>
                 {
+                    b.HasOne("LoanMS.Domain.Entities.User", "ArchivedBy")
+                        .WithMany()
+                        .HasForeignKey("ArchivedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("LoanMS.Domain.Entities.User", "AssignedTo")
                         .WithMany("AssignedLoans")
                         .HasForeignKey("AssignedToUserId")
@@ -3884,6 +4788,8 @@ namespace LoanMS.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("PartnerId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ArchivedBy");
 
                     b.Navigation("AssignedTo");
 
@@ -4013,6 +4919,27 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Navigation("Loan");
                 });
 
+            modelBuilder.Entity("LoanMS.Domain.Entities.OfferDeviation", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.Loan", null)
+                        .WithMany()
+                        .HasForeignKey("LoanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.ApplicationOffer", null)
+                        .WithMany()
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("RaisedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("LoanMS.Domain.Entities.PasswordResetToken", b =>
                 {
                     b.HasOne("LoanMS.Domain.Entities.User", "User")
@@ -4077,6 +5004,32 @@ namespace LoanMS.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Loan");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.Sanction", b =>
+                {
+                    b.HasOne("LoanMS.Domain.Entities.CreditApproval", null)
+                        .WithMany()
+                        .HasForeignKey("CreditApprovalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.Loan", null)
+                        .WithMany()
+                        .HasForeignKey("LoanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.ApplicationOffer", null)
+                        .WithMany()
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("LoanMS.Domain.Entities.Sanction", null)
+                        .WithMany()
+                        .HasForeignKey("PreviousSanctionId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.ScoreFactor", b =>
@@ -4216,6 +5169,11 @@ namespace LoanMS.Infrastructure.Migrations
                     b.Navigation("Location");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("LoanMS.Domain.Entities.ApplicationOffer", b =>
+                {
+                    b.Navigation("Revisions");
                 });
 
             modelBuilder.Entity("LoanMS.Domain.Entities.BankMaster", b =>

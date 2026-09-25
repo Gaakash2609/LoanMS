@@ -1,0 +1,1 @@
+import{o as e}from"./index-C2kN_vC5.js";const a={access:()=>e.get("/api/expertexport/access"),getConfig:()=>e.get("/api/expertexport/config"),saveConfig:(p,t)=>e.post("/api/expertexport/config",{roles:p,userIds:t}),downloadData:()=>e.get("/api/expertexport/data",{responseType:"blob"})};export{a as e};

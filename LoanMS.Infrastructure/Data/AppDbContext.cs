@@ -11,7 +11,36 @@ public class AppDbContext : DbContext
     /// <summary>Name of the User soft-delete query filter (see OnModelCreating).</summary>
     public const string UserSoftDeleteFilter = "UserSoftDelete";
 
+    /// <summary>Partial unique index: at most ONE active/in-process (non-deleted,
+    /// non-terminal) application per customer. The DB-level backstop behind
+    /// LoanService.EvaluateApplicationEligibility for concurrent submits.</summary>
+    public const string ActiveApplicationIndex = "UX_Loans_CustomerId_ActiveApplication";
+    /// <summary>Unique normalised PAN (where a valid PAN exists) — customer-create race guard.</summary>
+    public const string CustomerPanIndex = "UX_Customers_PanNormalized";
+
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+    // Customer identity keys are derived columns — recompute them for every
+    // added/modified Customer here, the single choke point every write path
+    // (wizard, customer API, anything added later) goes through.
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        RefreshCustomerIdentityKeys();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        RefreshCustomerIdentityKeys();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void RefreshCustomerIdentityKeys()
+    {
+        foreach (var entry in ChangeTracker.Entries<Customer>())
+            if (entry.State is EntityState.Added or EntityState.Modified)
+                entry.Entity.RefreshIdentityKeys();
+    }
 
     // Root-caused live in production 2026-08-24: POST /api/loans/{id}/obligations
     // was throwing ArgumentException("Cannot write DateTime with Kind=Unspecified
@@ -82,6 +111,22 @@ public class AppDbContext : DbContext
     public DbSet<AiAgentRun>        AiAgentRuns         => Set<AiAgentRun>();
     public DbSet<LoginAttempt>      LoginAttempts       => Set<LoginAttempt>();
 
+    // Offer → Deviation → Credit Approval → Sanction → Disbursement
+    public DbSet<ApplicationOffer>         ApplicationOffers         => Set<ApplicationOffer>();
+    public DbSet<ApplicationOfferRevision> ApplicationOfferRevisions => Set<ApplicationOfferRevision>();
+    public DbSet<DeviationRule>            DeviationRules            => Set<DeviationRule>();
+    public DbSet<OfferDeviation>           OfferDeviations           => Set<OfferDeviation>();
+    public DbSet<CreditApproval>           CreditApprovals           => Set<CreditApproval>();
+    public DbSet<Sanction>                 Sanctions                 => Set<Sanction>();
+    public DbSet<Disbursement>             Disbursements             => Set<Disbursement>();
+
+    // DB-level constraint names the offer workflow maps to clean 409s (DbConflicts).
+    public const string ActiveOfferPerLenderIndex  = "UX_ApplicationOffers_Loan_Bank_Active";
+    public const string FinalOfferIndex            = "UX_ApplicationOffers_Loan_Final";
+    public const string OpenDeviationIndex         = "UX_OfferDeviations_Offer_Raised";
+    public const string ActiveSanctionIndex        = "UX_Sanctions_Loan_Active";
+    public const string CompletedDisbursementIndex = "UX_Disbursements_Loan_Completed";
+
     // CIBIL / Bureau Report Entities
     public DbSet<BureauReport>           BureauReports           => Set<BureauReport>();
     public DbSet<BureauAccount>          BureauAccounts          => Set<BureauAccount>();
@@ -138,6 +183,15 @@ public class AppDbContext : DbContext
             e.Property(c => c.Gender).HasMaxLength(1);
             e.Property(c => c.FatherName).HasMaxLength(150);
             e.Property(c => c.ResidenceType).HasMaxLength(40);
+            // Normalised identity keys — global matching runs on these. Soft-
+            // deleted rows are deliberately INSIDE the unique PAN guarantee (a
+            // deleted customer's PAN is still that person's identity).
+            e.Property(c => c.PanNormalized).HasMaxLength(10);
+            e.Property(c => c.PhoneNormalized).HasMaxLength(10);
+            e.Property(c => c.EmailNormalized).HasMaxLength(200);
+            e.HasIndex(c => c.PanNormalized, CustomerPanIndex).IsUnique().HasFilter("\"PanNormalized\" IS NOT NULL");
+            e.HasIndex(c => c.PhoneNormalized);
+            e.HasIndex(c => c.EmailNormalized);
             e.HasQueryFilter(c => !c.IsDeleted);
         });
 
@@ -173,6 +227,14 @@ public class AppDbContext : DbContext
             e.Property(l => l.IncredCustomerId).HasMaxLength(100);
             e.Property(l => l.IncredRequestId).HasMaxLength(100);
             e.Property(l => l.IncredOfferStatus).HasMaxLength(20);
+            e.Property(l => l.ArchiveReason).HasMaxLength(500);
+            e.HasOne(l => l.ArchivedBy).WithMany().HasForeignKey(l => l.ArchivedByUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            // One active/in-process application per customer (see
+            // ActiveApplicationIndex). Terminal statuses come from the same
+            // classification the eligibility guard uses, so the two can't drift.
+            e.HasIndex(l => l.CustomerId, ActiveApplicationIndex).IsUnique().HasFilter(
+                "\"IsDeleted\" = false AND \"Status\" NOT IN (" +
+                string.Join(", ", LoanMS.Application.Services.LoanService.TerminalApplicationStatuses.Select(s => $"'{s}'")) + ")");
             e.HasQueryFilter(l => !l.IsDeleted);
             e.HasOne(l => l.Customer).WithMany(c => c.Loans).HasForeignKey(l => l.CustomerId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(l => l.CreatedBy).WithMany(u => u.CreatedLoans).HasForeignKey(l => l.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
@@ -183,6 +245,14 @@ public class AppDbContext : DbContext
             e.HasOne(l => l.LoginUser).WithMany().HasForeignKey(l => l.LoginUserId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
             e.HasOne(l => l.OpsManager).WithMany().HasForeignKey(l => l.OpsManagerId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
             e.Property(l => l.SalesTeamName).HasMaxLength(200);
+            // Application stages are exactly the LoanStatus enum — NI / Not
+            // Interested and Cancelled are not application stages and can no
+            // longer be written even by raw SQL.
+            var loanStatusList = "'" + string.Join("', '", Enum.GetNames<LoanStatus>()) + "'";
+            e.ToTable(t => {
+                t.HasCheckConstraint("CK_Loans_Status", $"\"Status\" IN ({loanStatusList})");
+                t.HasCheckConstraint("CK_Loans_PreRejectedStatus", $"\"PreRejectedStatus\" IS NULL OR \"PreRejectedStatus\" IN ({loanStatusList})");
+            });
         });
 
         mb.Entity<LoanOffer>(e => {
@@ -200,6 +270,11 @@ public class AppDbContext : DbContext
             e.HasKey(h => h.Id);
             e.Property(h => h.FromStatus).HasConversion<string>();
             e.Property(h => h.ToStatus).HasConversion<string>();
+            var historyStatusList = "'" + string.Join("', '", Enum.GetNames<LoanStatus>()) + "'";
+            e.ToTable(t => {
+                t.HasCheckConstraint("CK_LoanStatusHistories_FromStatus", $"\"FromStatus\" IN ({historyStatusList})");
+                t.HasCheckConstraint("CK_LoanStatusHistories_ToStatus", $"\"ToStatus\" IN ({historyStatusList})");
+            });
             e.HasQueryFilter(h => !h.IsDeleted);
             e.HasOne(h => h.Loan).WithMany(l => l.StatusHistory).HasForeignKey(h => h.LoanId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(h => h.ChangedBy).WithMany().HasForeignKey(h => h.ChangedByUserId).OnDelete(DeleteBehavior.Restrict);
@@ -370,6 +445,7 @@ public class AppDbContext : DbContext
             e.HasOne(t => t.Loan).WithMany().HasForeignKey(t => t.LoanId).IsRequired(false).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(t => t.AssignedTo).WithMany().HasForeignKey(t => t.AssignedToUserId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(t => t.CreatedBy).WithMany().HasForeignKey(t => t.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.Property(t => t.PauseReason).HasMaxLength(500);
         });
 
         mb.Entity<Ticket>(e => {
@@ -855,6 +931,179 @@ public class AppDbContext : DbContext
             e.HasIndex(sf => sf.BureauReportId);
             e.Property(sf => sf.Factor).HasMaxLength(200).IsRequired();
             e.Property(sf => sf.Description).HasMaxLength(500);
+        });
+
+        // ── Offer workflow ───────────────────────────────────────────────────
+        // Partial unique indexes are the DB backstop for the service rules:
+        // one ACTIVE offer per lender per application, one FINAL offer per
+        // application, one open deviation request per offer, one ACTIVE
+        // sanction per application, one completed disbursement per application.
+        // The max-3-active-offers rule and the immutability of revisions /
+        // approvals / sanctions / disbursement money columns are enforced by
+        // PostgreSQL triggers in migration AddOfferWorkflow.
+        var activeOfferFilter = "\"IsDeleted\" = false AND \"Status\" IN ('" +
+            string.Join("', '", OfferWorkflowStatuses.ActiveOfferStatuses) + "')";
+        mb.Entity<ApplicationOffer>(e => {
+            e.HasKey(o => o.Id);
+            e.Property(o => o.LenderName).HasMaxLength(200).IsRequired();
+            e.Property(o => o.ProductKey).HasMaxLength(100).IsRequired();
+            e.Property(o => o.LoanType).HasMaxLength(50).IsRequired();
+            e.Property(o => o.Status).HasMaxLength(20).IsRequired();
+            e.Property(o => o.DeviationStatus).HasMaxLength(20).IsRequired();
+            e.Property(o => o.ApprovalStatus).HasMaxLength(20).IsRequired();
+            e.Property(o => o.StatusReason).HasMaxLength(1000);
+            e.Property(o => o.Version).IsConcurrencyToken();
+            e.HasIndex(o => o.LoanId);
+            e.HasIndex(o => new { o.LoanId, o.BankId }, ActiveOfferPerLenderIndex).IsUnique().HasFilter(activeOfferFilter);
+            e.HasIndex(o => o.LoanId, FinalOfferIndex).IsUnique()
+                .HasFilter($"\"IsDeleted\" = false AND \"Status\" = '{OfferWorkflowStatuses.OfferFinal}'");
+            e.HasQueryFilter(o => !o.IsDeleted);
+            e.HasOne(o => o.Loan).WithMany().HasForeignKey(o => o.LoanId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(o => o.Bank).WithMany().HasForeignKey(o => o.BankId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<User>().WithMany().HasForeignKey(o => o.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => {
+                t.HasCheckConstraint("CK_ApplicationOffers_Status", "\"Status\" IN ('" + string.Join("', '", OfferWorkflowStatuses.AllOfferStatuses) + "')");
+                t.HasCheckConstraint("CK_ApplicationOffers_DeviationStatus", "\"DeviationStatus\" IN ('" + string.Join("', '", OfferWorkflowStatuses.AllOfferDeviationStatuses) + "')");
+                t.HasCheckConstraint("CK_ApplicationOffers_ApprovalStatus", "\"ApprovalStatus\" IN ('" + string.Join("', '", OfferWorkflowStatuses.AllApprovalStatuses) + "')");
+                t.HasCheckConstraint("CK_ApplicationOffers_FinalSelection", "\"Status\" <> 'Final' OR (\"SelectedAt\" IS NOT NULL AND \"SelectedRevisionNo\" IS NOT NULL)");
+            });
+        });
+
+        mb.Entity<ApplicationOfferRevision>(e => {
+            e.HasKey(r => r.Id);
+            e.HasIndex(r => new { r.OfferId, r.RevisionNo }).IsUnique();
+            foreach (var p in new[] { nameof(ApplicationOfferRevision.LoanAmount), nameof(ApplicationOfferRevision.ProcessingFeeAmount),
+                                      nameof(ApplicationOfferRevision.GstAmount), nameof(ApplicationOfferRevision.InsuranceAmount),
+                                      nameof(ApplicationOfferRevision.BtAmount), nameof(ApplicationOfferRevision.StampDuty),
+                                      nameof(ApplicationOfferRevision.FinancedPrincipal), nameof(ApplicationOfferRevision.Emi),
+                                      nameof(ApplicationOfferRevision.NetDisbursement) })
+                e.Property(p).HasColumnType("decimal(18,2)");
+            foreach (var p in new[] { nameof(ApplicationOfferRevision.BaseRoi), nameof(ApplicationOfferRevision.OfferedRoi),
+                                      nameof(ApplicationOfferRevision.ProcessingFeePct), nameof(ApplicationOfferRevision.GstPct) })
+                e.Property(p).HasColumnType("decimal(5,2)");
+            e.Property(r => r.RateType).HasMaxLength(20);
+            e.Property(r => r.ChangeReason).HasMaxLength(1000);
+            e.Property(r => r.EvaluationOutcome).HasMaxLength(20);
+            e.HasOne(r => r.Offer).WithMany(o => o.Revisions).HasForeignKey(r => r.OfferId).OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => t.HasCheckConstraint("CK_OfferRevisions_Positive",
+                "\"LoanAmount\" > 0 AND \"TenureMonths\" > 0 AND \"OfferedRoi\" >= 0 AND \"NetDisbursement\" > 0"));
+        });
+
+        mb.Entity<DeviationRule>(e => {
+            e.HasKey(r => r.Id);
+            e.Property(r => r.RuleKey).HasMaxLength(64).IsRequired();
+            e.Property(r => r.Name).HasMaxLength(200).IsRequired();
+            e.Property(r => r.ProductKey).HasMaxLength(100);
+            e.Property(r => r.LoanType).HasMaxLength(50);
+            e.Property(r => r.DeviationType).HasMaxLength(30).IsRequired();
+            e.Property(r => r.Metric).HasMaxLength(40).IsRequired();
+            e.Property(r => r.LimitValue).HasColumnType("decimal(18,2)");
+            e.Property(r => r.MaxApprovableDeviation).HasColumnType("decimal(18,2)");
+            e.Property(r => r.ConditionLogic).HasMaxLength(3);
+            e.Property(r => r.Notes).HasMaxLength(1000);
+            e.HasIndex(r => new { r.RuleKey, r.Version }).IsUnique();
+            e.HasIndex(r => new { r.BankId, r.DeviationType });
+            e.HasOne(r => r.Bank).WithMany().HasForeignKey(r => r.BankId).OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => {
+                t.HasCheckConstraint("CK_DeviationRules_Dates", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" >= \"EffectiveFrom\"");
+                t.HasCheckConstraint("CK_DeviationRules_Logic", "\"ConditionLogic\" IN ('AND', 'OR')");
+            });
+        });
+
+        mb.Entity<OfferDeviation>(e => {
+            e.HasKey(d => d.Id);
+            e.Property(d => d.DeviationType).HasMaxLength(40).IsRequired();
+            e.Property(d => d.Source).HasMaxLength(10).IsRequired();
+            e.Property(d => d.Status).HasMaxLength(20).IsRequired();
+            e.Property(d => d.Reason).HasMaxLength(2000).IsRequired();
+            e.Property(d => d.AssignmentState).HasMaxLength(20);
+            e.Property(d => d.DecisionComment).HasMaxLength(2000);
+            e.Property(d => d.ClosedReason).HasMaxLength(500);
+            e.Property(d => d.IdempotencyKey).HasMaxLength(100);
+            e.Property(d => d.DecisionIdempotencyKey).HasMaxLength(100);
+            e.HasIndex(d => d.LoanId);
+            e.HasIndex(d => d.OfferId, OpenDeviationIndex).IsUnique()
+                .HasFilter($"\"Status\" = '{OfferWorkflowStatuses.RequestRaised}'");
+            e.HasIndex(d => d.IdempotencyKey).IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
+            e.HasIndex(d => d.DecisionIdempotencyKey).IsUnique().HasFilter("\"DecisionIdempotencyKey\" IS NOT NULL");
+            e.HasOne<Loan>().WithMany().HasForeignKey(d => d.LoanId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ApplicationOffer>().WithMany().HasForeignKey(d => d.OfferId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<User>().WithMany().HasForeignKey(d => d.RaisedByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => {
+                t.HasCheckConstraint("CK_OfferDeviations_Status", "\"Status\" IN ('" + string.Join("', '", OfferWorkflowStatuses.AllRequestStatuses) + "')");
+                t.HasCheckConstraint("CK_OfferDeviations_NoSelfApproval", "\"Status\" <> 'Approved' OR \"DecidedByUserId\" <> \"RaisedByUserId\"");
+            });
+        });
+
+        mb.Entity<CreditApproval>(e => {
+            e.HasKey(a => a.Id);
+            e.Property(a => a.LenderName).HasMaxLength(200);
+            e.Property(a => a.Decision).HasMaxLength(20).IsRequired();
+            e.Property(a => a.Comment).HasMaxLength(2000);
+            e.Property(a => a.DeviationStatusAtApproval).HasMaxLength(20);
+            e.Property(a => a.IdempotencyKey).HasMaxLength(100);
+            e.HasIndex(a => a.LoanId);
+            e.HasIndex(a => a.IdempotencyKey).IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
+            e.HasOne<Loan>().WithMany().HasForeignKey(a => a.LoanId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ApplicationOffer>().WithMany().HasForeignKey(a => a.OfferId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<User>().WithMany().HasForeignKey(a => a.ApproverUserId).OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => t.HasCheckConstraint("CK_CreditApprovals_Decision", "\"Decision\" IN ('Approved', 'Rejected')"));
+        });
+
+        mb.Entity<Sanction>(e => {
+            e.HasKey(s => s.Id);
+            e.Property(s => s.SanctionNumber).HasMaxLength(60).IsRequired();
+            e.Property(s => s.LenderName).HasMaxLength(200);
+            foreach (var p in new[] { nameof(Sanction.LoanAmount), nameof(Sanction.Emi), nameof(Sanction.ProcessingFeeAmount),
+                                      nameof(Sanction.GstAmount), nameof(Sanction.InsuranceAmount), nameof(Sanction.BtAmount),
+                                      nameof(Sanction.StampDuty), nameof(Sanction.FinancedPrincipal), nameof(Sanction.NetDisbursement) })
+                e.Property(p).HasColumnType("decimal(18,2)");
+            foreach (var p in new[] { nameof(Sanction.Roi), nameof(Sanction.ProcessingFeePct), nameof(Sanction.GstPct) })
+                e.Property(p).HasColumnType("decimal(5,2)");
+            e.Property(s => s.Status).HasMaxLength(20).IsRequired();
+            e.Property(s => s.CancellationType).HasMaxLength(20);
+            e.Property(s => s.CancelReason).HasMaxLength(1000);
+            e.Property(s => s.IdempotencyKey).HasMaxLength(100);
+            e.HasIndex(s => s.SanctionNumber).IsUnique();
+            e.HasIndex(s => s.LoanId, ActiveSanctionIndex).IsUnique()
+                .HasFilter($"\"Status\" = '{OfferWorkflowStatuses.SanctionActive}'");
+            e.HasIndex(s => s.IdempotencyKey).IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
+            e.HasOne<Loan>().WithMany().HasForeignKey(s => s.LoanId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ApplicationOffer>().WithMany().HasForeignKey(s => s.OfferId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<CreditApproval>().WithMany().HasForeignKey(s => s.CreditApprovalId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<Sanction>().WithMany().HasForeignKey(s => s.PreviousSanctionId).OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => {
+                t.HasCheckConstraint("CK_Sanctions_Status", "\"Status\" IN ('" + string.Join("', '", OfferWorkflowStatuses.AllSanctionStatuses) + "')");
+                t.HasCheckConstraint("CK_Sanctions_CancelReason", "\"Status\" <> 'Cancelled' OR (\"CancelReason\" IS NOT NULL AND \"CancelledAt\" IS NOT NULL)");
+            });
+        });
+
+        mb.Entity<Disbursement>(e => {
+            e.HasKey(d => d.Id);
+            e.Property(d => d.Type).HasMaxLength(20).IsRequired();
+            e.Property(d => d.Amount).HasColumnType("decimal(18,2)");
+            e.Property(d => d.BankAccountNumber).HasMaxLength(34).IsRequired();
+            e.Property(d => d.Ifsc).HasMaxLength(11).IsRequired();
+            e.Property(d => d.AccountHolderName).HasMaxLength(200);
+            e.Property(d => d.Utr).HasMaxLength(50).IsRequired();
+            e.Property(d => d.LenderReference).HasMaxLength(100);
+            e.Property(d => d.Mode).HasMaxLength(20).IsRequired();
+            e.Property(d => d.Status).HasMaxLength(20).IsRequired();
+            e.Property(d => d.Reason).HasMaxLength(1000);
+            e.Property(d => d.PreviousLoanStatus).HasMaxLength(20);
+            e.Property(d => d.IdempotencyKey).HasMaxLength(100);
+            e.HasIndex(d => d.LoanId, CompletedDisbursementIndex).IsUnique()
+                .HasFilter($"\"Type\" = '{OfferWorkflowStatuses.TypeDisbursement}' AND \"Status\" = '{OfferWorkflowStatuses.DisbursementCompleted}'");
+            e.HasIndex(d => d.IdempotencyKey).IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
+            e.HasOne<Loan>().WithMany().HasForeignKey(d => d.LoanId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<Sanction>().WithMany().HasForeignKey(d => d.SanctionId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<Disbursement>().WithMany().HasForeignKey(d => d.ReversalOfId).OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => {
+                t.HasCheckConstraint("CK_Disbursements_Type", "\"Type\" IN ('Disbursement', 'Reversal')");
+                t.HasCheckConstraint("CK_Disbursements_Status", "\"Status\" IN ('Completed', 'Reversed')");
+                t.HasCheckConstraint("CK_Disbursements_Amount", "\"Amount\" > 0");
+                t.HasCheckConstraint("CK_Disbursements_ReversalRef", "\"Type\" <> 'Reversal' OR (\"ReversalOfId\" IS NOT NULL AND \"Reason\" IS NOT NULL)");
+            });
         });
     }
 }

@@ -18,4 +18,18 @@ public interface ICustomerRepository : IGenericRepository<Customer>
     /// customers — the DB unique indexes on Email/PanNumber include them.</summary>
     Task<bool> EmailTakenIncludingDeletedAsync(string email, int? excludeId = null);
     Task<bool> PanTakenIncludingDeletedAsync(string pan, int? excludeId = null);
+
+    /// <summary>GLOBAL identity lookup on the normalised keys — no user scope,
+    /// soft-deleted customers included. Arguments must already be normalised
+    /// (Customer.NormalizePan / NormalizeMobile / NormalizeEmail); null = not supplied.</summary>
+    Task<List<CustomerIdentityRow>> FindByIdentityKeysAsync(string? pan, string? mobile, string? email);
+    Task<CustomerIdentityRow?> GetIdentityRowAsync(int customerId);
+    /// <summary>True when the customer exists only for this one draft
+    /// application: no other application (deleted ones included) and no bureau
+    /// report reference it — i.e. it is safe to supersede.</summary>
+    Task<bool> IsProvisionalForLoanAsync(int customerId, int loanId);
+    /// <summary>Serialises concurrent identification/creation for the same
+    /// normalised identifiers (PostgreSQL transaction-scoped advisory locks,
+    /// taken in a fixed order). No-op outside a transaction / on other providers.</summary>
+    Task LockIdentityKeysAsync(string? pan, string? mobile, string? email);
 }

@@ -20,13 +20,20 @@ public class WizardController : BaseController
     private readonly ILogger<WizardController> _logger;
     private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
     private readonly LoanMS.API.Services.ILoginUserAssignmentService _loginAssign;
+    // Central rules (shared with every other create/reactivate path): global
+    // customer identification and the duplicate-application + 45-day guard.
+    private readonly ICustomerService _customerService;
+    private readonly ILoanService _loanService;
 
-    public WizardController(AppDbContext db, ILogger<WizardController> logger, LoanMS.API.Services.IRolePermissionService rolePerm, LoanMS.API.Services.ILoginUserAssignmentService loginAssign)
+    public WizardController(AppDbContext db, ILogger<WizardController> logger, LoanMS.API.Services.IRolePermissionService rolePerm, LoanMS.API.Services.ILoginUserAssignmentService loginAssign,
+        ICustomerService customerService, ILoanService loanService)
     {
         _db     = db;
         _logger = logger;
         _rolePerm = rolePerm;
         _loginAssign = loginAssign;
+        _customerService = customerService;
+        _loanService = loanService;
     }
 
     // NOTE: the wizard frontend sends short keys (new_car, used_car, education, lap)
@@ -172,43 +179,27 @@ public class WizardController : BaseController
     }
 
     /// <summary>
-    /// Find the customer this application belongs to (by existing loan, PAN, then
-    /// mobile) or create a new one. Shared by Submit and SaveDraft so both follow
-    /// the exact same matching rules instead of drifting apart.
+    /// Find the customer this application belongs to, or create a new one.
+    /// Shared by Submit and SaveDraft. Identification is the global, normalised
+    /// rule in CustomerService.ResolveIdentityAsync (PAN / mobile / email, soft-
+    /// deleted customers included), run on EVERY save — not only the first — so
+    /// an identifier typed later that belongs to an existing customer re-links
+    /// the draft instead of silently leaving a duplicate customer behind.
+    /// Returns (null, identity) when the details need admin review (conflicting
+    /// matches or a deleted customer): nothing is merged, restored or created.
+    /// Must run inside the caller's transaction (the identifier locks are
+    /// transaction-scoped).
     /// </summary>
-    private async Task<Customer> FindOrCreateCustomerAsync(WizardSubmitDto dto, Loan? existingLoan)
+    private async Task<(Customer? Customer, CustomerIdentityMatchDto Identity)> ResolveCustomerForApplicationAsync(
+        WizardSubmitDto dto, Loan? existingLoan)
     {
+        var identity = await _customerService.ResolveIdentityAsync(dto.Pan, dto.Mobile, dto.Email,
+            existingLoan?.CustomerId, existingLoan?.Id, lockIdentifiers: true);
+        if (identity.NeedsReview) return (null, identity);
+
         Customer? customer = null;
-
-        if (existingLoan != null)
-            customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == existingLoan.CustomerId);
-
-        // PanNumber has a unique index that is NOT filtered by IsDeleted, so a
-        // soft-deleted customer still physically occupies that PAN. Look it up
-        // with IgnoreQueryFilters (matching the seeder-user reactivation
-        // pattern in Program.cs) — otherwise a filtered lookup misses it and
-        // the subsequent INSERT collides on the unique index → 500. Reused (and
-        // reactivated, below) instead of colliding.
-        if (customer == null && !string.IsNullOrWhiteSpace(dto.Pan))
-            customer = await _db.Customers.IgnoreQueryFilters().FirstOrDefaultAsync(c =>
-                c.PanNumber == dto.Pan.ToUpper().Trim());
-
-        if (customer == null && !string.IsNullOrWhiteSpace(dto.Mobile))
-            customer = await _db.Customers.FirstOrDefaultAsync(c =>
-                c.Phone == dto.Mobile.Trim() && !c.IsDeleted);
-
-        // BUGFIX (wizard bug sweep): Customer.Email has a unique index (same
-        // as PanNumber), but this lookup never checked it before falling
-        // through to "create new" — so a dto.Email that happens to match an
-        // EXISTING customer's email (PAN not yet entered, mobile blank or a
-        // typo) would try to INSERT a duplicate, hit the unique constraint,
-        // and surface as the same generic 500 "Could not save draft."
-        // Email also has an unfiltered unique index — same IgnoreQueryFilters
-        // reasoning as PanNumber above, so a soft-deleted customer's email
-        // can't trigger a duplicate-INSERT 500.
-        if (customer == null && !string.IsNullOrWhiteSpace(dto.Email))
-            customer = await _db.Customers.IgnoreQueryFilters().FirstOrDefaultAsync(c =>
-                c.Email == dto.Email.ToLower().Trim());
+        if (identity.CustomerId is int matchedId)
+            customer = await _db.Customers.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.Id == matchedId);
 
         if (customer == null)
         {
@@ -237,7 +228,7 @@ public class WizardController : BaseController
                                  ? fallbackEmail
                                  : dto.Email.ToLower().Trim(),
                 Phone          = (dto.Mobile ?? string.Empty).Trim(),
-                PanNumber      = dto.Pan?.ToUpper().Trim(),
+                PanNumber      = string.IsNullOrWhiteSpace(dto.Pan) ? null : dto.Pan.ToUpper().Trim(),
                 AadhaarNumber  = dto.Aadhar?.Trim(),
                 DateOfBirth    = string.IsNullOrWhiteSpace(dto.Dob) ? null : DateTime.TryParse(dto.Dob, out var dob) ? DateTime.SpecifyKind(dob, DateTimeKind.Utc) : null,
                 // House/Flat No. (Street1) and Street & Locality (Street2) are
@@ -266,16 +257,22 @@ public class WizardController : BaseController
                 OfficialEmail  = dto.OfficeEmail,
                 CreatedAt      = DateTime.UtcNow
             };
-            ApplyProductDataCustomerFields(customer, dto.ProductData);
+            ApplyProductDataCustomerFields(customer, dto.ProductData, protectIdentity: false);
             _db.Customers.Add(customer);
         }
         else
         {
-            // If the matched customer was soft-deleted (found only via the
-            // IgnoreQueryFilters lookups above), reactivate it — a new
-            // application for that PAN/email means the customer is back.
-            if (customer.IsDeleted) customer.IsDeleted = false;
-            if (!string.IsNullOrWhiteSpace(dto.FullName)) customer.FullName = dto.FullName.Trim();
+            // An EXISTING master record (a returning customer, or one another
+            // application already uses) keeps its identity/KYC data: those
+            // fields are only filled when blank, never overwritten by a new
+            // application. The draft's own provisional record (created by this
+            // same wizard session) keeps being refined as the user types.
+            // Application-time data (address, employment, income, obligations,
+            // CIBIL) still updates as before — the new application needs it.
+            var protect = identity.IsExistingMaster;
+            bool Fill(string? current) => !protect || string.IsNullOrWhiteSpace(current);
+
+            if (!string.IsNullOrWhiteSpace(dto.FullName) && Fill(customer.FullName)) customer.FullName = dto.FullName.Trim();
             // Refresh Phone too (guarded). The customer is created on the FIRST
             // autosave, which can fire while the mobile is still mid-entry (a pause
             // longer than the ~800ms debounce), so the create branch may have stored
@@ -284,7 +281,7 @@ public class WizardController : BaseController
             // application for the same person would miss this customer and insert a
             // duplicate. Phone has no unique index, so this refresh can't 500 on a
             // duplicate-key violation (unlike PAN/Email below).
-            if (!string.IsNullOrWhiteSpace(dto.Mobile)) customer.Phone = dto.Mobile.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Mobile) && Fill(customer.Phone)) customer.Phone = dto.Mobile.Trim();
             // BUGFIX (wizard-to-detail-page linking sweep): the customer is
             // normally created on the very FIRST autosave (Step 1, as soon as
             // Mobile is valid) — well before Address (Step 4) or Employment
@@ -303,13 +300,13 @@ public class WizardController : BaseController
             if (dto.Obligations > 0) customer.MonthlyObligations = dto.Obligations;
             if (dto.Cibil > 0)   customer.CibilScore    = dto.Cibil;
             if (!string.IsNullOrWhiteSpace(dto.CompName)) customer.CompanyName = dto.CompName;
-            if (!string.IsNullOrWhiteSpace(dto.Gender))     customer.Gender        = NormalizeGender(dto.Gender);
-            if (!string.IsNullOrWhiteSpace(dto.FatherName)) customer.FatherName    = dto.FatherName.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Gender) && Fill(customer.Gender))         customer.Gender     = NormalizeGender(dto.Gender);
+            if (!string.IsNullOrWhiteSpace(dto.FatherName) && Fill(customer.FatherName)) customer.FatherName = dto.FatherName.Trim();
             if (!string.IsNullOrWhiteSpace(dto.HomeType))   customer.ResidenceType = dto.HomeType;
             if (!string.IsNullOrWhiteSpace(dto.Desig))       customer.Designation   = dto.Desig.Trim();
             if (!string.IsNullOrWhiteSpace(dto.CompType))    customer.CompanyType   = dto.CompType;
             if (!string.IsNullOrWhiteSpace(dto.OfficeEmail)) customer.OfficialEmail = dto.OfficeEmail.Trim();
-            ApplyProductDataCustomerFields(customer, dto.ProductData);
+            ApplyProductDataCustomerFields(customer, dto.ProductData, protect);
             // BUGFIX (draft-resume persistence): the update branch previously
             // dropped these KYC / employment fields. The Customer is created on
             // the FIRST autosave (Step 1, before they're entered), so every later
@@ -319,8 +316,9 @@ public class WizardController : BaseController
             // placeholder. The create branch already stores them; mirror that here
             // (guarded, so a blank never wipes a stored value). Shared by Submit +
             // SaveDraft, so a submitted-via-draft loan is fixed too.
-            if (!string.IsNullOrWhiteSpace(dto.Aadhar)) customer.AadhaarNumber = dto.Aadhar.Trim();
-            if (!string.IsNullOrWhiteSpace(dto.Dob) && DateTime.TryParse(dto.Dob, out var udob))
+            if (!string.IsNullOrWhiteSpace(dto.Aadhar) && Fill(customer.AadhaarNumber)) customer.AadhaarNumber = dto.Aadhar.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Dob) && DateTime.TryParse(dto.Dob, out var udob)
+                && (!protect || customer.DateOfBirth == null))
                 customer.DateOfBirth = DateTime.SpecifyKind(udob, DateTimeKind.Utc);
             if (!string.IsNullOrWhiteSpace(dto.EmpType)) customer.EmploymentType = MapEmpType(dto.EmpType);
             // BUGFIX (draft-resume persistence — same class as Aadhaar/DOB/EmpType
@@ -336,7 +334,9 @@ public class WizardController : BaseController
             // soft-deleted) customer already holds it, rather than 500 the save on a
             // duplicate-key violation. A true PAN duplicate is still surfaced by the
             // Validate/Submit duplicate-application check.
-            if (!string.IsNullOrWhiteSpace(dto.Pan))
+            // On an existing master record a valid PAN already on file is never
+            // replaced (a different PAN is refused upstream as a conflict).
+            if (!string.IsNullOrWhiteSpace(dto.Pan) && (!protect || Customer.NormalizePan(customer.PanNumber) == null))
             {
                 var realPan = dto.Pan.ToUpper().Trim();
                 if (!string.Equals(customer.PanNumber, realPan, StringComparison.OrdinalIgnoreCase)
@@ -346,8 +346,9 @@ public class WizardController : BaseController
             // Customer.Email has an UNFILTERED unique index, so only take the real
             // address when it actually changed and no other (incl. soft-deleted)
             // customer holds it — otherwise keep the placeholder rather than 500
-            // the save on a duplicate-key violation.
-            if (!string.IsNullOrWhiteSpace(dto.Email))
+            // the save on a duplicate-key violation. On an existing master record
+            // only a system placeholder (…@efin.auto) is ever replaced.
+            if (!string.IsNullOrWhiteSpace(dto.Email) && (!protect || Customer.NormalizeEmail(customer.Email) == null))
             {
                 var realEmail = dto.Email.ToLower().Trim();
                 if (!string.Equals(customer.Email, realEmail, StringComparison.OrdinalIgnoreCase)
@@ -357,7 +358,67 @@ public class WizardController : BaseController
             customer.UpdatedAt = DateTime.UtcNow;
         }
 
-        return customer;
+        return (customer, identity);
+    }
+
+    /// <summary>
+    /// After the application row points at the resolved customer: remove the
+    /// draft's superseded provisional customer (created by this same wizard
+    /// session before the typed PAN/mobile/email identified an existing
+    /// customer). Only ever a record no other application or bureau report uses
+    /// (CustomerService re-checks that) — this is not a merge of two customers.
+    /// </summary>
+    private async Task RemoveSupersededProvisionalCustomerAsync(CustomerIdentityMatchDto identity)
+    {
+        if (identity.SupersededProvisionalCustomerId is not int provisionalId) return;
+        var provisional = await _db.Customers.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.Id == provisionalId);
+        if (provisional == null) return;
+        _db.Customers.Remove(provisional);
+        await _db.SaveChangesAsync();
+    }
+
+    /// <summary>409 for a needs-review identity or a blocked application, with
+    /// the message this caller may see.</summary>
+    private ObjectResult BlockedResponse<T>(CustomerIdentityMatchDto? identity, ApplicationEligibilityDto? eligibility)
+    {
+        var body = identity is { NeedsReview: true }
+            ? ApiResponseDto<T>.Fail(identity.Message!, ApiErrorCodes.CustomerNeedsReview)
+            : ApiResponseDto<T>.Fail(
+                LoanMS.Application.Services.LoanService.DescribeEligibilityForCaller(eligibility!, CurrentUserId, CurrentUserRole),
+                eligibility!.Code!);
+        return Conflict(body);
+    }
+
+    /// <summary>Audit trail for a refused final submit (the global AuditMiddleware
+    /// only records successful writes). Identifiers are masked. Best-effort.
+    /// Not written for background draft autosaves, which would flood the log.</summary>
+    private async Task AuditBlockedSubmitAsync(WizardSubmitDto dto, CustomerIdentityMatchDto? identity, ApplicationEligibilityDto? eligibility)
+    {
+        try
+        {
+            _db.ChangeTracker.Clear();
+            var needsReview = identity is { NeedsReview: true };
+            var pan = Customer.NormalizePan(dto.Pan);
+            var mobile = Customer.NormalizeMobile(dto.Mobile);
+            AuditHelper.LogChange(_db, HttpContext,
+                entityName: needsReview ? "Customers" : "Loans",
+                entityId: needsReview
+                    ? string.Join(",", identity!.MatchedCustomerIds)
+                    : (eligibility?.BlockingLoanId?.ToString() ?? string.Empty),
+                action: needsReview ? "CustomerNeedsReview" : "ApplicationBlocked",
+                oldValues: null,
+                newValues: $"wizard submit; PAN {(pan == null ? "-" : pan[..5] + "****" + pan[^1])}, " +
+                           $"mobile {(mobile == null ? "-" : "******" + mobile[^4..])}" +
+                           (dto.LoanId is > 0 ? $", draft {dto.LoanId}" : string.Empty),
+                reason: needsReview ? $"{ApiErrorCodes.CustomerNeedsReview}: {identity!.Message}"
+                                    : $"{eligibility!.Code}: {eligibility.Message}",
+                userId: CurrentUserId, userName: CurrentUserEmail);
+            await _db.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not write the blocked-application audit entry.");
+        }
     }
 
     // Defence-in-depth boundary check, not the primary fix (that is the
@@ -398,12 +459,12 @@ public class WizardController : BaseController
     // specific keys back out onto the Customer entity itself. Every write here
     // is guarded (only overwrites when the wizard actually sent that key), so a
     // save that omits, say, Office Address never blanks an existing value.
-    private static void ApplyProductDataCustomerFields(Customer customer, Dictionary<string, object>? productData)
+    private static void ApplyProductDataCustomerFields(Customer customer, Dictionary<string, object>? productData, bool protectIdentity)
     {
         if (productData == null || productData.Count == 0) return;
 
         var mother = GetProductDataString(productData, "mother");
-        if (!string.IsNullOrWhiteSpace(mother)) customer.MotherName = mother.Trim();
+        if (!string.IsNullOrWhiteSpace(mother) && (!protectIdentity || string.IsNullOrWhiteSpace(customer.MotherName))) customer.MotherName = mother.Trim();
 
         // Office address — Step 5 captures it as two lines + PIN (Vanilla
         // parity), but Customer has a single OfficeAddress column (the same
@@ -620,9 +681,30 @@ public class WizardController : BaseController
                 }
             }
 
-            // ── 1. Find or create customer ────────────────────────────────────
-            var customer = await FindOrCreateCustomerAsync(dto, existingLoan);
+            // ── 1. Identify (global) or create the customer ─────────────────────
+            var (resolvedCustomer, identity) = await ResolveCustomerForApplicationAsync(dto, existingLoan);
+            if (resolvedCustomer == null)
+            {
+                await tx.RollbackAsync();
+                await AuditBlockedSubmitAsync(dto, identity, null);
+                return BlockedResponse<WizardSubmitResponseDto>(identity, null);
+            }
+            var customer = resolvedCustomer;
             await _db.SaveChangesAsync();
+
+            // ── 1b. Central duplicate-application + 45-day guard ───────────────
+            // Locked per customer inside this transaction, so two users
+            // submitting for the same customer at the same moment are
+            // serialised: the second sees the first's application and gets 409.
+            // A resumed draft is excluded from "active" (it IS this application)
+            // but is otherwise re-checked against today's state.
+            var eligibility = await _loanService.GuardApplicationAsync(customer.Id, existingLoan?.Id);
+            if (!eligibility.Allowed)
+            {
+                await tx.RollbackAsync();
+                await AuditBlockedSubmitAsync(dto, null, eligibility);
+                return BlockedResponse<WizardSubmitResponseDto>(null, eligibility);
+            }
 
             // ── 2. Generate loan number (reuse existing one when resuming a draft) ──
             string loanNum;
@@ -667,6 +749,9 @@ public class WizardController : BaseController
                 loan.SelectedLenderNames = dto.LenderName;
                 loan.Status          = LoanStatus.Submitted;
                 loan.UpdatedAt       = DateTime.UtcNow;
+                // Re-link when the typed identifiers identified an existing
+                // customer (see ResolveCustomerForApplicationAsync).
+                loan.CustomerId      = customer.Id;
                 // Phase 2 — Wizard Sales Person Assignment: resolved above
                 // (never null past the error-check), so a draft resume can
                 // reassign the loan the same way a fresh submission does.
@@ -712,6 +797,7 @@ public class WizardController : BaseController
                 _db.Loans.Add(loan);
             }
             await _db.SaveChangesAsync();
+            await RemoveSupersededProvisionalCustomerAsync(identity);
 
             // ── 4. Status history ────────────────────────────────────────────────
             _db.Set<LoanStatusHistory>().Add(new LoanStatusHistory
@@ -846,6 +932,14 @@ public class WizardController : BaseController
                 MonthlyEmi = emi,
                 Status     = loan.Status.ToString()
             }, $"Application {loanNum} submitted successfully."));
+        }
+        catch (Exception ex) when (DbConflicts.Classify(ex) is { } conflict)
+        {
+            // Lost a race against the one-active-application / customer unique
+            // index (the DB-level backstop): a clean 409, never a raw DB error.
+            await tx.RollbackAsync();
+            _logger.LogWarning(ex, "Wizard submission hit a uniqueness guard for user {UserId}", CurrentUserId);
+            return Conflict(ApiResponseDto<WizardSubmitResponseDto>.Fail(conflict.Message, conflict.Code));
         }
         catch (Exception ex)
         {
@@ -1110,8 +1204,27 @@ public class WizardController : BaseController
                 }
             }
 
-            var customer = await FindOrCreateCustomerAsync(dto, existingLoan);
+            // Same global identification + central guard as Submit, on every
+            // autosave: a draft (which counts as an active application) can
+            // neither be started nor kept for a customer who already has an
+            // active application or is inside the 45-day window. Blocks are not
+            // audited here — autosave fires on every pause in typing; the final
+            // Submit records them.
+            var (resolvedCustomer, identity) = await ResolveCustomerForApplicationAsync(dto, existingLoan);
+            if (resolvedCustomer == null)
+            {
+                await tx.RollbackAsync();
+                return BlockedResponse<WizardSubmitResponseDto>(identity, null);
+            }
+            var customer = resolvedCustomer;
             await _db.SaveChangesAsync();
+
+            var eligibility = await _loanService.GuardApplicationAsync(customer.Id, existingLoan?.Id);
+            if (!eligibility.Allowed)
+            {
+                await tx.RollbackAsync();
+                return BlockedResponse<WizardSubmitResponseDto>(null, eligibility);
+            }
 
             var loanType = _loanTypeMap.TryGetValue(dto.LoanType ?? "personal_loan", out var lt) ? lt : LoanType.Personal;
 
@@ -1119,6 +1232,7 @@ public class WizardController : BaseController
             if (existingLoan != null)
             {
                 loan = existingLoan;
+                loan.CustomerId      = customer.Id;
                 loan.LoanType        = loanType;
                 loan.RequestedAmount = dto.Amount;
                 loan.InterestRate    = dto.LoanRate > 0 ? dto.LoanRate : 12;
@@ -1186,6 +1300,7 @@ public class WizardController : BaseController
             }
 
             await _db.SaveChangesAsync();
+            await RemoveSupersededProvisionalCustomerAsync(identity);
 
             // Persist Step-7 references on the draft too (shared with Submit) so a
             // resumed draft keeps them — SaveDraft previously wrote no LoanReference
@@ -1216,6 +1331,12 @@ public class WizardController : BaseController
             // (so the retry re-runs cleanly), and loop to try exactly once more.
             await tx.RollbackAsync();
             _db.ChangeTracker.Clear();
+        }
+        catch (Exception ex) when (DbConflicts.Classify(ex) is { } conflict)
+        {
+            await tx.RollbackAsync();
+            _logger.LogWarning(ex, "Wizard draft save hit a uniqueness guard for user {UserId}", CurrentUserId);
+            return Conflict(ApiResponseDto<WizardSubmitResponseDto>.Fail(conflict.Message, conflict.Code));
         }
         catch (Exception ex)
         {
@@ -1260,35 +1381,34 @@ public class WizardController : BaseController
 
         errors.AddRange(await ValidateMappingAsync(dto));
 
-        // PAN duplicate check — message is intentionally vague for external roles
-        if (!string.IsNullOrWhiteSpace(dto.Pan) && dto.Pan.Length == 10)
-        {
-            var isInternal = CurrentUserRole is "Admin" or "Manager";
-            var panExists  = await _db.Customers.AnyAsync(c =>
-                c.PanNumber == dto.Pan.ToUpper().Trim() && !c.IsDeleted);
-
-            if (panExists)
-            {
-                var existingCustomer = await _db.Customers.FirstAsync(c =>
-                    c.PanNumber == dto.Pan.ToUpper().Trim() && !c.IsDeleted);
-                var activeLoans = await _db.Loans.CountAsync(l =>
-                    l.CustomerId == existingCustomer.Id &&
-                    l.Id != (dto.LoanId ?? 0) &&   // exclude the draft being resumed/completed right now
-                    l.Status != LoanStatus.Rejected &&
-                    l.Status != LoanStatus.Closed && !l.IsDeleted);
-
-                if (activeLoans > 0)
-                {
-                    // Admin/Manager: full detail. External roles: generic message.
-                    errors.Add(isInternal
-                        ? $"PAN {dto.Pan.ToUpper()} already has {activeLoans} active loan(s)."
-                        : "This customer already has an active application. Please contact your manager.");
-                }
-            }
-        }
-
         if (errors.Any())
             return BadRequest(ApiResponseDto<object>.Fail(errors));
+
+        // Duplicate customer / application + 45-day check — the SAME central
+        // rules Submit enforces (read-only here; Submit re-checks under lock).
+        // Replaces the old PAN-only copy of the active-loan rule. The draft
+        // being completed (dto.LoanId) counts only if the caller may resume it.
+        int? ownLoanId = null, ownCustomerId = null;
+        if (dto.LoanId is > 0)
+        {
+            var draft = await _db.Loans.AsNoTracking()
+                .Where(l => l.Id == dto.LoanId.Value && l.Status == LoanStatus.Draft)
+                .Select(l => new { l.Id, l.CustomerId, l.CreatedByUserId }).FirstOrDefaultAsync();
+            if (draft != null && (CurrentUserRole is "Admin" or "Manager" || draft.CreatedByUserId == CurrentUserId))
+            {
+                ownLoanId = draft.Id;
+                ownCustomerId = draft.CustomerId;
+            }
+        }
+        var identity = await _customerService.ResolveIdentityAsync(dto.Pan, dto.Mobile, dto.Email, ownCustomerId, ownLoanId);
+        if (identity.NeedsReview)
+            return BlockedResponse<object>(identity, null);
+        if (identity.CustomerId is int customerId)
+        {
+            var eligibility = await _loanService.CheckApplicationEligibilityAsync(customerId, ownLoanId);
+            if (!eligibility.Allowed)
+                return BlockedResponse<object>(null, eligibility);
+        }
 
         var emi = LoanMS.Application.Services.EmiCalculator.ReducingBalance(dto.Amount, dto.LoanRate, dto.Tenure);
         return Ok(ApiResponseDto<object>.Ok(new {

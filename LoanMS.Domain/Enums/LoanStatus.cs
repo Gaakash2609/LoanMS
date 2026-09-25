@@ -35,5 +35,13 @@ public enum LoanStatus
     // Positive). IS part of the linear machine here (Approved → Acceptance →
     // Disbursed) but Approved → Disbursed directly remains allowed too, for
     // loans that don't go through a recorded deal-confirmation step.
-    Acceptance = 9
+    Acceptance = 9,
+    // Lender offers are collected, one is selected as final, deviation (if
+    // any) is resolved and Credit Approval is given here. Legacy's "offer"
+    // stage (efin-app.js STATUSES.offer, 'EFIN-Final Offer Check'). String-
+    // persisted like OnHold/Decision/Acceptance. Entered from UnderReview only
+    // through OfferWorkflowService.MoveToOffer (verification checks complete),
+    // left through Raise Deviation (→ Decision), Credit Approval (→ Approved)
+    // or Back (→ UnderReview).
+    Offer = 10
 }

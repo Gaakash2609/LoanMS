@@ -13,6 +13,7 @@ import PageHeader from '@/components/shared/PageHeader'
 import { loansApi } from '@/api/loansApi'
 import type { LoanListItem } from '@/types'
 import ReportAnalyticsTabs from '@/components/shared/ReportAnalyticsTabs'
+import OfferPipelineReport from '@/components/shared/OfferPipelineReport'
 
 export default function ReportsPage() {
   // Draft vs applied — legacy only re-renders on an explicit Apply (or on a
@@ -477,6 +478,10 @@ export default function ReportsPage() {
               a ReportsController endpoint that already existed but had no
               React caller (only /summary was ever used). */}
           <ReportAnalyticsTabs filters={filters} />
+
+          {/* Offer → deviation → credit approval → sanction → disbursement
+              register (GET /api/reports/offer-pipeline, scoped + masked server-side). */}
+          <OfferPipelineReport />
 
           {/* Monthly Target achievement (Disb. Amount / Login Count / Disb.
               Count) — Vanilla's "Monthly Targets & Achievements" cards

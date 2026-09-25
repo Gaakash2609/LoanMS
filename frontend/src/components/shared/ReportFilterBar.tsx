@@ -27,7 +27,7 @@ import { Button } from '@/components/ui/Button'
 // which has no counterpart in the persisted enum. Per the agreed decision the
 // filter uses Loan.Status as stored, in the same order LoansPage lists it.
 const STATUSES: LoanStatus[] = [
-  'Draft', 'Submitted', 'UnderReview', 'Approved', 'Disbursed', 'Rejected', 'Closed',
+  'Draft', 'Submitted', 'UnderReview', 'Offer', 'Approved', 'Disbursed', 'Rejected', 'Closed',
 ]
 
 export type ScopeValue = 'all' | 'mine' | 'team'

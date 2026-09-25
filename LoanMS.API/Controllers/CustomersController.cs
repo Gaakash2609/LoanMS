@@ -53,7 +53,8 @@ public class CustomersController : BaseController
                 ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage)).ToList()));
 
         var result = await _customerService.CreateAsync(request);
-        if (!result.Success) return BadRequest(result);
+        // Existing / needs-review identity → 409 (ApiResult maps ErrorCode).
+        if (!result.Success) return ApiResult(result);
         return CreatedAtAction(nameof(GetById), new { id = result.Data!.Id }, result);
     }
 
@@ -91,15 +92,34 @@ public class CustomersController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Check if PAN already exists — call before wizard submit</summary>
+    /// <summary>
+    /// Does a customer with this PAN / mobile / email already exist? GLOBAL (not
+    /// limited to the caller's own customers) and on normalised values — the
+    /// same identification the wizard uses. Deliberately returns no customer
+    /// data (no id, name or contact details), only whether a match exists and
+    /// whether it is ambiguous, so it can't be used to look people up.
+    /// "check-mobile" is the same check addressed by mobile.
+    /// </summary>
     [HttpGet("check-pan")]
-    public async Task<IActionResult> CheckPan([FromQuery] string pan, [FromQuery] int? excludeId = null)
+    [HttpGet("check-mobile")]
+    public async Task<IActionResult> CheckPan([FromQuery] string? pan = null, [FromQuery] int? excludeId = null,
+        [FromQuery] string? mobile = null, [FromQuery] string? email = null)
     {
-        if (string.IsNullOrWhiteSpace(pan) || pan.Length != 10)
+        var panKey = LoanMS.Domain.Entities.Customer.NormalizePan(pan);
+        var mobileKey = LoanMS.Domain.Entities.Customer.NormalizeMobile(mobile);
+        var emailKey = LoanMS.Domain.Entities.Customer.NormalizeEmail(email);
+        if (!string.IsNullOrWhiteSpace(pan) && panKey == null)
             return BadRequest(ApiResponseDto<object>.Fail("Invalid PAN format."));
-        
-        var exists = await _customerService.PanExistsAsync(pan.ToUpper().Trim(), excludeId);
-        return Ok(ApiResponseDto<object>.Ok(new { exists, pan = pan.ToUpper().Trim() }));
+        if (!string.IsNullOrWhiteSpace(mobile) && mobileKey == null)
+            return BadRequest(ApiResponseDto<object>.Fail("Invalid mobile number."));
+        if (panKey == null && mobileKey == null && emailKey == null)
+            return BadRequest(ApiResponseDto<object>.Fail("Provide a PAN, mobile number or email to check."));
+
+        var identity = await _customerService.ResolveIdentityAsync(panKey, mobileKey, emailKey);
+        var matchIds = identity.MatchedCustomerIds.Where(i => excludeId == null || i != excludeId.Value).ToList();
+        var exists = identity.Outcome != LoanMS.Application.DTOs.CustomerIdentityOutcome.New && matchIds.Count > 0;
+        var matchStatus = !exists ? "none" : identity.NeedsReview ? "needsReview" : "match";
+        return Ok(ApiResponseDto<object>.Ok(new { exists, pan = panKey, mobile = mobileKey, matchStatus }));
     }
 
     /// <summary>Search customers by name/phone/PAN for wizard autofill</summary>

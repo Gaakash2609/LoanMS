@@ -67,6 +67,11 @@ public class LoanFilterDto
     public string? PartnerName { get; set; }
     public string? CompanyName { get; set; }
 
+    /// <summary>Archived applications: null / "exclude" (default — the
+    /// operational list, export and counts hide them), "only" (the Archived
+    /// view) or "include". Applied by LoanRepository.ApplyArchiveScope.</summary>
+    public string? Archived { get; set; }
+
     public string SortBy { get; set; } = "CreatedAt";
     public string SortDir { get; set; } = "desc";
 }

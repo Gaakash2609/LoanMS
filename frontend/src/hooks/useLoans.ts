@@ -6,6 +6,7 @@ import type { ApiResponse } from '@/types'
 import { emailApi, lenderEmailThreadsApi } from '@/api/lenderEmailApi'
 import { buildSubjectAndBody, STATUS_TO_STAGE_KEY, AUTO_EMAIL_TRIGGER_STAGES } from '@/utils/lenderEmailTemplates'
 import { useAuthStore } from '@/store/authStore'
+import { apiErrorStatus, isNetworkError } from '@/utils/apiError'
 
 export const LOAN_KEYS = {
   all:       ['loans'] as const,
@@ -16,10 +17,25 @@ export const LOAN_KEYS = {
   dashboard: ['loans', 'dashboard'] as const,
 }
 
+// A failed list request must never look like "0 applications". These are the
+// failures that are worth retrying automatically — they are momentary (a
+// replica restarting, a dropped connection, a rate-limit window, a slow DB
+// call) and succeed on the very next attempt, which is exactly the "same
+// account, same time, sometimes no data" symptom.
+const TRANSIENT_STATUSES = new Set([401, 408, 425, 429, 500, 502, 503, 504])
+function isTransientLoadError(error: unknown): boolean {
+  const status = apiErrorStatus(error)
+  return isNetworkError(error) || status === undefined || TRANSIENT_STATUSES.has(status)
+}
+
 export function useLoans(filter: LoanFilter) {
   return useQuery({
     queryKey:        LOAN_KEYS.list(filter),
     queryFn:         () => loansApi.getAll(filter).then((r) => r.data.data),
+    retry:           (failureCount, error) => failureCount < 3 && isTransientLoadError(error),
+    retryDelay:      (attempt) => Math.min(800 * 2 ** attempt, 4000),
+    refetchOnWindowFocus: true,
+    refetchOnReconnect:   'always',
     // Application List must always reflect the current database state —
     // never serve a cached snapshot, whether from an earlier visit or from
     // right before a new application was created.

@@ -1,0 +1,1 @@
+import{o as t}from"./index-C2kN_vC5.js";const s={login:o=>t.post("/api/auth/login",o),logout:()=>t.post("/api/auth/logout"),forgotPassword:o=>t.post("/api/auth/forgot-password",o),resetPassword:o=>t.post("/api/auth/reset-password",o)};export{s as a};

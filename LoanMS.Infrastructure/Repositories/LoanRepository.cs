@@ -20,6 +20,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
             .Include(l => l.AssignedTo)
             .Include(l => l.LoginUser)
             .Include(l => l.OpsManager)
+            .Include(l => l.ArchivedBy)
             .Include(l => l.Location)
             .Include(l => l.Dsa)
             .Include(l => l.Partner)
@@ -514,6 +515,57 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
         return await query.AnyAsync(l => l.Id == loanId);
     }
 
+    // ── Archive scope — the ONE place that decides whether archived
+    // applications take part in a query. Operational surfaces (list, export,
+    // dashboard, filter options, reports, search) go through here so they all
+    // agree; detail-by-id, access checks and the eligibility guard do not. ──
+    public static IQueryable<Loan> ApplyArchiveScope(IQueryable<Loan> query, string? archived) =>
+        (archived ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "only"             => query.Where(l => l.IsArchived),
+            "include" or "all" => query,
+            _                  => query.Where(l => !l.IsArchived),
+        };
+
+    /// <summary>ApplyVisibilityScope + the default archive exclusion — the scope
+    /// every operational aggregate (dashboard, reports) uses.</summary>
+    public static IQueryable<Loan> ApplyOperationalScope(AppDbContext ctx, IQueryable<Loan> query, int currentUserId, string? currentUserRole) =>
+        ApplyArchiveScope(ApplyVisibilityScope(ctx, query, currentUserId, currentUserRole), null);
+
+    // ── Application eligibility (duplicate / 45-day guard) ──────────────────
+    private const int CustomerApplicationLockClass = 7101;
+
+    /// <summary>Every application of a customer, soft-deleted ones included, with
+    /// the latest real transition INTO Rejected from LoanStatusHistory (a
+    /// Rejected→Rejected row — e.g. an archive/timeline note — is not a rejection).</summary>
+    public static IQueryable<LoanEligibilityRow> QueryEligibilityRows(AppDbContext ctx, int customerId) =>
+        ctx.Set<Loan>().IgnoreQueryFilters()
+            .Where(l => l.CustomerId == customerId)
+            .Select(l => new LoanEligibilityRow
+            {
+                Id = l.Id,
+                LoanNumber = l.LoanNumber,
+                Status = l.Status,
+                IsDeleted = l.IsDeleted,
+                IsArchived = l.IsArchived,
+                CreatedByUserId = l.CreatedByUserId,
+                CreatedAt = l.CreatedAt,
+                RejectedAt = l.RejectedAt,
+                LastRejectionTransitionAt = ctx.Set<LoanStatusHistory>().IgnoreQueryFilters()
+                    .Where(h => h.LoanId == l.Id && h.ToStatus == LoanStatus.Rejected && h.FromStatus != LoanStatus.Rejected)
+                    .Max(h => (DateTime?)h.CreatedAt),
+            });
+
+    public async Task<List<LoanEligibilityRow>> GetEligibilityRowsAsync(int customerId) =>
+        await QueryEligibilityRows(_ctx, customerId).ToListAsync();
+
+    public async Task LockCustomerForApplicationAsync(int customerId)
+    {
+        if (!_ctx.Database.IsNpgsql() || _ctx.Database.CurrentTransaction == null) return;
+        await _ctx.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({CustomerApplicationLockClass}, {customerId})");
+    }
+
     public async Task<bool> LocationExistsAsync(int locationId)
     {
         return await _ctx.Set<LoanMS.Domain.Entities.Location>().AnyAsync(l => l.Id == locationId && !l.IsDeleted);
@@ -602,6 +654,8 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 CreatedByUserId        = l.CreatedByUserId,
                 AssignedToUserId       = l.AssignedToUserId,
                 CustomerMonthlyIncome  = l.Customer.MonthlyIncome,
+                IsArchived             = l.IsArchived,
+                ArchivedAt             = l.ArchivedAt,
                 CreatedByName   = l.CreatedBy.FullName,
                 AssignedToName  = l.AssignedTo != null ? l.AssignedTo.FullName : null,
                 LoginUserName   = l.LoginUser  != null ? l.LoginUser.FullName  : null,
@@ -670,6 +724,8 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 CreatedByUserId        = l.CreatedByUserId,
                 AssignedToUserId       = l.AssignedToUserId,
                 CustomerMonthlyIncome  = l.Customer.MonthlyIncome,
+                IsArchived             = l.IsArchived,
+                ArchivedAt             = l.ArchivedAt,
                 CreatedByName   = l.CreatedBy.FullName,
                 AssignedToName  = l.AssignedTo != null ? l.AssignedTo.FullName : null,
                 LoginUserName   = l.LoginUser  != null ? l.LoginUser.FullName  : null,
@@ -690,6 +746,10 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
     /// </summary>
     private static IQueryable<Loan> ApplyListFilters(AppDbContext ctx, IQueryable<Loan> query, LoanFilterDto filter)
     {
+        // Default list/export/search hide archived applications; the Archived
+        // view asks for them explicitly (filter.Archived = "only").
+        query = ApplyArchiveScope(query, filter.Archived);
+
         if (!string.IsNullOrEmpty(filter.Search))
         {
             var s = filter.Search.ToLower();
@@ -791,7 +851,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
     /// </summary>
     public async Task<LoanFilterOptionsDto> GetFilterOptionsAsync(int userId, string? role)
     {
-        var scope = ApplyVisibilityScope(_ctx, _set.IncludeDeletedUsers(), userId, role);
+        var scope = ApplyArchiveScope(ApplyVisibilityScope(_ctx, _set.IncludeDeletedUsers(), userId, role), null);
 
         async Task<List<string>> Distinct(IQueryable<string?> values) =>
             (await values.Where(v => v != null && v != "").Distinct().ToListAsync())
@@ -940,12 +1000,14 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
         var baseQuery = _set.IncludeDeletedUsers();
         if (userId.HasValue)
             baseQuery = ApplyVisibilityScope(_ctx, baseQuery, userId.Value, role);
+        // Archived applications never count in the dashboard (see ApplyArchiveScope).
+        baseQuery = ApplyArchiveScope(baseQuery, null);
 
         // Single aggregation query — no ToListAsync() on full table
         var stats = await baseQuery.GroupBy(_ => 1).Select(g => new
         {
             Total        = g.Count(),
-            Pending      = g.Count(l => l.Status == LoanStatus.Submitted || l.Status == LoanStatus.UnderReview),
+            Pending      = g.Count(l => l.Status == LoanStatus.Submitted || l.Status == LoanStatus.UnderReview || l.Status == LoanStatus.Offer),
             Approved     = g.Count(l => l.Status == LoanStatus.Approved),
             Rejected     = g.Count(l => l.Status == LoanStatus.Rejected),
             Disbursed    = g.Count(l => l.Status == LoanStatus.Disbursed),
@@ -993,6 +1055,8 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
                 CreatedByUserId        = l.CreatedByUserId,
                 AssignedToUserId       = l.AssignedToUserId,
                 CustomerMonthlyIncome  = l.Customer.MonthlyIncome,
+                IsArchived             = l.IsArchived,
+                ArchivedAt             = l.ArchivedAt,
                 CreatedByName   = l.CreatedBy.FullName,
                 AssignedToName  = l.AssignedTo != null ? l.AssignedTo.FullName : null,
                 LoginUserName   = l.LoginUser  != null ? l.LoginUser.FullName  : null,

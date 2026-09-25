@@ -1,0 +1,1 @@
+import{o as s}from"./index-CudIVv7F.js";const p={getAll:t=>s.get("/api/tasks",{params:t}),create:t=>s.post("/api/tasks",t),reassign:(t,a)=>s.patch(`/api/tasks/${t}/reassign`,{assignedToUserId:a}),toggleComplete:t=>s.patch(`/api/tasks/${t}/complete`),delete:t=>s.delete(`/api/tasks/${t}`)};export{p as t};

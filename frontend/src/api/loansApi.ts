@@ -74,18 +74,11 @@ export const loansApi = {
     api.patch<ApiResponse<Loan>>(`/api/loans/${id}/status`, data),
 
   // ── Dedicated workflow transitions ──────────────────────────────────────
-  // These routes exist on LoansController and apply their own server-side
-  // semantics that the generic PATCH /status does not: /approve carries
-  // ApprovedAmount, /reject carries a Reason, /disburse hard-codes the
-  // disbursal comment.
-  // Using them keeps the recorded status-history text and approved amount
-  // consistent with what the legacy app wrote.
-  approve: (id: number, data: { approvedAmount?: number; comment?: string }) =>
-    api.patch<ApiResponse<Loan>>(`/api/loans/${id}/approve`, data),
+  // Credit approval and disbursement are no longer direct loan transitions —
+  // they run through the Offers workflow (offerWorkflowApi). /reject carries
+  // a Reason.
   reject: (id: number, data: { reason?: string }) =>
     api.patch<ApiResponse<Loan>>(`/api/loans/${id}/reject`, data),
-  disburse: (id: number) =>
-    api.patch<ApiResponse<Loan>>(`/api/loans/${id}/disburse`),
 
   // Hold / Un-hold — pause an in-flight application and later resume it at
   // whatever status it held before. Backend gates both on canHoldApp
@@ -102,21 +95,11 @@ export const loansApi = {
   reopen: (id: number, reason: string) =>
     api.patch<ApiResponse<Loan>>(`/api/loans/${id}/reopen`, { reason }),
 
-  // Policy-band deviation flags (empty = within policy). Gated on canDeviation
-  // server-side (LoansController.GetDeviations). Read-only risk signal.
-  getDeviations: (id: number) =>
-    api.get<ApiResponse<LoanDeviation[]>>(`/api/loans/${id}/deviations`),
-
-  // Deviation workflow — all gated on canDeviation. raise: UnderReview →
-  // Decision (type+reason). decide: Decision → Approved (approve) / Rejected;
-  // the raiser cannot self-approve unless Admin (backend-enforced). skip:
-  // UnderReview → Approved. Legacy confirmDeviation/confirmSkipDeviation.
-  raiseDeviation: (id: number, deviationType: string, reason: string) =>
-    api.patch<ApiResponse<Loan>>(`/api/loans/${id}/deviation/raise`, { deviationType, reason }),
-  decideDeviation: (id: number, approve: boolean, comment?: string) =>
-    api.patch<ApiResponse<Loan>>(`/api/loans/${id}/deviation/decide`, { approve, comment }),
-  skipDeviation: (id: number, reason?: string) =>
-    api.patch<ApiResponse<Loan>>(`/api/loans/${id}/deviation/skip`, { reason }),
+  // Archive a closed/rejected application (soft; reason mandatory). Backend
+  // gate: Admin / ProductTeam / LocationHead within their scope; an active
+  // application is refused with 409.
+  archive: (id: number, reason: string) =>
+    api.patch<ApiResponse<Loan>>(`/api/loans/${id}/archive`, { reason }),
 
   // Per-loan Lender RM override (Lender Email Workflow) — PATCH sets the RM
   // contact used for lender-email enquiries on this application only.
@@ -250,28 +233,31 @@ export const loansApi = {
       { headers: { 'Content-Type': 'multipart/form-data' } })
   },
 
-  // GET /api/loans/duplicate-check — the authoritative "recent application on
-  // this PAN" check the legacy wizard runs from the PAN field's oninput
-  // (wPanCheck, index.html:1491). Server rule: non-Draft loan on the same PAN
-  // within 60 days. Warning-only by design — it never blocks submission, it
-  // just surfaces the signal. Never 400s: an malformed/short PAN comes back as
-  // { hasDuplicate: false }.
-  duplicateCheck: (pan: string) =>
-    api.get<ApiResponse<LoanDuplicateCheck>>('/api/loans/duplicate-check', { params: { pan } }),
+  // GET /api/loans/duplicate-check — wizard pre-check (UX only). Runs the same
+  // global customer identification and the same duplicate-application +
+  // 45-day re-application rule the backend enforces on every draft save and
+  // submit. `loanId` = this wizard's own draft (excluded from "active"). Never
+  // 400s: incomplete identifiers come back as { hasDuplicate: false }.
+  duplicateCheck: (q: { pan?: string; mobile?: string; email?: string; loanId?: number }) =>
+    api.get<ApiResponse<LoanDuplicateCheck>>('/api/loans/duplicate-check', {
+      params: {
+        pan: q.pan || undefined, mobile: q.mobile || undefined,
+        email: q.email || undefined, loanId: q.loanId || undefined,
+      },
+    }),
 }
 
-// One policy-band breach — matches LoanDeviationDto.
-export interface LoanDeviation {
-  type: string
-  description: string
-  badge: string
-}
-
-// Shape of DuplicateCheck's two response forms (LoansController.cs:468).
+// Shape of LoansController.DuplicateCheck. `message` is the server's own
+// wording for this caller (another user's application number/status is only
+// included for roles allowed to see it).
 export interface LoanDuplicateCheck {
   hasDuplicate: boolean
-  loanNumber?: string
-  status?: string
-  customerName?: string
-  daysAgo?: number
+  /** ACTIVE_APPLICATION_EXISTS | REAPPLY_COOLDOWN | REJECTION_DATE_UNKNOWN | CUSTOMER_NEEDS_REVIEW */
+  code?: string
+  message?: string
+  loanNumber?: string | null
+  status?: string | null
+  /** UTC instant a new application becomes allowed (REAPPLY_COOLDOWN). */
+  reapplyAfter?: string | null
+  existingCustomer?: boolean
 }

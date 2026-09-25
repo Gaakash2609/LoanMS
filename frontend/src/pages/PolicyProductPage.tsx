@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/authStore'
 import { rejectionReasonsApi, type RejectionReason } from '@/api/rejectionReasonsApi'
 import ProductOfferMatrixCard from '@/components/shared/ProductOfferMatrixCard'
 import IncredCommentTemplatesCard from '@/components/shared/IncredCommentTemplatesCard'
+import DeviationRulesCard from '@/components/shared/DeviationRulesCard'
 import { PageLoader } from '@/components/ui/LoadingSpinner'
 
 // Legacy page-policy-product: role-action permission matrix + DSA/Partner tables
@@ -30,8 +31,11 @@ const MATRIX: Record<string, Record<string, boolean>> = {
   'View applications (own)':    { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':true, 'Channel Partner':true, 'Payout & Reconciliation Officer':true,  'Product & Risk Officer':true  },
   'View applications (all)':    { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':true, 'Product & Risk Officer':true  },
   'Change loan status':         { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
-  'Approve loan':               { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':true, 'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
-  'Disburse loan':              { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':true, 'Product & Risk Officer':false },
+  // Credit approval / sanction / disbursement: Chief Administrator, Zonal
+  // Manager, Credit Evaluation Manager, Credit Evaluation Officer only
+  // (OfferWorkflowService.AuthorityRoles) — everyone else is view-only.
+  'Approve loan':               { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
+  'Disburse loan':              { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
   'Create customer':            { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':true,  Partner:true,  Accounts:false,'Product & Risk Officer':false },
   'Edit customer':              { 'Chief Administrator':true, 'Credit Evaluation Officer':true, 'Deputy Sales Manager':true, 'Business Development Executive':true,  Partner:false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
   'Delete record':              { 'Chief Administrator':true, 'Credit Evaluation Officer':false,'Deputy Sales Manager':false,'Business Development Executive':false, 'Channel Partner':false, 'Payout & Reconciliation Officer':false,'Product & Risk Officer':false },
@@ -233,6 +237,7 @@ export default function PolicyProductPage() {
           </table>
         </div>
       </Card>
+      <DeviationRulesCard />
       <RejectionReasonsCard />
       <ProductOfferMatrixCard />
       <IncredCommentTemplatesCard />

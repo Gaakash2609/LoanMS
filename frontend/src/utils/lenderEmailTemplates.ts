@@ -13,15 +13,15 @@ export const AUTO_EMAIL_TRIGGER_STAGES = ['Approved', 'Acceptance', 'Disbursed']
 // Where the LEW bar itself is SHOWN in the Timeline tab — a wider gate than
 // the auto-send trigger above, and deliberately decoupled from it. Legacy's
 // renderTrackingSection shows the #lew-action-bar for LEW_POST_UW =
-// ['login','underwriting','offer','approved','decision','approved_deviation',
-// 'acceptance','ni'] and hides it on terminal stages (efin-app.js:3173-3174).
-// Mapped to React's status enum (api-bridge STATUS_MAP: login=Submitted,
-// underwriting=UnderReview, approved=Approved, decision=Decision,
-// acceptance=Acceptance). Showing the card here only renders the manual
+// the post-underwriting stages (login, underwriting, offer, approved,
+// decision, acceptance) and hides it on terminal stages (efin-app.js:3173).
+// Mapped to React's status enum (login=Submitted, underwriting=UnderReview,
+// offer=Offer, approved=Approved, decision=Decision, acceptance=Acceptance).
+// NI / Cancelled are not LoanMS application stages. Showing the card here only renders the manual
 // Send Enquiry / Log Reply / Thread surface — it never auto-sends (that is
 // gated separately by AUTO_EMAIL_TRIGGER_STAGES in hooks/useLoans.ts), so
 // widening visibility to match Vanilla is safe.
-export const LENDER_EMAIL_VISIBLE_STAGES = ['Submitted', 'UnderReview', 'Approved', 'Decision', 'Acceptance']
+export const LENDER_EMAIL_VISIBLE_STAGES = ['Submitted', 'UnderReview', 'Offer', 'Approved', 'Decision', 'Acceptance']
 
 // Maps a LoanStatus (as used by React's status-update flow) to the
 // lower-case stage key EMAIL_TEMPLATES/STAGE_EMAIL_CONFIG key in legacy.

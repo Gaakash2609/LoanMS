@@ -53,7 +53,8 @@ public class WizardSaveDraftConcurrencyTests
         }, "TestAuth");
 
         var controller = new WizardController(db, NullLogger<WizardController>.Instance,
-            RolePermissionTestDouble.AllowAll(), new LoanMS.API.Services.LoginUserAssignmentService(db))
+            RolePermissionTestDouble.AllowAll(), new LoanMS.API.Services.LoginUserAssignmentService(db),
+            CentralRulesTestFactory.Create(db).Customers, CentralRulesTestFactory.Create(db).Loans)
         {
             ControllerContext = new ControllerContext
             {
@@ -75,8 +76,12 @@ public class WizardSaveDraftConcurrencyTests
         Tenure   = 24,
     };
 
+    // Business rule changed 2026-09-24 (customer duplicate / re-application
+    // brief): a soft-deleted customer matched by a new application is NOT
+    // silently reactivated any more — it needs admin review. The original
+    // guarantees of this test still hold: no 500, and no duplicate customer.
     [Fact]
-    public async Task SaveDraft_NewDraft_WithSoftDeletedPan_ReusesAndReactivates_NoDuplicate_No500()
+    public async Task SaveDraft_NewDraft_WithSoftDeletedPan_NeedsReview_NotReactivated_NoDuplicate_No500()
     {
         var (controller, db) = CreateController();
 
@@ -94,20 +99,24 @@ public class WizardSaveDraftConcurrencyTests
 
         var result = await controller.SaveDraft(DraftDto(pan, email));
 
-        // Not an unhandled 500.
-        (result as ObjectResult)?.StatusCode.Should().NotBe(500);
-        result.Should().BeOfType<OkObjectResult>();
+        // Not an unhandled 500 — a clean 409 "needs admin review".
+        var conflict = result.Should().BeOfType<ConflictObjectResult>().Subject;
+        ((ApiResponseDto<WizardSubmitResponseDto>)conflict.Value!).ErrorCode.Should().Be(ApiErrorCodes.CustomerNeedsReview);
 
-        // Still exactly ONE customer for that PAN — reused, not duplicated — and
-        // reactivated for the new application.
+        // Still exactly ONE customer for that PAN — not duplicated, and not
+        // resurrected without a review.
         var customers = await db.Customers.IgnoreQueryFilters()
             .Where(c => c.PanNumber == pan).ToListAsync();
         customers.Should().HaveCount(1);
-        customers[0].IsDeleted.Should().BeFalse("a new application reactivates the soft-deleted customer");
+        customers[0].IsDeleted.Should().BeTrue("a deleted customer is never silently restored");
+        (await db.Loans.IgnoreQueryFilters().CountAsync()).Should().Be(0);
     }
 
+    // Business rule changed 2026-09-24: a Draft counts as an active
+    // application, so a SECOND draft for the same customer is refused (409)
+    // instead of creating a parallel application. Still one customer.
     [Fact]
-    public async Task SaveDraft_TwoSequentialDrafts_SamePan_ShareOneCustomer_NoDuplicate()
+    public async Task SaveDraft_TwoSequentialDrafts_SamePan_OneCustomer_SecondDraftBlocked()
     {
         var (controller, db) = CreateController();
         const string pan = "SEQAB1234Z";
@@ -117,13 +126,14 @@ public class WizardSaveDraftConcurrencyTests
         var r2 = await controller.SaveDraft(DraftDto(pan, email));
 
         r1.Should().BeOfType<OkObjectResult>();
-        r2.Should().BeOfType<OkObjectResult>();
+        var conflict = r2.Should().BeOfType<ConflictObjectResult>().Subject;
+        ((ApiResponseDto<WizardSubmitResponseDto>)conflict.Value!).ErrorCode.Should().Be(ApiErrorCodes.ActiveApplicationExists);
 
         var customers = await db.Customers.IgnoreQueryFilters()
             .Where(c => c.PanNumber == pan).ToListAsync();
         customers.Should().HaveCount(1, "two drafts for the same PAN must share one customer");
 
         var loans = await db.Loans.CountAsync(l => l.CustomerId == customers[0].Id);
-        loans.Should().Be(2, "each draft still creates its own loan against the shared customer");
+        loans.Should().Be(1, "the draft already occupies the customer's one active application");
     }
 }

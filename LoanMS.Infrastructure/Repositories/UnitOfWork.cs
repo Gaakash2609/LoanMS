@@ -30,5 +30,24 @@ public class UnitOfWork : IUnitOfWork
 
     public async Task<int> SaveChangesAsync() => await _ctx.SaveChangesAsync();
 
+    public async Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> work)
+    {
+        // Already inside a caller's transaction (e.g. the wizard), or a provider
+        // without transactions (EF InMemory in tests): just run it.
+        if (!_ctx.Database.IsRelational() || _ctx.Database.CurrentTransaction != null)
+            return await work();
+
+        // Same NpgsqlRetryingExecutionStrategy rule WizardController follows:
+        // the transaction must be opened inside the strategy's delegate.
+        var strategy = _ctx.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await _ctx.Database.BeginTransactionAsync();
+            var result = await work();
+            await tx.CommitAsync();
+            return result;
+        });
+    }
+
     public void Dispose() => _ctx.Dispose();
 }

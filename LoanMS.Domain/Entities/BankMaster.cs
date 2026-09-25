@@ -20,6 +20,9 @@ public class BankMaster : BaseEntity
     public string? Email       { get; set; }
     public string? Remarks     { get; set; }
     public bool    IsActive    { get; set; } = true;
+    /// <summary>How long this lender's offers stay valid (days). Pre-fills an offer's
+    /// valid-until date; null = no default validity.</summary>
+    public int?    OfferValidityDays { get; set; }
 
     /// <summary>User who created this bank record (for audit; not used for ownership checks).</summary>
     public int? CreatedByUserId { get; set; }

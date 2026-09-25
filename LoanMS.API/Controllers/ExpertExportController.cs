@@ -149,18 +149,22 @@ public class ExpertExportController : BaseController
                 CustomerName = l.Customer.FullName,
                 l.RequestedAmount,
                 l.ApprovedAmount,
-                l.CreatedAt
+                l.CreatedAt,
+                l.IsArchived
             })
             .ToListAsync();
 
+        // Full-data export (every application, archived ones included), so it
+        // carries an explicit Archived column instead of silently mixing them
+        // with operational rows.
         var sb = new StringBuilder();
-        sb.AppendLine("Loan Number,Loan Type,Status,Customer Name,Requested Amount,Approved Amount,Created At");
+        sb.AppendLine("Loan Number,Loan Type,Status,Customer Name,Requested Amount,Approved Amount,Created At,Archived");
         foreach (var r in rows)
         {
             sb.AppendLine(string.Join(",",
                 _csv(r.LoanNumber), _csv(r.LoanType.ToString()), _csv(r.Status.ToString()),
                 _csv(r.CustomerName), r.RequestedAmount, r.ApprovedAmount?.ToString() ?? "",
-                r.CreatedAt.ToString("yyyy-MM-dd HH:mm")));
+                r.CreatedAt.ToString("yyyy-MM-dd HH:mm"), r.IsArchived ? "Yes" : "No"));
         }
 
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());

@@ -31,9 +31,23 @@ public class Loan : BaseEntity
     // ── Reject / Re-open parity (Vanilla rejectApp/reopenApp, efin-app.js:10589,
     // 10600) — snapshot taken whenever a loan moves TO Rejected, so a later
     // Reopen can restore the exact pre-rejection stage instead of an admin
-    // guessing a target status. RejectedAt anchors the 45-day reopen window. ──
+    // guessing a target status. ──
     public LoanStatus? PreRejectedStatus { get; set; }
+    // Server-set only: stamped (UTC) on every transition INTO Rejected, never
+    // cleared (Reopen keeps it) and never read from a request payload. It
+    // anchors the 45-day re-application cooldown (LoanService
+    // .EvaluateApplicationEligibility) together with LoanStatusHistory.
     public DateTime? RejectedAt { get; set; }
+
+    // ── Application archive (soft, application-level) ─────────────────────
+    // Only a closed/rejected application can be archived. Archiving hides it
+    // from operational lists, counts, reports and exports but deletes nothing
+    // (customer, documents and history stay). It never touches the rejection
+    // cooldown, which is decided by Status + RejectedAt alone. No unarchive.
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    public int? ArchivedByUserId { get; set; }
+    public string? ArchiveReason { get; set; }
 
     // ── Wizard draft progress (server-side — replaces the old client-only
     // localStorage "wizard_draft_meta" index) ─────────────────────────────
@@ -164,6 +178,7 @@ public class Loan : BaseEntity
     public User? AssignedTo { get; set; }
     public User? LoginUser { get; set; }
     public User? OpsManager { get; set; }
+    public User? ArchivedBy { get; set; }
     public DsaPartner? Dsa { get; set; }
     public DsaPartner? Partner { get; set; }
     public Location? Location { get; set; }

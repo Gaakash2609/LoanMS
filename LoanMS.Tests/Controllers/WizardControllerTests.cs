@@ -57,7 +57,8 @@ public class WizardControllerTests
         }, "TestAuth");
 
         var controller = new WizardController(db, NullLogger<WizardController>.Instance, RolePermissionTestDouble.AllowAll(),
-            new LoanMS.API.Services.LoginUserAssignmentService(db))
+            new LoanMS.API.Services.LoginUserAssignmentService(db),
+            CentralRulesTestFactory.Create(db).Customers, CentralRulesTestFactory.Create(db).Loans)
         {
             ControllerContext = new ControllerContext
             {

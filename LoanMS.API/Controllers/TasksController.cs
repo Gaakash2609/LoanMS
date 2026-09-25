@@ -35,6 +35,7 @@ public class TasksController : BaseController
             .Select(t => new {
                 t.Id, t.Title, t.Description, t.Priority,
                 t.IsCompleted, t.DueDate, t.LoanId,
+                IsPaused = t.PausedAt != null, t.PauseReason,
                 AssignedTo = t.AssignedTo.FullName,
                 CreatedBy  = t.CreatedBy.FullName,
                 t.CreatedAt
@@ -88,6 +89,11 @@ public class TasksController : BaseController
         if (task.AssignedToUserId != CurrentUserId && !isManager)
             return Forbid();
 
+        // A pending deviation-approval task is moved with its deviation request
+        // (Offers tab → reassign approver), which checks approver eligibility.
+        if (await _db.OfferDeviations.AnyAsync(d => d.TaskId == id && d.Status == LoanMS.Domain.Entities.OfferWorkflowStatuses.RequestRaised))
+            return Conflict(ApiResponseDto<bool>.Fail("This is a deviation-approval task — reassign it from the application's Offers tab.", ApiErrorCodes.WorkflowStage));
+
         var newAssignee = await _db.Users.FirstOrDefaultAsync(u => u.Id == dto.AssignedToUserId);
         if (newAssignee == null)
             return BadRequest(ApiResponseDto<bool>.Fail("Assigned user does not exist."));
@@ -115,6 +121,8 @@ public class TasksController : BaseController
         if (CurrentUserRole != "Admin" && CurrentUserRole != "Manager"
             && task.AssignedToUserId != CurrentUserId && task.CreatedByUserId != CurrentUserId)
             return NotFound(ApiResponseDto<bool>.Fail("Not found."));
+        if (task.PausedAt != null)
+            return Conflict(ApiResponseDto<bool>.Fail($"This task is paused ({task.PauseReason ?? "application on hold"}) — un-hold the application first.", ApiErrorCodes.WorkflowStage));
         task.IsCompleted = !task.IsCompleted;
         task.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();

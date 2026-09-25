@@ -83,3 +83,12 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 )
+
+// Keep every open tab on the same session. The server holds a single, rotating
+// refresh token per user, so a tab that keeps its own stale copy would fail its
+// next refresh even though another tab already renewed the session.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'efin_auth') void useAuthStore.persist.rehydrate()
+  })
+}

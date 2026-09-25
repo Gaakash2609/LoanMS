@@ -44,7 +44,7 @@ export {
   mapDocNameToBackendType, validateDocFile, MANDATORY_DOC_TYPES, isBankStatementDocName,
 } from '@/pages/wizard/wizardDocuments'
 // Per-step components — each extracted to its own file under wizard/steps.
-import { Step1 } from '@/pages/wizard/steps/Step1'
+import { Step1, duplicateCheckKey } from '@/pages/wizard/steps/Step1'
 import { Step2 } from '@/pages/wizard/steps/Step2'
 import { Step3 } from '@/pages/wizard/steps/Step3'
 import { Step4 } from '@/pages/wizard/steps/Step4'
@@ -501,6 +501,10 @@ export default function NewApplicationPage() {
   // see when there are unsaved edits. `savingRef` serialises concurrent saves;
   // `dirtyRef` marks that the current in-memory data is ahead of the server.
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  // Set when the server refuses the draft with 409 — the duplicate-application,
+  // 45-day re-application or customer "needs admin review" rule. Shown as a
+  // banner with the server's own message instead of a bare "Not saved".
+  const [draftBlockedMessage, setDraftBlockedMessage] = useState('')
   const savingRef = useRef(false)
   const dirtyRef = useRef(false)
   // Always points at the newest saveDraftNow. The tab-hide/unload/unmount flush
@@ -765,13 +769,16 @@ export default function NewApplicationPage() {
       const loanId = res.data.data?.loanId
       if (loanId) setServerLoanId(loanId)
       setSaveState('saved')
+      setDraftBlockedMessage('')
       savedOk = true
-    } catch {
+    } catch (err) {
       // Do NOT fall back to localStorage and do NOT claim success — surface the
       // unsaved state so the user knows this round did not reach the server, and
       // keep the draft marked dirty so the next debounce tick retries it.
       dirtyRef.current = true
       setSaveState('error')
+      const status = (err as { response?: { status?: number } })?.response?.status
+      if (status === 409) setDraftBlockedMessage(getApiErrorMessage(err, 'This customer cannot start a new application right now.'))
     } finally {
       savingRef.current = false
     }
@@ -1125,19 +1132,15 @@ export default function NewApplicationPage() {
       return
     }
     if (!validateCurrentStep()) { setErrorNonce(n => n + 1); return }
-    // PAN 60-day duplicate — Vanilla BLOCKS Continue here (validateStep step 1,
-    // efin-app.js:8353 returns false), on top of the advisory wPanCheck warning
-    // strip. React had ported only the advisory warning, so a duplicate PAN
-    // could still proceed. Restore Vanilla's blocking behaviour on step 1 by
-    // reading the same duplicate-check result Step1 already caches
-    // (['loan-duplicate-check', PAN]).
+    // Duplicate / re-application block on step 1 — Vanilla also BLOCKS
+    // Continue here (validateStep step 1, efin-app.js:8353). Reads the result
+    // Step1 already cached from the server's central rule (active application,
+    // 45 days after rejection, or customer needs admin review). UX only: the
+    // backend enforces the same rule on every draft save and on submit.
     if (step === 1) {
-      const panKey = (data.pan || '').trim().toUpperCase()
-      const dup = panKey.length === 10
-        ? qc.getQueryData<{ hasDuplicate?: boolean; status?: string; loanNumber?: string }>(['loan-duplicate-check', panKey])
-        : undefined
+      const dup = qc.getQueryData<{ hasDuplicate?: boolean; message?: string }>(duplicateCheckKey(data, serverLoanId))
       if (dup?.hasDuplicate) {
-        setSubmitError(`Customer has a recent ${dup.status} application on this PAN within 60 days${dup.loanNumber ? ` (${dup.loanNumber})` : ''} — cannot proceed with a duplicate.`)
+        setSubmitError(dup.message || 'This customer cannot start a new application right now.')
         setErrorNonce(n => n + 1)
         return
       }
@@ -1327,6 +1330,14 @@ export default function NewApplicationPage() {
         </div>
       </div>
 
+      {/* Draft refused by a business rule (409): say why, in the server's words. */}
+      {draftBlockedMessage && (
+        <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+          <span><strong>Draft not saved.</strong> {draftBlockedMessage}</span>
+        </div>
+      )}
+
       {/* Step indicators — legacy-style gradient/glow stepper, one hue per step.
           TOP-STEPPER LABELS use Vanilla's DEFAULT set for every product: Vanilla
           getActiveWizardSteps() has no per-product wizardLabels, so its top
@@ -1388,7 +1399,7 @@ export default function NewApplicationPage() {
         {step === 1 && (
           <div className="wiz-required-note"><span className="wiz-req-dot" /> Fields marked with * are required to proceed.</div>
         )}
-        {step === 1 && <Step1 data={data} onChange={update} errors={stepErrors} touch={touch} />}
+        {step === 1 && <Step1 data={data} onChange={update} errors={stepErrors} touch={touch} draftLoanId={serverLoanId} />}
         {step === 2 && <Step2 data={data} onChange={update} errors={stepErrors} touch={touch} touched={touched} />}
         {step === 3 && <Step3 data={data} onChange={update} errors={stepErrors} touch={touch} />}
         {step === 4 && <Step4 data={data} onChange={update} errors={stepErrors} touch={touch} />}

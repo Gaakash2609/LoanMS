@@ -49,7 +49,7 @@ export interface UserLocationsAndTeams {
 export interface LocationOption { id: number; name: string }
 export interface TeamOption { id: number; name: string; type: 'Sales' | 'Login' }
 
-export type LoanStatus = 'Draft'|'Submitted'|'UnderReview'|'Approved'|'Disbursed'|'Rejected'|'Closed'|'OnHold'|'Decision'|'Acceptance'
+export type LoanStatus = 'Draft'|'Submitted'|'UnderReview'|'Approved'|'Disbursed'|'Rejected'|'Closed'|'OnHold'|'Decision'|'Acceptance'|'Offer'
 export type LoanType = 'Personal'|'Business'|'Home'|'Car'|'NewCar'|'UsedCar'|'Education'|'LAP'|'AgainstProperty'|'Overdraft'|'Insurance'
 
 export interface Customer {
@@ -127,6 +127,11 @@ export interface Loan {
   fiReportChecked?: boolean
   nachDone?: boolean
   customerAgreementDone?: boolean
+  // Application archive (PATCH /api/loans/{id}/archive). Server-set only.
+  isArchived?: boolean
+  archivedAt?: string | null
+  archivedByName?: string | null
+  archiveReason?: string | null
   statusHistory: LoanStatusHistory[]
   // Already returned by GET /api/loans/{id} (LoanDetailDto.References) —
   // this type just never declared it, so the References tab had no data.
@@ -196,6 +201,8 @@ export interface LoanListItem {
   // name can never put a loan in the wrong tab.
   createdByUserId?: number
   assignedToUserId?: number | null
+  isArchived?: boolean
+  archivedAt?: string | null
 }
 
 export interface LoanOffer {
@@ -272,6 +279,9 @@ export interface LoanFilter {
   salesPerson?: string; location?: string; channel?: string; bank?: string
   purpose?: string; empType?: string; city?: string; state?: string; gender?: string
   dsaName?: string; partnerName?: string; companyName?: string
+  // Archived applications are hidden unless asked for: 'only' = the
+  // Applications → Archived view (LoanFilterDto.Archived).
+  archived?: 'only' | 'include'
 }
 
 /** GET /api/loans/filter-options — distinct values across the caller's visible loans. */

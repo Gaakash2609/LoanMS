@@ -83,6 +83,8 @@ namespace LoanMS.Domain.Entities
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public string SourceFile { get; set; } = string.Empty;
+        /// <summary>User who uploaded this report (manual bureau-report upload); null for other sources.</summary>
+        public int? UploadedByUserId { get; set; }
         public bool IsActive { get; set; }
 
         // Computed convenience property - flattens PaymentHistory from all Accounts

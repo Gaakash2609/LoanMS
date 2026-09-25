@@ -147,25 +147,27 @@ describe('role permission matrix (positive + negative)', () => {
     })
   })
 
-  it('LoginTeam — processing incl. verify, no deviation approval', () => {
+  // 2026-09-25 offer-workflow decision: Credit Evaluation Officer and Credit
+  // Evaluation Manager are 2 of the 4 deviation / credit-approval / sanction /
+  // disbursement authorities, so they may raise deviations too.
+  it('LoginTeam — processing incl. verify, deviation + disbursement authority', () => {
     expectFlags('LoginTeam', {
       canCreateApp: true, canChangeStatus: true, canDisburse: true,
-      canVerifyDocs: true, canUploadDocs: true, // positive
-      canDeviation: false, // negative
+      canVerifyDocs: true, canUploadDocs: true, canDeviation: true, // positive
     })
   })
 
-  it('TeamLeader — supervise + verify, cannot create/upload', () => {
+  it('TeamLeader — supervise + verify + raise deviation, cannot create/upload/disburse', () => {
     expectFlags('TeamLeader', {
       canChangeStatus: true, canDeviation: true, canVerifyDocs: true, // positive
-      canCreateApp: false, canUploadDocs: false, // negative
+      canCreateApp: false, canUploadDocs: false, canDisburse: false, // negative
     })
   })
 
-  it('Manager — approve + verify, cannot create/upload', () => {
+  it('Manager — status + verify + raise deviation, cannot create/upload/disburse', () => {
     expectFlags('Manager', {
-      canChangeStatus: true, canDisburse: true, canVerifyDocs: true, // positive
-      canCreateApp: false, canUploadDocs: false, // negative
+      canChangeStatus: true, canDeviation: true, canVerifyDocs: true, // positive
+      canCreateApp: false, canUploadDocs: false, canDisburse: false, // negative
     })
   })
 
@@ -176,11 +178,10 @@ describe('role permission matrix (positive + negative)', () => {
     })
   })
 
-  it('OperationManager — ops owner, verify yes, deviation no', () => {
+  it('OperationManager — ops owner, verify, deviation + disbursement authority', () => {
     expectFlags('OperationManager', {
       canCreateApp: true, canChangeStatus: true, canDisburse: true,
-      canVerifyDocs: true, canUploadDocs: true, // positive
-      canDeviation: false, // negative
+      canVerifyDocs: true, canUploadDocs: true, canDeviation: true, // positive
     })
   })
 })

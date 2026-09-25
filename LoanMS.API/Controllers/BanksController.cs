@@ -67,6 +67,7 @@ public class BanksController : BaseController
                 b.LoanTypesJson,
                 b.ServiceablePinsJson,
                 b.HomeTypesJson,
+                b.OfferValidityDays,
                 ProductRules = b.ProductRules.Select(r => new {
                     r.ProductKey, r.MinCibil, r.AcceptNtc, r.MaxLoanAmt, r.MinTenure, r.MaxTenure,
                     r.FoirLimit, r.PfRequired, r.MinAge, r.MaxAge, r.MinExpMonths,
@@ -154,7 +155,8 @@ public class BanksController : BaseController
             MaxAge        = dto.MaxAge ?? 60,
             MinExpMonths  = dto.MinExpMonths ?? 6,
             EmpTypesJson  = dto.EmpTypes  != null ? System.Text.Json.JsonSerializer.Serialize(dto.EmpTypes)  : "[]",
-            CompTypesJson = dto.CompTypes != null ? System.Text.Json.JsonSerializer.Serialize(dto.CompTypes) : "[]"
+            CompTypesJson = dto.CompTypes != null ? System.Text.Json.JsonSerializer.Serialize(dto.CompTypes) : "[]",
+            OfferValidityDays = dto.OfferValidityDays is > 0 and <= 365 ? dto.OfferValidityDays : null
         };
 
         try
@@ -232,6 +234,13 @@ public class BanksController : BaseController
         if (dto.LoanTypes != null) bank.LoanTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.LoanTypes);
         if (dto.ServiceablePins != null) bank.ServiceablePinsJson = System.Text.Json.JsonSerializer.Serialize(dto.ServiceablePins);
         if (dto.HomeTypes != null) bank.HomeTypesJson = System.Text.Json.JsonSerializer.Serialize(dto.HomeTypes);
+        // Offer validity (days): omitted = unchanged, 0 = clear, 1–365 = set.
+        if (dto.OfferValidityDays.HasValue)
+        {
+            if (dto.OfferValidityDays.Value < 0 || dto.OfferValidityDays.Value > 365)
+                return BadRequest(ApiResponseDto<bool>.Fail("Offer validity must be between 0 and 365 days."));
+            bank.OfferValidityDays = dto.OfferValidityDays.Value == 0 ? null : dto.OfferValidityDays.Value;
+        }
         bank.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -350,6 +359,8 @@ public class BankDto
     public List<string>? LoanTypes { get; set; }
     public List<string>? ServiceablePins { get; set; }
     public List<string>? HomeTypes { get; set; }
+    /// <summary>Default validity of this lender's offers in days (0 clears it).</summary>
+    public int? OfferValidityDays { get; set; }
 }
 
 public class BankProductRuleDto

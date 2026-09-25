@@ -47,6 +47,19 @@ export const COMMENT_ONLY_TASKS = new Set([
   'EFIN-Income Check - CPA', 'EFIN-Deviation', 'EFIN-Charge',
 ])
 
+// Timeline rows written by the server-side Offers workflow (offer, deviation,
+// credit approval, sanction, disbursement). They are audit records: the API
+// refuses to create, edit or delete them (TrackingController), so the UI offers
+// no edit/delete for them. Keep in step with OfferWorkflowService.SystemTimelineNames.
+export const SYSTEM_TIMELINE_NAMES: ReadonlySet<string> = new Set([
+  'EFIN-Final Offer Check', 'EFIN-Back to Underwriting', 'EFIN-Offer Created', 'EFIN-Offer Revised',
+  'EFIN-Offer Withdrawn', 'EFIN-Offer Selected', 'EFIN-Offer Unselected', 'EFIN-Offer Expired',
+  'EFIN-Deviation', 'EFIN-Approved Deviation', 'EFIN-Deviation Rejected', 'EFIN- SKIP Deviation',
+  'EFIN-Approved', 'EFIN-Credit Rejected', 'EFIN-Sanction Generated', 'EFIN-Sanction Cancelled',
+  'EFIN-Sanction Revoked', 'EFIN-Sanction Amendment', 'EFIN-Disbursed', 'EFIN-Disbursement Reversed',
+].map(n => n.toLowerCase()))
+export const isSystemTimelineEntry = (name?: string | null) => SYSTEM_TIMELINE_NAMES.has((name ?? '').trim().toLowerCase())
+
 export function routeDisplay(
   e: { name: string; comment?: string | null; subNote?: string | null },
 ): { comment: string; subNote: string } {

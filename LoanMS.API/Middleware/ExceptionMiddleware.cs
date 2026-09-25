@@ -57,6 +57,19 @@ public class ExceptionMiddleware
                 new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
             return;
         }
+
+        // Lost race against the one-active-application / customer-identity
+        // unique indexes: a business conflict, not a server fault — clean 409,
+        // never the raw database message.
+        if (ex is Microsoft.EntityFrameworkCore.DbUpdateException
+            && LoanMS.Infrastructure.Data.DbConflicts.Classify(ex) is { } dup)
+        {
+            context.Response.StatusCode = (int)HttpStatusCode.Conflict;
+            await context.Response.WriteAsync(JsonSerializer.Serialize(
+                new { success = false, message = dup.Message, errors = new[] { dup.Message }, errorCode = dup.Code },
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+            return;
+        }
         context.Response.StatusCode  = ex switch
         {
             UnauthorizedAccessException => (int)HttpStatusCode.Unauthorized,

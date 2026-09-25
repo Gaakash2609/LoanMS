@@ -25,9 +25,8 @@ namespace LoanMS.Infrastructure.Services;
 /// threshold exists anywhere in the project (avoids inventing one).
 ///
 /// Terminal statuses excluded from SLA tracking: Rejected, Disbursed,
-/// Closed — the closest backend-enum equivalent of the existing frontend's
-/// terminal list (['disbursed','rejected','cancelled','ni'], which are
-/// legacy string values that don't map 1:1 onto LoanStatus).
+/// Closed — the backend equivalent of the legacy frontend's terminal list
+/// (NI / Cancelled are not application statuses in LoanMS).
 ///
 /// Dedupe: Loan.SlaBreachNotifiedAt is set once a breach is notified, and
 /// only reset to null when the loan's Status actually changes (see
@@ -46,7 +45,9 @@ public class SlaAndTaskAutomationService : BackgroundService
     private const int SlaBreachHours = 144; // 6 days — matches efin-app.js's existing "sla-over" threshold exactly
     private const string AutoTaskMarker = "[Auto: SLA follow-up]";
 
-    private static readonly LoanStatus[] TerminalStatuses = { LoanStatus.Rejected, LoanStatus.Disbursed, LoanStatus.Closed };
+    // OnHold is excluded too: a held application's workflow and tasks are paused,
+    // so its SLA clock must not breach while it waits.
+    private static readonly LoanStatus[] TerminalStatuses = { LoanStatus.Rejected, LoanStatus.Disbursed, LoanStatus.Closed, LoanStatus.OnHold };
 
     public SlaAndTaskAutomationService(IServiceProvider services, ILogger<SlaAndTaskAutomationService> logger, IConfiguration config)
     {

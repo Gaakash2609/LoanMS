@@ -28,6 +28,7 @@ export const STAGE_META: Record<LoanStatus, { label: string; color: string }> = 
   OnHold:      { label: 'Hold',           color: '#e67e00' },
   Decision:    { label: 'Decision',       color: '#a159ff' },
   Acceptance:  { label: 'Acceptance',     color: '#0aa1a1' },
+  Offer:       { label: 'Offer',          color: '#0a589a' },
 }
 // Pipeline bars only ever show the exact stage set Vanilla's own
 // PIPELINE_STAGE_META lists (efin-app.js:1427-1436: wip/login/underwriting/
@@ -52,7 +53,9 @@ export const STAGE_META: Record<LoanStatus, { label: string; color: string }> = 
 // "Personal Details"/wip bar here; a submitted loan goes straight to
 // Submitted ("Assign Lender"). Order and colours below mirror vanilla's
 // array exactly for every stage the backend enum can actually reach.
-export const STAGE_ORDER: LoanStatus[] = ['Submitted', 'UnderReview', 'Approved', 'Disbursed', 'OnHold', 'Rejected']
+// The backend now has Vanilla's 'offer' stage (LoanStatus.Offer), so its bar
+// is restored in Vanilla's position (after underwriting).
+export const STAGE_ORDER: LoanStatus[] = ['Submitted', 'UnderReview', 'Offer', 'Approved', 'Disbursed', 'OnHold', 'Rejected']
 
 // Keyed by the backend LoanType.ToString() names the API actually returns
 // (Car/LAP/Overdraft), so the breakdown shows real labels instead of the raw

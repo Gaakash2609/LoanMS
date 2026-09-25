@@ -13,8 +13,8 @@ import { StatusBadge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatCurrency, formatDate } from '@/utils/format'
 import {
-  Plus, Search, RefreshCw, ChevronLeft, ChevronRight, FileClock, Play, Trash2, Download,
-  SlidersHorizontal, Eye, ClipboardList, Inbox, SearchX, X,
+  Plus, Search, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, FileClock, Play, Trash2, Download,
+  SlidersHorizontal, Eye, ClipboardList, Inbox, SearchX, X, Archive,
 } from 'lucide-react'
 import { listDraftMetas, deleteDraftMeta, type WizardDraftSummary } from '@/utils/draftStorage'
 import ExportLoansModal from '@/components/shared/ExportLoansModal'
@@ -23,12 +23,14 @@ import { useAuthStore } from '@/store/authStore'
 
 // Vanilla applications filter chips (index.html:963) — business labels
 // mapped onto this app's status enum (Personal Details=Draft/WIP, Assign
-// Lender=Submitted, Underwriting=UnderReview, Hold=OnHold).
+// Lender=Submitted, Underwriting=UnderReview, Offer=Offer, Hold=OnHold).
+// Offer is legacy's 'offer' stage, now a real backend status.
 const STATUS_CHIPS: { label: string; value: string }[] = [
   { label: 'All', value: '' },
   { label: 'Personal Details', value: 'Draft' },
   { label: 'Assign Lender', value: 'Submitted' },
   { label: 'Underwriting', value: 'UnderReview' },
+  { label: 'Offer', value: 'Offer' },
   { label: 'Approved', value: 'Approved' },
   { label: 'Disbursed', value: 'Disbursed' },
   { label: 'Rejected', value: 'Rejected' },
@@ -40,7 +42,10 @@ const STATUS_CHIPS: { label: string; value: string }[] = [
 // validates each record's own permission + transition legality and reports
 // per-record succeeded/failed counts, so this list is only about which
 // targets to offer, not about enforcement.
-const BULK_STATUSES = ['UnderReview', 'Approved', 'Rejected', 'Disbursed']
+// Approved / Disbursed are no longer bulk targets: they are reached only through
+// the Offers workflow (credit approval, disbursement record) and the backend
+// refuses them on the status route.
+const BULK_STATUSES = ['UnderReview', 'Rejected']
 
 // Legacy renderAppsPaginationBar's page window: always 1 and last, plus the
 // current page and its immediate neighbours; null marks an elided gap.
@@ -71,10 +76,21 @@ const NO_FILTER_OPTIONS = {
 
 export default function LoansPage() {
   const { filter, setFilter } = useLoanStore()
-  const { data, isLoading, refetch } = useLoans(filter)
+  const { data, isLoading, isError, isFetching, refetch } = useLoans(filter)
   const qc = useQueryClient()
   const user = useAuthStore(s => s.user)
-  const [section, setSection] = useState<'applications' | 'drafts'>('applications')
+  // 'archived' = the same server-paged table, asking only for archived
+  // applications (filter.archived = 'only'); the default list, its counts and
+  // export never include them. Start in whichever view the stored filter is in.
+  const [section, setSection] = useState<'applications' | 'archived' | 'drafts'>(
+    filter.archived === 'only' ? 'archived' : 'applications')
+  const isListSection = section === 'applications' || section === 'archived'
+  const switchSection = (next: 'applications' | 'archived' | 'drafts') => {
+    setSection(next)
+    setSelected([])
+    if (next === 'archived' && filter.archived !== 'only') setFilter({ archived: 'only', page: 1 })
+    if (next === 'applications' && filter.archived) setFilter({ archived: undefined, page: 1 })
+  }
   const [showExport, setShowExport] = useState(false)
   const [drafts, setDrafts] = useState<WizardDraftSummary[]>([])
   const [draftsLoading, setDraftsLoading] = useState(false)
@@ -193,6 +209,10 @@ export default function LoansPage() {
   // The page shows what is applied and offers the one-click way back out.
   const activeSearch = (filter.search ?? '').trim()
   const total = data?.totalCount ?? 0
+  // The request itself failed (network / server / auth) — this is NOT the same
+  // as "there are no applications", so it gets its own state instead of a
+  // misleading "0 total / No applications found".
+  const loadFailed = isError && !data
   const clearSearch = () => setFilter({ search: undefined, searchField: undefined })
 
   // "Narrowed" = anything that could be hiding rows: header search, a status
@@ -216,8 +236,8 @@ export default function LoansPage() {
             <div className="min-w-0">
               <h1 className="ap-title">Applications</h1>
               <p className="ap-sub">
-                <span className="ap-count">{total}</span>
-                total application{total !== 1 ? 's' : ''}
+                <span className="ap-count">{loadFailed ? '—' : total}</span>
+                {section === 'archived' ? 'archived' : 'total'} application{total !== 1 ? 's' : ''}
               </p>
             </div>
           </div>
@@ -235,12 +255,14 @@ export default function LoansPage() {
         <div className="ap-seg" role="tablist" aria-label="Applications section">
           {([
             { key: 'applications', label: 'Applications' },
+            { key: 'archived', label: 'Archived' },
             { key: 'drafts', label: 'Drafts' },
           ] as const).map(t => (
             <button key={t.key} type="button" role="tab" aria-selected={section === t.key}
-              onClick={() => setSection(t.key)}
+              onClick={() => switchSection(t.key)}
               className={`ap-seg-btn ${section === t.key ? 'is-active' : ''}`}>
               {t.key === 'drafts' && <FileClock size={14} />}
+              {t.key === 'archived' && <Archive size={14} />}
               {t.label}
               {t.key === 'drafts' && drafts.length > 0 && (
                 <span className="ap-pill-orange">{drafts.length}</span>
@@ -252,7 +274,7 @@ export default function LoansPage() {
         {/* Status tabs + Filters. Search lives in the top header bar (it writes
             the same loan filter), so this row carries only the status chips and
             the advanced Filters button. */}
-        {section === 'applications' && (
+        {isListSection && (
           <div className="ap-toolbar">
             {STATUS_CHIPS.map((c) => (
               <button
@@ -273,7 +295,7 @@ export default function LoansPage() {
           </div>
         )}
 
-        {section === 'applications' && (
+        {isListSection && (
           <Card className="ap-card">
 
             {/* Shown while the header search is applied, with a way to clear it —
@@ -310,7 +332,7 @@ export default function LoansPage() {
             {/* Bulk actions — PATCH /api/loans/bulk-status. Only rendered for
                 roles the endpoint actually authorizes, and only once at least
                 one row is selected. */}
-            {canBulk && selected.length > 0 && (
+            {canBulk && section === 'applications' && selected.length > 0 && (
               <div className="ap-bulk">
                 <span className="ap-bulk-count">{selected.length} selected</span>
                 <select
@@ -334,6 +356,12 @@ export default function LoansPage() {
               </div>
             )}
             {bulkResult && <div className="ap-note">{bulkResult}</div>}
+            {isError && data && (
+              <div className="ap-note">
+                Couldn't refresh the list — showing the last loaded data.{' '}
+                <button type="button" className="underline" onClick={() => refetch()}>Retry</button>
+              </div>
+            )}
 
             {/* Table */}
             {isLoading ? <LoadingSpinner /> : (
@@ -369,7 +397,24 @@ export default function LoansPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.length === 0 ? (
+                      {loadFailed ? (
+                        <tr>
+                          <td colSpan={8 + (canBulk ? 1 : 0)}>
+                            <div className="ap-empty" role="alert">
+                              <span className="ap-empty-icon" aria-hidden><AlertTriangle size={30} /></span>
+                              <p className="ap-empty-title">Couldn't load applications</p>
+                              <p className="ap-empty-hint">
+                                The server didn't respond properly — your data is safe. This is usually momentary; please try again.
+                              </p>
+                              <div className="ap-empty-actions">
+                                <Button variant="secondary" size="sm" onClick={() => refetch()} disabled={isFetching}>
+                                  <RefreshCw size={13} className="mr-1.5" />{isFetching ? 'Retrying…' : 'Try again'}
+                                </Button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : rows.length === 0 ? (
                         // Vanilla shows a "No applications found" empty-row when the
                         // list/filter yields nothing (index.html empty-state).
                         <tr>

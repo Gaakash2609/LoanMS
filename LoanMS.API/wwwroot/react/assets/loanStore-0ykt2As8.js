@@ -1,0 +1,1 @@
+import{s as r}from"./index-C2kN_vC5.js";const i={page:1,pageSize:25},n=r(s=>({filter:i,setFilter:e=>s(o=>{const t={...o.filter,...e,page:e.page??1};return"statuses"in e&&!("status"in e)&&(t.status=void 0),"status"in e&&!("statuses"in e)&&(t.statuses=void 0),{filter:t}}),resetFilter:()=>s({filter:i})}));export{n as u};

@@ -4,7 +4,8 @@ import { FileText, Lock, Pencil, Check } from 'lucide-react'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { InlineLoader } from '@/components/ui/LoadingSpinner'
 import { loansApi } from '@/api/loansApi'
-import { tasksApi } from '@/api/tasksApi'
+import { offerWorkflowApi } from '@/api/offerWorkflowApi'
+import { workflowKey } from '@/components/shared/OffersTab'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency } from '@/utils/format'
 import { computeBundledAmount, flatRateFromReducing } from '@/utils/emi'
@@ -55,19 +56,15 @@ const emiDayToIso = (day: string) => `${EMI_DATE_ANCHOR_MONTH}-${day.padStart(2,
 // in the same window); this sends the whole current payload each debounce, so
 // no rapid multi-field edit is ever lost — a superset of legacy's behaviour.
 
-// ── Edit permission — Vanilla parity (efin-app.js renderDetailApproval
-// :7346-7354 + efinIsAppLocked :40228 + isAppFinalLocked :711). NOT gated on
-// canChangeStatus: legacy lets the Sales person who created the loan and the
-// channel Partner edit the CAM. Admin always edits (even a finalised loan);
-// once finalised (Disbursed/Rejected/Closed/OnHold) every non-admin is
-// read-only; only Sales/TeamLeader/Manager are app-access gated (unlock via
-// ownership — createdBy — or an open "Application Verification" task); every
-// other non-admin role has ambient edit access.
-const FINAL_LOCK_STATUSES: ReadonlyArray<LoanStatus> = ['Disbursed', 'Rejected', 'Closed', 'OnHold']
-const CAM_GATED_ROLES: ReadonlyArray<UserRole> = ['Sales', 'TeamLeader', 'Manager']
-const FINAL_LABEL: Partial<Record<LoanStatus, string>> = {
-  Disbursed: 'Disbursed', Rejected: 'Rejected', Closed: 'Closed', OnHold: 'On Hold',
-}
+// ── Edit permission (offer-workflow business decision, 2026-09-25) ────────
+// Sanction paperwork may be changed only by the 4 sanction authorities —
+// Chief Administrator, Zonal Manager, Credit Evaluation Manager, Credit
+// Evaluation Officer — only after credit approval (Approved / Acceptance), and
+// never while an immutable Sanction is active (a correction is then a sanction
+// Amendment in the Offers tab). This supersedes the earlier Vanilla-parity CAM
+// rule; PUT /sanction-detail enforces exactly the same thing (403 / 409).
+const SANCTION_AUTHORITY_ROLES: ReadonlyArray<UserRole> = ['Admin', 'LocationHead', 'OperationManager', 'LoginTeam']
+const SANCTION_EDIT_STATUSES: ReadonlyArray<LoanStatus> = ['Approved', 'Acceptance']
 
 const num = (s: string) => parseFloat(s) || 0
 // Read-only formatters mirror legacy's fmt/pct (efin-app.js:7365-7366): a
@@ -79,27 +76,18 @@ export default function SanctionDetailCard({ loan }: { loan: Loan }) {
   const qc = useQueryClient()
   const sd = loan.sanctionDetail
 
-  // ── Permission gate (unchanged from the permission-parity pass) ──────────
+  // ── Permission gate — mirrors LoansController.UpdateSanctionDetail ───────
   const user = useAuthStore(s => s.user)
   const role = user?.role
-  const isAdmin = role === 'Admin'
-  const isFinalLocked = FINAL_LOCK_STATUSES.includes(loan.status)
-  const isGatedRole = !!role && CAM_GATED_ROLES.includes(role)
-  const ownsApp = !!user && loan.createdBy?.id === user.id
-  const needsTaskCheck = isGatedRole && !isAdmin && !isFinalLocked && !ownsApp
-  const { data: openTasks } = useQuery({
-    queryKey: ['tasks', 'loan', loan.id, 'open'],
-    queryFn: () => tasksApi.getAll({ loanId: loan.id, completed: false }).then(r => r.data.data ?? []),
-    enabled: needsTaskCheck,
-    staleTime: 30_000,
+  const isAuthority = !!role && SANCTION_AUTHORITY_ROLES.includes(role)
+  const stageOk = SANCTION_EDIT_STATUSES.includes(loan.status)
+  const { data: workflow } = useQuery({
+    queryKey: workflowKey(loan.id),
+    queryFn: () => offerWorkflowApi.get(loan.id).then(r => r.data.data ?? null),
+    enabled: isAuthority && stageOk,
   })
-  const myName = (user?.fullName ?? '').trim().toLowerCase()
-  const hasVerificationTask = (openTasks ?? []).some(t =>
-    !t.isCompleted &&
-    (t.assignedTo ?? '').trim().toLowerCase() === myName &&
-    (t.title ?? '').toLowerCase().includes('application verification'))
-  const appAccessLocked = isGatedRole && !ownsApp && !hasVerificationTask
-  const canEdit = isAdmin || (!isFinalLocked && !appAccessLocked)
+  const sanctionActive = !!workflow?.sanctions.some(x => x.status === 'Active')
+  const canEdit = isAuthority && stageOk && !!workflow && !sanctionActive
 
   // ── Seeds ─────────────────────────────────────────────────────────────────
   // Legacy's CAM seeds every field from `app.sanction* || ''` (empty when the
@@ -261,9 +249,11 @@ export default function SanctionDetailCard({ loan }: { loan: Loan }) {
         ) : (
           <span className="inline-flex items-center gap-1 text-gray-500">
             <Lock size={12} />
-            {isFinalLocked
-              ? `View-only — application is ${FINAL_LABEL[loan.status] ?? loan.status}; only Admin can edit now`
-              : "View-only — you don't have edit access to this application"}
+            {sanctionActive
+              ? 'View-only — the sanction is generated and immutable; use Amendment in the Offers tab to correct it'
+              : !isAuthority
+                ? 'View-only — only the Chief Administrator, Zonal Manager and Credit Evaluation Manager / Officer edit sanction terms'
+                : `View-only — sanction terms are recorded after credit approval (application is ${loan.status})`}
           </span>
         )}
         {canEdit && (

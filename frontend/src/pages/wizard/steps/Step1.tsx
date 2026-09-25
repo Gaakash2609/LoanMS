@@ -10,11 +10,21 @@ import { FormGroup, TextInput, SelectInput } from '@/pages/wizard/WizardFields'
 import type { WizardData } from '@/pages/wizard/wizardTypes'
 import { roleTitle } from '@/pages/users/userConstants'
 
-export function Step1({ data, onChange, errors, touch }: {
+// Query key of the Step-1 duplicate/re-application pre-check. Shared with
+// NewApplicationPage, which reads the cached result to block Continue.
+export function duplicateCheckKey(data: WizardData, draftLoanId?: number) {
+  const pan = (data.pan || '').trim().toUpperCase()
+  const mobile = (data.mobile || '').replace(/\D/g, '').slice(-10)
+  return ['loan-duplicate-check', pan.length === 10 ? pan : '', mobile.length === 10 ? mobile : '', draftLoanId ?? 0] as const
+}
+
+export function Step1({ data, onChange, errors, touch, draftLoanId }: {
   data: WizardData
   onChange: (f: Partial<WizardData>) => void
   errors: Record<string, string>
   touch: (field: string) => void
+  /** This wizard's own server draft — excluded from "active application". */
+  draftLoanId?: number
 }) {
   const { data: locations } = useQuery({
     queryKey: ['wizard-locations'],
@@ -35,22 +45,22 @@ export function Step1({ data, onChange, errors, touch }: {
   const dsaList     = (dsaPartnerList ?? []).filter(d => d.partnerType === 'Dsa')
   const partnerList = (dsaPartnerList ?? []).filter(d => d.partnerType === 'Partner')
 
-  // ── Live PAN duplicate check ────────────────────────────────────────────
-  // Ports legacy wPanCheck() (efin-app.js:7155), wired in index.html:1491 on
-  // the PAN field's oninput. Legacy checked its own local APPLICATIONS cache
-  // first and fell back to the server; there is no such client-side cache
-  // here, so it goes straight to the authoritative endpoint — which legacy's
-  // own comment calls the reliable one. Warning-only: it must never block
-  // submission, exactly like legacy.
+  // ── Live duplicate / re-application check ──────────────────────────────
+  // Started as a port of legacy wPanCheck() (efin-app.js:7155); now asks the
+  // server's central rule (global customer match on PAN + mobile, one active
+  // application per customer, 45 days after a rejection). UX only — the
+  // backend re-checks on every draft save and on submit, so this can never be
+  // the thing that lets a duplicate through.
   //
-  // The query key carries the PAN, so a result for a PAN the user has since
-  // typed past can never render — that is legacy's `stillPan !== pan` guard,
-  // handled structurally instead of with a manual re-read.
-  const panForCheck = (data.pan || '').trim().toUpperCase()
+  // The query key carries the identifiers, so a result for a PAN/mobile the
+  // user has since typed past can never render (legacy's `stillPan !== pan`
+  // guard, handled structurally).
+  const dupKey = duplicateCheckKey(data, draftLoanId)
   const { data: panDuplicate } = useQuery({
-    queryKey: ['loan-duplicate-check', panForCheck],
-    queryFn: () => loansApi.duplicateCheck(panForCheck).then(r => r.data.data),
-    enabled: panForCheck.length === 10,
+    queryKey: dupKey,
+    queryFn: () => loansApi.duplicateCheck({ pan: dupKey[1], mobile: dupKey[2], loanId: dupKey[3] || undefined })
+      .then(r => r.data.data),
+    enabled: !!dupKey[1] || !!dupKey[2],
     staleTime: 60_000,
     retry: false,
   })
@@ -89,17 +99,13 @@ export function Step1({ data, onChange, errors, touch }: {
           onBlur={() => touch('pan')}
           placeholder="ABCDE1234F" maxLength={10} minLength={10}
           className="uppercase font-mono" />
-        {/* Same amber warning-strip legacy shows in #w-pan-dup-alert. Advisory
-            only — nothing here disables Next or fails validation. */}
+        {/* Same amber warning-strip legacy shows in #w-pan-dup-alert, now with
+            the server's own reason (active application / re-apply date /
+            admin review). NewApplicationPage blocks Continue on it. */}
         {panDuplicate?.hasDuplicate && (
-          <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <div role="alert" className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-            <span>
-              Customer has a recent <strong>{panDuplicate.status}</strong> application
-              {panDuplicate.loanNumber ? <> (<span className="font-mono">{panDuplicate.loanNumber}</span>
-              {panDuplicate.customerName ? ` — ${panDuplicate.customerName}` : ''})</> : null}
-              {panDuplicate.daysAgo != null ? `. Created ${panDuplicate.daysAgo} days ago.` : '.'}
-            </span>
+            <span>{panDuplicate.message || 'This customer cannot start a new application right now.'}</span>
           </div>
         )}
       </FormGroup>

@@ -37,7 +37,7 @@ public sealed class LoginUserAssignmentService : ILoginUserAssignmentService
     // In-flight statuses that count toward a Login User's active workload.
     private static readonly LoanStatus[] _activeStatuses =
     {
-        LoanStatus.Submitted, LoanStatus.UnderReview, LoanStatus.Approved,
+        LoanStatus.Submitted, LoanStatus.UnderReview, LoanStatus.Offer, LoanStatus.Approved,
         LoanStatus.OnHold, LoanStatus.Decision, LoanStatus.Acceptance
     };
 

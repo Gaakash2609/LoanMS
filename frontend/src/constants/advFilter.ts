@@ -194,4 +194,4 @@ export function scopeToStatus(scope: ExportScope): LoanStatus | undefined {
 }
 
 /** Statuses legacy counts as the active pipeline for the 'pending' scope. */
-export const PIPELINE_STATUSES = ['Draft', 'Submitted', 'UnderReview', 'Approved'] as const
+export const PIPELINE_STATUSES = ['Draft', 'Submitted', 'UnderReview', 'Offer', 'Approved'] as const

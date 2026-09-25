@@ -56,7 +56,31 @@ public class CustomerDeletionService : ICustomerDeletionService
         if (loans.Any(l => !l.IsDeleted && !DeletableLoanStatuses.Contains(l.Status)))
             return ApiResponseDto<CustomerDeletionResultDto>.Fail("Cannot delete customer with active loans.");
 
+        // A rejected application still inside its 45-day re-application window
+        // (or with no recorded rejection date) is the evidence that rule runs on.
+        // Purging the customer would erase it and let a new application through
+        // early, so the delete waits until the window has passed.
+        var eligibility = LoanMS.Application.Services.LoanService.EvaluateApplicationEligibility(
+            await LoanMS.Infrastructure.Repositories.LoanRepository.QueryEligibilityRows(_db, customerId).ToListAsync(ct),
+            DateTime.UtcNow);
+        if (eligibility.Code is ApiErrorCodes.ReapplyCooldown or ApiErrorCodes.RejectionDateUnknown)
+            return ApiResponseDto<CustomerDeletionResultDto>.Fail(
+                "Cannot delete this customer yet: a rejected application is still inside the 45-day re-application " +
+                "window (or its rejection date is not recorded). Deleting now would remove that restriction. " +
+                eligibility.Message);
+
         var loanIds = loans.Select(l => l.Id).ToList();
+
+        // Lender offers, credit approvals, sanctions and disbursements are
+        // append-only lending records (immutable at the database level) — a
+        // customer who has any cannot be purged.
+        if (await _db.ApplicationOffers.IgnoreQueryFilters().AnyAsync(o => loanIds.Contains(o.LoanId), ct)
+            || await _db.Sanctions.AnyAsync(s => loanIds.Contains(s.LoanId), ct)
+            || await _db.Disbursements.AnyAsync(d => loanIds.Contains(d.LoanId), ct))
+            return ApiResponseDto<CustomerDeletionResultDto>.Fail(
+                "Cannot delete this customer: their applications carry lender offers / sanction / disbursement records, " +
+                "which are retained for audit. Archive the application instead.");
+
         var loanIdStrs = loanIds.Select(i => i.ToString()).ToList();
         var loanNumbers = loans.Select(l => l.LoanNumber).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
         var incredIds = loans.Select(l => l.IncredApplicationId).Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n!).ToList();

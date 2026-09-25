@@ -17,13 +17,39 @@ public class LoansController : BaseController
     private readonly AppDbContext _db;
     private readonly LoanMS.Application.Interfaces.IFileStorageService _fileStorage;
     private readonly LoanMS.API.Services.IRolePermissionService _rolePerm;
+    // Global customer identification for GET duplicate-check (always injected
+    // by DI; optional only so older unit-test constructions keep compiling).
+    private readonly ICustomerService? _customerService;
 
-    public LoansController(ILoanService loanService, AppDbContext db, LoanMS.Application.Interfaces.IFileStorageService fileStorage, LoanMS.API.Services.IRolePermissionService rolePerm)
+    public LoansController(ILoanService loanService, AppDbContext db, LoanMS.Application.Interfaces.IFileStorageService fileStorage, LoanMS.API.Services.IRolePermissionService rolePerm,
+        ICustomerService? customerService = null)
     {
         _loanService = loanService;
         _db          = db;
         _fileStorage = fileStorage;
         _rolePerm    = rolePerm;
+        _customerService = customerService;
+    }
+
+    private static bool IsEligibilityBlock(string? code) => code is ApiErrorCodes.ActiveApplicationExists
+        or ApiErrorCodes.ReapplyCooldown or ApiErrorCodes.RejectionDateUnknown or ApiErrorCodes.CustomerNeedsReview;
+
+    /// <summary>Audit trail for an application attempt the central guard
+    /// refused (existing AuditLog pattern; the global AuditMiddleware only
+    /// records successful writes). Best-effort: never turns a 409 into a 500.</summary>
+    private async Task AuditBlockedApplicationAsync<T>(string entityId, string attempted, ApiResponseDto<T> result)
+    {
+        if (!IsEligibilityBlock(result.ErrorCode)) return;
+        try
+        {
+            _db.ChangeTracker.Clear();
+            AuditHelper.LogChange(_db, HttpContext, "Loans", entityId, "ApplicationBlocked",
+                oldValues: null, newValues: attempted,
+                reason: $"{result.ErrorCode}: {result.Errors.FirstOrDefault()}",
+                userId: CurrentUserId, userName: CurrentUserEmail);
+            await _db.SaveChangesAsync();
+        }
+        catch { /* audit is best-effort here; the block itself already stands */ }
     }
 
     /// <summary>Get dashboard statistics</summary>
@@ -82,8 +108,12 @@ public class LoansController : BaseController
         if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canCreateApp"))
             return Forbid();
 
-        var result = await _loanService.CreateAsync(request, CurrentUserId);
-        if (!result.Success) return BadRequest(result);
+        var result = await _loanService.CreateAsync(request, CurrentUserId, CurrentUserRole);
+        if (!result.Success)
+        {
+            await AuditBlockedApplicationAsync($"customer:{request.CustomerId}", "POST /api/loans", result);
+            return ApiResult(result);
+        }
         return CreatedAtAction(nameof(GetById), new { id = result.Data!.Id }, result);
     }
 
@@ -167,7 +197,11 @@ public class LoansController : BaseController
             .Where(l => l.Id == id).Select(l => (LoanStatus?)l.Status).FirstOrDefaultAsync();
 
         var result = await _loanService.OverrideStatusAsync(id, request.NewStatus, request.Reason, CurrentUserId, CurrentUserRole);
-        if (!result.Success) return ApiResult(result);
+        if (!result.Success)
+        {
+            await AuditBlockedApplicationAsync(id.ToString(), $"override-status → {request.NewStatus}", result);
+            return ApiResult(result);
+        }
 
         // Structured audit entry (old→new + reason). This is IN ADDITION to the
         // global AuditMiddleware row and to LoanStatusHistory — it is the one
@@ -209,7 +243,11 @@ public class LoansController : BaseController
             .Where(l => l.Id == id).Select(l => (LoanStatus?)l.Status).FirstOrDefaultAsync();
 
         var result = await _loanService.ReopenAsync(id, request.Reason, CurrentUserId, CurrentUserRole);
-        if (!result.Success) return ApiResult(result);
+        if (!result.Success)
+        {
+            await AuditBlockedApplicationAsync(id.ToString(), "reopen", result);
+            return ApiResult(result);
+        }
 
         _db.AuditLogs.Add(new AuditLog
         {
@@ -226,6 +264,49 @@ public class LoansController : BaseController
         });
         await _db.SaveChangesAsync();
 
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Archive a closed/rejected application (soft, application-level; reason
+    /// mandatory). Role gate here AND in LoanService.ArchiveAsync: Admin (Chief
+    /// Administrator), ProductTeam (Product &amp; Risk Officer), LocationHead
+    /// (Zonal Manager) — within their normal loan visibility scope. The
+    /// structured audit row is written in the SAME SaveChanges as the archive,
+    /// so an archive can never persist without its audit entry.
+    /// </summary>
+    [HttpPatch("{id:int}/archive")]
+    [Authorize(Roles = "Admin,ProductTeam,LocationHead")]
+    public async Task<IActionResult> Archive(int id, [FromBody] ArchiveLoanRequestDto? request)
+    {
+        var before = await _db.Set<Loan>().AsNoTracking()
+            .Where(l => l.Id == id).Select(l => new { l.Status, l.IsArchived }).FirstOrDefaultAsync();
+
+        AuditLog? audit = null;
+        if (before != null && !string.IsNullOrWhiteSpace(request?.Reason))
+        {
+            audit = new AuditLog
+            {
+                EntityName = "Loans",
+                Action     = "Archived",
+                EntityId   = id.ToString(),
+                OldValues  = $"IsArchived={before.IsArchived}; Status={before.Status}",
+                NewValues  = "IsArchived=True",
+                Reason     = request.Reason.Trim(),
+                UserId     = CurrentUserId,
+                UserName   = CurrentUserEmail,
+                IpAddress  = HttpContext.Connection.RemoteIpAddress?.ToString(),
+                CreatedAt  = DateTime.UtcNow
+            };
+            _db.AuditLogs.Add(audit);
+        }
+
+        var result = await _loanService.ArchiveAsync(id, request?.Reason, CurrentUserId, CurrentUserRole);
+        if (!result.Success)
+        {
+            if (audit != null) _db.Entry(audit).State = EntityState.Detached;
+            return ApiResult(result);
+        }
         return Ok(result);
     }
 
@@ -305,29 +386,20 @@ public class LoansController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Approve loan [Roles with canChangeStatus:true — approval is a status transition]</summary>
-    [HttpPatch("{id:int}/approve")]
-    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
-    public async Task<IActionResult> Approve(int id, [FromBody] ApproveRequestDto request)
-    {
-        // Same fine-grained check UpdateStatus (PATCH .../status) already
-        // applies for this exact transition -- added here because the UI now
-        // calls this dedicated route directly (see loansApi.ts), so without
-        // this the Settings screen's per-role canChangeStatus toggle stopped
-        // actually governing the button it's meant to control.
-        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canChangeStatus"))
-            return Forbid();
+    // ── Retired: offer-chain transitions ─────────────────────────────────────
+    // Approve (credit approval), Disburse and the loan-level deviation
+    // raise/decide/skip/flags endpoints were replaced by the Offer workflow
+    // (/api/loans/{id}/workflow/..., OfferWorkflowController). They stay routed
+    // so an old client (e.g. the unused legacy api-bridge.js) gets an explicit
+    // 409 with directions instead of a silent 404 or — worse — a bypass of the
+    // offer / deviation / credit-approval / sanction chain.
+    private IActionResult Retired(string action, string replacement) =>
+        Conflict(ApiResponseDto<object>.Fail(
+            $"{action} is no longer a direct loan action. Use the Offers tab: {replacement}.", ApiErrorCodes.WorkflowStage));
 
-        var result = await _loanService.UpdateStatusAsync(id,
-            new UpdateLoanStatusRequestDto
-            {
-                NewStatus      = LoanStatus.Approved,
-                ApprovedAmount = request.ApprovedAmount,
-                Comment        = request.Comment ?? "Loan approved."
-            },
-            CurrentUserId, CurrentUserRole);
-        return ApiResult(result);
-    }
+    [HttpPatch("{id:int}/approve")]
+    public IActionResult Approve(int id) =>
+        Retired("Approve", "select the final offer, resolve any deviation, then Credit Approval (POST /api/loans/{id}/workflow/offers/{offerId}/credit-approval)");
 
     /// <summary>Reject loan [Roles with canRejectApp:true in the frontend ROLES matrix]</summary>
     [HttpPatch("{id:int}/reject")]
@@ -349,21 +421,9 @@ public class LoansController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>Disburse loan [Roles with canDisburse:true in the frontend ROLES matrix]</summary>
     [HttpPatch("{id:int}/disburse")]
-    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
-    public async Task<IActionResult> Disburse(int id)
-    {
-        // Same reasoning as Approve above -- matches UpdateStatus's own
-        // canDisburse check for this transition.
-        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDisburse"))
-            return Forbid();
-
-        var result = await _loanService.UpdateStatusAsync(id,
-            new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Disbursed, Comment = "Loan disbursed." },
-            CurrentUserId, CurrentUserRole);
-        return ApiResult(result);
-    }
+    public IActionResult Disburse(int id) =>
+        Retired("Disburse", "generate the sanction, then record the disbursement (POST /api/loans/{id}/workflow/disbursements)");
 
     /// <summary>
     /// Put an in-flight loan on hold [Roles with canHoldApp:true]. Restores
@@ -395,68 +455,21 @@ public class LoansController : BaseController
         return ApiResult(result);
     }
 
-    /// <summary>
-    /// Policy-band deviation flags for this loan (empty = within policy),
-    /// gated on canDeviation — the permission that previously governed
-    /// nothing. Ported from legacy laCheckDeviations: ROI band vs CIBIL,
-    /// FOIR cap, loan-amount income multiplier, tenure max, CIBIL minimum.
-    /// Read-only risk signal for reviewers; does not change loan state.
-    /// </summary>
     [HttpGet("{id:int}/deviations")]
-    public async Task<IActionResult> GetDeviations(int id)
-    {
-        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDeviation"))
-            return Forbid();
+    public IActionResult GetDeviations(int id) =>
+        Retired("Loan-level deviation flags", "each offer's rule-engine evaluation is in GET /api/loans/{id}/workflow");
 
-        var result = await _loanService.GetDeviationsAsync(id, CurrentUserId, CurrentUserRole);
-        return ApiResult(result);
-    }
-
-    /// <summary>
-    /// Raise a policy deviation on an Under Review loan → Decision
-    /// [canDeviation]. Type + reason required. Legacy: confirmDeviation.
-    /// </summary>
     [HttpPatch("{id:int}/deviation/raise")]
-    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
-    public async Task<IActionResult> RaiseDeviation(int id, [FromBody] RaiseDeviationRequestDto request)
-    {
-        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDeviation"))
-            return Forbid();
+    public IActionResult RaiseDeviation(int id) =>
+        Retired("Raise deviation", "raise it on the selected final offer (POST /api/loans/{id}/workflow/offers/{offerId}/deviations)");
 
-        var result = await _loanService.RaiseDeviationAsync(id, request?.DeviationType ?? "", request?.Reason ?? "", CurrentUserId, CurrentUserRole);
-        return ApiResult(result);
-    }
-
-    /// <summary>
-    /// Decide a raised deviation (approve → Approved, else → Rejected)
-    /// [canDeviation]. The raiser cannot approve their own deviation unless
-    /// Admin (enforced in the service). Legacy: confirmApprovedDeviation.
-    /// </summary>
     [HttpPatch("{id:int}/deviation/decide")]
-    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
-    public async Task<IActionResult> DecideDeviation(int id, [FromBody] DecideDeviationRequestDto request)
-    {
-        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDeviation"))
-            return Forbid();
+    public IActionResult DecideDeviation(int id) =>
+        Retired("Deviation decision", "POST /api/loans/{id}/workflow/deviations/{deviationId}/decide");
 
-        var result = await _loanService.DecideDeviationAsync(id, request?.Approve ?? false, request?.Comment, CurrentUserId, CurrentUserRole);
-        return ApiResult(result);
-    }
-
-    /// <summary>
-    /// Skip deviation routing on an Under Review loan → Approved
-    /// [canDeviation]. Legacy: confirmSkipDeviation.
-    /// </summary>
     [HttpPatch("{id:int}/deviation/skip")]
-    [Authorize(Roles = "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager")]
-    public async Task<IActionResult> SkipDeviation(int id, [FromBody] HoldRequestDto? request)
-    {
-        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canDeviation"))
-            return Forbid();
-
-        var result = await _loanService.SkipDeviationAsync(id, request?.Reason, CurrentUserId, CurrentUserRole);
-        return ApiResult(result);
-    }
+    public IActionResult SkipDeviation(int id) =>
+        Retired("Skip deviation", "POST /api/loans/{id}/workflow/offers/{offerId}/deviations/skip");
 
     /// <summary>
     /// Update Sales Team / Operations Manager assignment (linked-users
@@ -554,12 +567,20 @@ public class LoansController : BaseController
     /// read-only rule stays a client concern (SanctionDetailCard), exactly as in
     /// legacy where the same backend serves the vanilla UI.
     /// </summary>
+    // Sanction paperwork may be edited only by the 4 sanction authority roles
+    // (Chief Administrator, Zonal Manager, Credit Evaluation Manager, Credit
+    // Evaluation Officer) and never while an immutable Sanction is active —
+    // the sanction snapshot (OfferWorkflowService) is then the source of truth
+    // and this panel is display-only (a correction = sanction Amendment).
     [HttpPut("{id:int}/sanction-detail")]
-    [Authorize(Roles = "Admin,Manager,Sales,Partner,Dsa,LoginTeam,TeamLeader,LocationHead,OperationManager,Accounts,ProductTeam")]
+    [Authorize(Roles = "Admin,LocationHead,OperationManager,LoginTeam")]
     public async Task<IActionResult> UpdateSanctionDetail(int id, [FromBody] UpdateLoanSanctionDetailRequestDto request)
     {
         var loan = await _loanService.GetByIdAsync(id, CurrentUserId, CurrentUserRole);
         if (!loan.Success) return NotFound(loan);
+        if (await _db.Sanctions.AnyAsync(s => s.LoanId == id && s.Status == LoanMS.Domain.Entities.OfferWorkflowStatuses.SanctionActive))
+            return Conflict(ApiResponseDto<bool>.Fail(
+                "A sanction is active — its terms are immutable. Cancel it with type Amendment to correct them.", ApiErrorCodes.WorkflowStage));
 
         // Stage guard — sanction terms are recorded only once the loan is at/after the
         // approval step (legacy: the "Approve with Details" step is the only writer of
@@ -568,9 +589,10 @@ public class LoansController : BaseController
         // deviation-approval path. Anything earlier (Draft/Submitted, never approved)
         // is rejected so a sanction row can't exist for a loan at its initial stage.
         var stage = loan.Data;
-        var canRecordSanction = stage != null && (stage.ApprovedAt != null
-            || stage.Status == nameof(LoanStatus.UnderReview)
-            || stage.Status == nameof(LoanStatus.Decision));
+        // Credit approval (offer workflow) stamps ApprovedAt; before that there
+        // are no sanctioned terms to record.
+        var canRecordSanction = stage != null && stage.ApprovedAt != null
+            && stage.Status is nameof(LoanStatus.Approved) or nameof(LoanStatus.Acceptance);
         if (!canRecordSanction)
             return BadRequest(ApiResponseDto<bool>.Fail("Sanction details can only be recorded once the loan has reached the review/approval stage."));
 
@@ -737,42 +759,60 @@ public class LoansController : BaseController
     }
 
     /// <summary>
-    /// Duplicate-application check (productivity audit, P1 — the exact rule
-    /// already established client-side in efin-app.js's wPanCheck(): same
-    /// PAN, any non-Draft status, created within the last 60 days). That
-    /// existing check only ever looked at APPLICATIONS — this browser's
-    /// locally-synced (capped/paginated) copy — so it could miss a genuine
-    /// recent duplicate that simply hadn't synced to this particular
-    /// browser yet. This is the same rule, made authoritative against the
-    /// full database. Warning-only (matches existing UX) — does not block
-    /// anything, just surfaces the same "recent application on this PAN"
-    /// signal the wizard already shows, reliably this time.
+    /// Wizard pre-check (UX only — the authoritative guard runs again on every
+    /// draft save / submit). Runs the SAME global customer identification
+    /// (CustomerService.ResolveIdentityAsync) and the SAME duplicate + 45-day
+    /// rule (LoanService.CheckApplicationEligibilityAsync) the write paths use,
+    /// on normalised PAN / mobile / email. Replaces the legacy "any application
+    /// created within 60 days" warning, which contradicted the business rules
+    /// (it flagged Closed applications and ignored the rejection date).
+    /// loanId = the caller's own draft (excluded from "active application"),
+    /// honoured only for a Draft the caller may resume. Never returns another
+    /// user's application details to roles that may not see them.
     /// </summary>
     [HttpGet("duplicate-check")]
-    public async Task<IActionResult> DuplicateCheck([FromQuery] string pan)
+    public async Task<IActionResult> DuplicateCheck([FromQuery] string? pan, [FromQuery] string? mobile = null,
+        [FromQuery] string? email = null, [FromQuery] int? loanId = null)
     {
-        if (string.IsNullOrWhiteSpace(pan) || pan.Trim().Length != 10)
+        if (_customerService == null)
             return Ok(ApiResponseDto<object>.Ok(new { hasDuplicate = false }));
 
-        var cutoff = DateTime.UtcNow.AddDays(-60);
-        var match = await _db.Loans
-            .Where(l => l.Status != LoanStatus.Draft && l.CreatedAt >= cutoff)
-            .Include(l => l.Customer)
-            .Where(l => l.Customer.PanNumber == pan.Trim().ToUpper())
-            .OrderByDescending(l => l.CreatedAt)
-            .Select(l => new { l.LoanNumber, Status = l.Status.ToString(), l.Customer.FullName, l.CreatedAt })
-            .FirstOrDefaultAsync();
+        int? ownLoanId = null, ownCustomerId = null;
+        if (loanId is > 0)
+        {
+            var draft = await _db.Loans.AsNoTracking()
+                .Where(l => l.Id == loanId.Value && l.Status == LoanStatus.Draft)
+                .Select(l => new { l.Id, l.CustomerId, l.CreatedByUserId }).FirstOrDefaultAsync();
+            if (draft != null && (CurrentUserRole is "Admin" or "Manager" || draft.CreatedByUserId == CurrentUserId))
+            {
+                ownLoanId = draft.Id;
+                ownCustomerId = draft.CustomerId;
+            }
+        }
 
-        if (match == null)
+        var identity = await _customerService.ResolveIdentityAsync(pan, mobile, email, ownCustomerId, ownLoanId);
+        if (identity.NeedsReview)
+            return Ok(ApiResponseDto<object>.Ok(new
+            {
+                hasDuplicate = true, code = ApiErrorCodes.CustomerNeedsReview, message = identity.Message
+            }));
+        if (identity.CustomerId is not int customerId)
             return Ok(ApiResponseDto<object>.Ok(new { hasDuplicate = false }));
 
+        var eligibility = await _loanService.CheckApplicationEligibilityAsync(customerId, ownLoanId);
+        if (eligibility.Allowed)
+            return Ok(ApiResponseDto<object>.Ok(new { hasDuplicate = false, existingCustomer = true }));
+
+        var detailed = CurrentUserRole is "Admin" or "Manager"
+                       || eligibility.BlockingLoanCreatedByUserId == CurrentUserId;
         return Ok(ApiResponseDto<object>.Ok(new
         {
             hasDuplicate = true,
-            loanNumber = match.LoanNumber,
-            status = match.Status,
-            customerName = match.FullName,
-            daysAgo = Math.Round((DateTime.UtcNow - match.CreatedAt).TotalDays, 1)
+            code         = eligibility.Code,
+            message      = LoanMS.Application.Services.LoanService.DescribeEligibilityForCaller(eligibility, CurrentUserId, CurrentUserRole),
+            status       = detailed ? eligibility.BlockingStatus : null,
+            loanNumber   = detailed ? eligibility.BlockingLoanNumber : null,
+            reapplyAfter = eligibility.ReapplyAfterUtc,
         }));
     }
 
@@ -1197,12 +1237,6 @@ public class LoansController : BaseController
     }
 }
 
-public class ApproveRequestDto
-{
-    public decimal? ApprovedAmount { get; set; }
-    public string?  Comment        { get; set; }
-}
-
 public class RejectRequestDto
 {
     public string? Reason { get; set; }
@@ -1211,18 +1245,6 @@ public class RejectRequestDto
 public class HoldRequestDto
 {
     public string? Reason { get; set; }
-}
-
-public class RaiseDeviationRequestDto
-{
-    public string? DeviationType { get; set; }
-    public string? Reason { get; set; }
-}
-
-public class DecideDeviationRequestDto
-{
-    public bool Approve { get; set; }
-    public string? Comment { get; set; }
 }
 
 /// <summary>Body for document verify/reject. Note is optional on verify,

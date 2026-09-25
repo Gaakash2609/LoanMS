@@ -10,6 +10,7 @@ import {
 import { AddBankModal } from '@/components/shared/AddBankModal'
 import { AddLineModal } from '@/components/shared/LineModals'
 import { NumberInput } from '@/components/ui/NumberInput'
+import { apiErrorMessage } from '@/utils/apiError'
 
 // ── Assigned Banks (per product) ─────────────────────────────────────────────
 // Legacy #lc-product-banks section (efin-app.js lcRenderProductBanks /
@@ -23,7 +24,7 @@ import { NumberInput } from '@/components/ui/NumberInput'
 // name/flags/rules PUT. Everything persists to the DB immediately; Save
 // Assignment re-affirms the whole set (parity with legacy's explicit save).
 
-type EditDraft = { id: number; name: string; isIncred: boolean; isElite: boolean; maxLoanAmt: string; foirLimit: string; minCibil: string; minExpMonths: string }
+type EditDraft = { id: number; name: string; isIncred: boolean; isElite: boolean; maxLoanAmt: string; foirLimit: string; minCibil: string; minExpMonths: string; offerValidityDays: string }
 const num = (s: string): number | null => (s.trim() === '' ? null : Number(s))
 
 export function AssignedBanksSection({ canEdit, productKey }: { canEdit: boolean; productKey: ProductKey }) {
@@ -51,6 +52,7 @@ export function AssignedBanksSection({ canEdit, productKey }: { canEdit: boolean
     mutationFn: (d: EditDraft) => banksApi.update(d.id, {
       bankName: d.name.trim(), isIncred: d.isIncred, isElite: d.isElite,
       maxLoanAmt: num(d.maxLoanAmt), foirLimit: num(d.foirLimit), minCibil: num(d.minCibil), minExpMonths: num(d.minExpMonths),
+      offerValidityDays: num(d.offerValidityDays) ?? 0,
     }),
     onSuccess: () => { invalidate(); setEditModal(null) },
   })
@@ -133,7 +135,7 @@ export function AssignedBanksSection({ canEdit, productKey }: { canEdit: boolean
                         onClick={() => setLineBank({ id: b.id, name: b.bankName })} title="Add company line"><Plus size={11} />Line</button>
                     )}
                     <button className="flex-1 text-[11px] font-semibold text-gray-600 hover:text-efin-blue flex items-center justify-center gap-0.5"
-                      onClick={() => setEditModal({ id: b.id, name: b.bankName, isIncred: !!b.isIncred, isElite: !!b.isElite, maxLoanAmt: b.maxLoanAmt == null ? '' : String(b.maxLoanAmt), foirLimit: b.foirLimit == null ? '' : String(b.foirLimit), minCibil: b.minCibil == null ? '' : String(b.minCibil), minExpMonths: b.minExpMonths == null ? '' : String(b.minExpMonths) })}>
+                      onClick={() => setEditModal({ id: b.id, name: b.bankName, isIncred: !!b.isIncred, isElite: !!b.isElite, maxLoanAmt: b.maxLoanAmt == null ? '' : String(b.maxLoanAmt), foirLimit: b.foirLimit == null ? '' : String(b.foirLimit), minCibil: b.minCibil == null ? '' : String(b.minCibil), minExpMonths: b.minExpMonths == null ? '' : String(b.minExpMonths), offerValidityDays: b.offerValidityDays == null ? '' : String(b.offerValidityDays) })}>
                       <Pencil size={11} />Edit
                     </button>
                     <button className="flex-1 text-[11px] font-semibold text-[color:var(--danger)] hover:underline flex items-center justify-center gap-0.5"
@@ -167,7 +169,7 @@ export function AssignedBanksSection({ canEdit, productKey }: { canEdit: boolean
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 mb-4">
               <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-2">Quick Rules</p>
               <div className="grid grid-cols-2 gap-2.5">
-                {([['Max Loan (₹)', 'maxLoanAmt'], ['FOIR Limit (%)', 'foirLimit'], ['Min CIBIL', 'minCibil'], ['Min Exp (mo)', 'minExpMonths']] as [string, keyof EditDraft][]).map(([lbl, key]) => (
+                {([['Max Loan (₹)', 'maxLoanAmt'], ['FOIR Limit (%)', 'foirLimit'], ['Min CIBIL', 'minCibil'], ['Min Exp (mo)', 'minExpMonths'], ['Offer validity (days)', 'offerValidityDays']] as [string, keyof EditDraft][]).map(([lbl, key]) => (
                   <div key={key}>
                     <p className="text-[10.5px] text-gray-500 mb-1">{lbl}</p>
                     <NumberInput value={editModal[key] as string} onChange={e => setEditModal({ ...editModal, [key]: e.target.value })}
@@ -176,7 +178,8 @@ export function AssignedBanksSection({ canEdit, productKey }: { canEdit: boolean
                 ))}
               </div>
             </div>
-            {editBank.isError && <p className="text-xs text-[color:var(--danger)] mb-2">Could not save. Try again.</p>}
+            <p className="-mt-2 mb-3 text-[10.5px] text-gray-500">Offer validity pre-fills “Valid until” on new offers of this lender (1–365 days; blank = none).</p>
+            {editBank.isError && <p className="text-xs text-[color:var(--danger)] mb-2">{apiErrorMessage(editBank.error)}</p>}
             <div className="flex gap-2">
               <Button className="flex-1" disabled={!editModal.name.trim() || editBank.isPending} onClick={() => editBank.mutate(editModal)}>✓ Save</Button>
               <Button variant="secondary" onClick={() => setEditModal(null)}>Cancel</Button>

@@ -271,8 +271,8 @@ export default function TasksPage() {
     // completed task could never be un-completed from the UI even though the
     // backend route is a plain toggle — reopening a task was impossible.
     { key: 'status', label: '', render: (t: Task) => (
-      <button onClick={() => toggle.mutate(t.id)} disabled={toggle.isPending}
-        title={t.isCompleted ? 'Reopen task' : 'Mark complete'}
+      <button onClick={() => toggle.mutate(t.id)} disabled={toggle.isPending || (t.isPaused && !t.isCompleted)}
+        title={t.isCompleted ? 'Reopen task' : t.isPaused ? 'Paused — the application is on hold' : 'Mark complete'}
         className="text-gray-400 hover:text-green-500 disabled:opacity-50">
         {t.isCompleted ? <CheckCircle size={16} className="text-green-500" /> : <Circle size={16} />}
       </button>
@@ -281,6 +281,7 @@ export default function TasksPage() {
       <div>
         <p className={`font-medium ${t.isCompleted ? 'line-through text-gray-400' : 'text-gray-900'}`}>{t.title}</p>
         {t.description && <p className="text-xs text-gray-500 mt-0.5 truncate max-w-xs">{t.description}</p>}
+        {t.isPaused && !t.isCompleted && <span className="mt-1 inline-block"><Badge variant="warning">⏸ Paused{t.pauseReason ? ` — ${t.pauseReason}` : ''}</Badge></span>}
       </div>
     )},
     // Sort by priority severity (High > Medium > Low), not alphabetically.

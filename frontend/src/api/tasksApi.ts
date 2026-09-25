@@ -11,6 +11,8 @@ export interface Task {
   // any real response, so those columns always rendered blank.
   assignedTo?: string; createdBy?: string
   createdAt: string
+  /** Paused while the application is On Hold — it cannot be completed until resumed. */
+  isPaused?: boolean; pauseReason?: string | null
 }
 
 // Exact shape of TaskCreateDto (LoanMS.API/Controllers/TasksController.cs)

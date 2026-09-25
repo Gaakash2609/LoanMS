@@ -56,7 +56,15 @@ public abstract class BaseController : ControllerBase
 
     protected IActionResult ApiResult<T>(ApiResponseDto<T> response)
     {
-        if (!response.Success) return BadRequest(response);
+        if (!response.Success)
+        {
+            // ErrorCode is set only by the duplicate/re-application/archive
+            // rules; every older failure keeps its existing 400.
+            if (ApiErrorCodes.IsConflict(response.ErrorCode)) return Conflict(response);
+            if (response.ErrorCode is ApiErrorCodes.Forbidden or ApiErrorCodes.SelfApproval) return StatusCode(StatusCodes.Status403Forbidden, response);
+            if (response.ErrorCode == ApiErrorCodes.NotFound) return NotFound(response);
+            return BadRequest(response);
+        }
         return Ok(response);
     }
 }

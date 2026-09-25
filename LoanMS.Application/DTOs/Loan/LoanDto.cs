@@ -61,6 +61,11 @@ public class LoanDto
     public bool FiReportChecked { get; set; }
     public bool NachDone { get; set; }
     public bool CustomerAgreementDone { get; set; }
+    // Application archive (see Loan entity). Read-only for clients.
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    public string? ArchivedByName { get; set; }
+    public string? ArchiveReason { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<LoanStatusHistoryDto> StatusHistory { get; set; } = new();
 }

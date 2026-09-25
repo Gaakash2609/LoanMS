@@ -33,7 +33,7 @@ const TABS: { key: Tab; label: string; adminOnly?: boolean }[] = [
   { key: 'targets',      label: 'Targets' },
 ]
 
-const STATUS_ORDER = ['Draft', 'Submitted', 'UnderReview', 'Approved', 'Disbursed', 'Rejected', 'Closed']
+const STATUS_ORDER = ['Draft', 'Submitted', 'UnderReview', 'Offer', 'Approved', 'Disbursed', 'Rejected', 'Closed']
 
 function Bar({ value, max, color = '#0a589a' }: { value: number; max: number; color?: string }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0

@@ -50,7 +50,7 @@ function Picker({ label, value, opts, onChange }: {
 }
 
 const STATUSES: LoanStatus[] = [
-  'Draft', 'Submitted', 'UnderReview', 'Approved', 'Decision', 'Acceptance', 'OnHold', 'Rejected', 'Disbursed', 'Closed',
+  'Draft', 'Submitted', 'UnderReview', 'Offer', 'Decision', 'Approved', 'Acceptance', 'OnHold', 'Rejected', 'Disbursed', 'Closed',
 ] as LoanStatus[]
 
 // Filter VALUES must be the backend LoanType enum names (the filter is sent

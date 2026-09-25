@@ -13,6 +13,10 @@ public class LoanTask : BaseEntity
     public DateTime? DueDate { get; set; }
     public int AssignedToUserId { get; set; }
     public int CreatedByUserId { get; set; }
+    /// <summary>Set while the task's application is on hold (paused, cannot be completed);
+    /// cleared on un-hold.</summary>
+    public DateTime? PausedAt { get; set; }
+    public string? PauseReason { get; set; }
 
     public Loan? Loan { get; set; }
     public User AssignedTo { get; set; } = null!;

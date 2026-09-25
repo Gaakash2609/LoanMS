@@ -6,15 +6,16 @@ import { incomeVerificationApi } from '@/api/incomeVerificationApi'
 import { LOAN_KEYS } from '@/hooks/useLoans'
 import { customersApi } from '@/api/customersApi'
 import { kycApi } from '@/api/kycApi'
-import type { CreateCustomerRequest, LoanSanctionDetail } from '@/types'
+import type { CreateCustomerRequest } from '@/types'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { useHasPermission, useCurrentUserDept } from '@/hooks/usePermissions'
 import { getDocumentWithTimeout, extractText } from '@/utils/perfios/pdf'
 import { parseSalarySlip, SALARY_SLIP_VISION_PROMPT } from '@/utils/salarySlipExtraction'
-import { computeBundledAmount, flatRateFromReducing, emiReducing } from '@/utils/emi'
-import { Wallet, Banknote, RotateCcw, Mail, Plus, Trash2, ShieldCheck, FileSearch, FileSignature, FileCheck, Repeat, Upload, Search, BadgeIndianRupee, AlertTriangle, SkipForward, CheckCircle2 } from 'lucide-react'
+import { Wallet, Banknote, RotateCcw, Mail, Plus, Trash2, ShieldCheck, FileSearch, FileSignature, FileCheck, Repeat, Upload, Search } from 'lucide-react'
+import { offerWorkflowApi } from '@/api/offerWorkflowApi'
+import { workflowKey } from '@/components/shared/OffersTab'
 import { NumberInput } from '@/components/ui/NumberInput'
 import { apiErrorMessage } from '@/utils/apiError'
 
@@ -66,23 +67,15 @@ interface CheckProps {
   employmentType?: string | null
   loanStatus: string
   // Loan type (drives which workflow buttons the actions bar shows —
-  // Vanilla's wf.timelineActions) and the workflow permission flags each
-  // workflow button checks (Vanilla rd.canChangeStatus / rd.canDisburse /
-  // canDeviation). Optional so existing callers/tests still compile.
+  // Vanilla's wf.timelineActions) and the status permission the Underwriting
+  // move checks (Vanilla rd.canChangeStatus). Optional so existing
+  // callers/tests still compile.
   loanType?: string
   canChangeStatus?: boolean
-  canDisburse?: boolean
-  canDeviation?: boolean
-  // Seed data for the "Approve with Details" sanction form (Vanilla's
-  // openLenderApprovalModal pre-fill — efin-app.js:31604-31621). The modal
-  // pre-fills the sanctioned Loan Amount / Tenure / ROI / EMI from the loan's
-  // own approved/requested figures, then overlays any previously-saved
-  // LoanSanctionDetail row. All optional so existing callers/tests still compile.
-  requestedAmount?: number
-  approvedAmount?: number | null
-  tenureMonths?: number
-  interestRate?: number
-  sanctionDetail?: LoanSanctionDetail
+  // Approve / Deviation / Disburse moved to the Offers tab (offer → deviation →
+  // credit approval → sanction → disbursement, all server-authorised). The bar
+  // only links there. Optional so existing callers/tests still compile.
+  onOpenOffers?: () => void
   // Verification flags — a check button hides once its flag is done, matching
   // legacy's `if (!app.document_checked)` etc. (efin-app.js:3240-3247, 3234,
   // 27458). Optional so existing callers/tests still compile.
@@ -96,7 +89,7 @@ interface CheckProps {
 }
 
 // Terminal stages where legacy shows NO action buttons in the Timeline
-// (isAppFinalLocked / FINAL_LOCK_STAGES: disbursed/rejected/cancelled/hold →
+// (isAppFinalLocked / FINAL_LOCK_STAGES: disbursed/rejected/hold →
 // React Disbursed/Rejected/Closed/OnHold). efin-app.js:710, 3218-3222.
 const FINAL_LOCK_STATUSES = ['Disbursed', 'Rejected', 'Closed', 'OnHold']
 
@@ -774,335 +767,27 @@ function SimpleActionModal({ loanId, title, subtitle, entryName, confirmLabel, o
   )
 }
 
-// ── Approve with Details (rich sanction form) ──────────────────────────────
-// Full port of Vanilla's openLenderApprovalModal / laAutoCalc / laBuildSubNote /
-// confirmLenderApproval (efin-app.js:31402-31981). Replaces the earlier minimal
-// amount+comment approve modal with the complete sanctioned-offer form the
-// underwriter fills at approval: loan amount, tenure (years↔months synced),
-// ROI, auto-computed flat reducing rate, processing fee % (+ optional bundling),
-// GST, stamp duty, auto-computed EMI, EMI date, insurance (+ optional bundling),
-// auto-computed bundled loan amount, BT flag and a live preview strip.
-//
-// The money math reuses the shared utils/emi ports (computeBundledAmount /
-// flatRateFromReducing / emiReducing) — byte-identical to Vanilla's laAutoCalc —
-// so EMI/flat/bundled come out exactly as Vanilla. On confirm it (1) persists
-// every sanction field to the LoanSanctionDetail row via the SAME endpoint the
-// Sanction Details card uses (PUT /sanction-detail) — the durable record Vanilla
-// only ever kept in browser memory; (2) approves the loan (PATCH /approve,
-// carrying the sanctioned Loan Amount as ApprovedAmount, moving UnderReview →
-// Approved); and (3) posts the EFIN-Approved Timeline entry with the full
-// sanction sub-note (laBuildSubNote), exactly as Vanilla's addTrackingEntry did.
-
-// EMI Date — recurring day-of-month (NOT a calendar date). Mirrors
-// SanctionDetailCard's helpers verbatim so the persisted emiDate ISO string
-// round-trips between the two surfaces. Legacy: sanctionEMIDate select of
-// 1,2,3,4,5,7,10,15,20,25 defaulting to the 3rd (efin-app.js:31480-31482).
-const EMI_DATE_DAYS = [1, 2, 3, 4, 5, 7, 10, 15, 20, 25]
-const EMI_DATE_ANCHOR_MONTH = '2000-01'
-const emiDateOptionLabel = (d: number) => `${d === 1 ? '1st' : d === 2 ? '2nd' : d === 3 ? '3rd' : d + 'th'} of every Month`
-const emiDayLabel = (day: string) => (day === '1' ? '1st' : day === '2' ? '2nd' : day === '3' ? '3rd' : day + 'th')
-const emiDayFromIso = (iso?: string | null) => (iso ? String(parseInt(iso.slice(8, 10), 10)) : '3')
-const emiDayToIso = (day: string) => `${EMI_DATE_ANCHOR_MONTH}-${day.padStart(2, '0')}`
-
-function ApproveWithDetailsModal({
-  loanId, isIns, dept, requestedAmount, approvedAmount, tenureMonths, interestRate, sanctionDetail: sd,
-  onClose, onApproved,
-}: {
-  loanId: number; isIns: boolean; dept: string
-  requestedAmount?: number; approvedAmount?: number | null; tenureMonths?: number
-  interestRate?: number; sanctionDetail?: LoanSanctionDetail
-  onClose: () => void; onApproved: () => void
-}) {
-  // ── Seeds (Vanilla openLenderApprovalModal pre-fill: app.sanction* || the
-  //    loan's own figure). React has no app.sanctionTenureYr, so years derive
-  //    from the seeded months. ────────────────────────────────────────────────
-  const seedAmt = sd?.sanctionLoanAmt ?? approvedAmount ?? requestedAmount ?? 0
-  const seedMonths = sd?.sanctionTenureMonths ?? tenureMonths ?? 0
-  const seedRoi = sd?.sanctionRoi ?? interestRate ?? 0
-
-  const [loanAmt, setLoanAmt] = useState(seedAmt ? String(seedAmt) : '')
-  const [tenureYr, setTenureYr] = useState(seedMonths ? String(+(seedMonths / 12).toFixed(2)) : '')
-  const [tenureMo, setTenureMo] = useState(seedMonths ? String(seedMonths) : '')
-  const [roi, setRoi] = useState(seedRoi ? String(seedRoi) : '')
-  const [flatStr, setFlatStr] = useState(sd?.flatRate != null ? String(sd.flatRate) : '')
-  const [flatManual, setFlatManual] = useState(sd?.flatRate != null)
-  const [pfPct, setPfPct] = useState(sd?.pfPercent != null ? String(sd.pfPercent) : '')
-  const [gst, setGst] = useState(sd?.gst ? String(sd.gst) : '18')
-  const [stamp, setStamp] = useState(sd?.stampDuty ?? 'As per government applicable')
-  const [emiManual, setEmiManual] = useState('')
-  const [emiEdited, setEmiEdited] = useState(false)
-  const [emiDay, setEmiDay] = useState(emiDayFromIso(sd?.emiDate))
-  const [insurance, setInsurance] = useState(sd?.insurance != null ? String(sd.insurance) : '')
-  const [insInBundled, setInsInBundled] = useState(!!sd?.insuranceInBundled)
-  const [pfInBundled, setPfInBundled] = useState(!!sd?.pfInBundled)
-  const [bt, setBt] = useState(sd?.isBt ? 'YES' : 'NO')
-  const [comment, setComment] = useState('')
-  const [error, setError] = useState('')
-
-  // ── Derived money math (Vanilla laAutoCalc, pure). ─────────────────────────
-  const n = (s: string) => parseFloat(s) || 0
-  const amtNum = n(loanAmt)
-  const months = parseInt(tenureMo, 10) || 0
-  const roiNum = n(roi)
-  const pfNum = n(pfPct)
-  const gstNum = gst === '' ? 18 : n(gst)
-  const insNum = n(insurance)
-  const { bundled } = computeBundledAmount({
-    amount: amtNum, pfPercent: pfNum, gstPercent: gstNum, insurance: insNum,
-    pfInBundled, insuranceInBundled: insInBundled,
-  })
-  // Flat reducing rate — auto from ROI (unless the user typed an override),
-  // recomputed on every input change exactly like laAutoCalc.
-  const autoFlat = roiNum > 0 ? flatRateFromReducing(roiNum, months) : 0
-  const flatVal = flatManual ? n(flatStr) : autoFlat
-  const flatDisplay = flatManual ? flatStr : (roiNum > 0 ? String(autoFlat) : '')
-  // EMI — auto-calculated on the bundled amount (falls back to the loan amount),
-  // editable but overwritten by the auto-calc, matching Vanilla's la-emi.
-  const emiBase = bundled > 0 ? bundled : amtNum
-  const autoEmi = emiBase > 0 && months > 0 ? Math.round(emiReducing(emiBase, roiNum, months).emi) : 0
-  const emiVal = emiEdited ? (parseInt(emiManual, 10) || 0) : autoEmi
-  const emiDisplay = emiEdited ? emiManual : (autoEmi > 0 ? String(autoEmi) : '')
-
-  const syncTenure = (which: 'yr' | 'mo', v: string) => {
-    if (which === 'yr') {
-      setTenureYr(v)
-      const yr = parseFloat(v)
-      if (!isNaN(yr) && yr > 0) setTenureMo(String(Math.round(yr * 12)))
-    } else {
-      setTenureMo(v)
-      const mo = parseFloat(v)
-      if (!isNaN(mo) && mo > 0) setTenureYr(String(+(mo / 12).toFixed(2)))
-    }
-  }
-
-  const submit = useMutation({
-    mutationFn: async () => {
-      // 1) Persist the full sanction paperwork (durable — Vanilla kept it only
-      //    in browser memory). Same endpoint/payload shape as SanctionDetailCard.
-      await loansApi.updateSanctionDetail(loanId, {
-        sanctionLoanAmt: amtNum || null,
-        sanctionTenureMonths: months || null,
-        sanctionRoi: roiNum || null,
-        sanctionEmi: emiVal || null,
-        pfPercent: pfNum,
-        gst: gstNum,
-        insurance: insNum,
-        pfInBundled,
-        insuranceInBundled: insInBundled,
-        isBundled: pfInBundled || insInBundled,
-        isBt: bt === 'YES',
-        flatRate: flatVal || null,
-        emiDate: emiDayToIso(emiDay),
-        stampDuty: stamp.trim() || null,
-      })
-      // 2) Approve — UnderReview → Approved, carrying the sanctioned Loan Amount
-      //    as the approved amount (Vanilla set app.amount = sanctionLoanAmt).
-      const remark = comment.trim() || 'Lender approval confirmed — sanction details recorded'
-      await loansApi.approve(loanId, { approvedAmount: amtNum || undefined, comment: comment.trim() || undefined })
-      // 3) EFIN-Approved Timeline entry with the full sanction sub-note
-      //    (laBuildSubNote) — routes to Sub Note (SUB_NOTE_ONLY), efin-app.js:31973.
-      const fmt = (v: number) => '₹' + Number(v).toLocaleString('en-IN')
-      const subNote = [
-        amtNum ? `Loan Amount: ${fmt(amtNum)}` : null,
-        tenureYr ? `Tenure (Years): ${tenureYr}` : null,
-        months ? `Tenure (Months): ${months}` : null,
-        emiVal ? `EMI (Calculated - Rounded): ${fmt(emiVal)}` : null,
-        flatVal ? `Flat Reducing Rate: ${flatVal}%` : null,
-        pfNum ? `Processing Fee: ${pfNum}%` : null,
-        roiNum ? `Rate of Interest (Annual): ${roiNum}%` : null,
-        bundled ? `Bundled Loan Amount: ${fmt(bundled)}` : null,
-        `Proc. Fee in Bundled: ${pfInBundled ? 'Included' : 'Excluded'}`,
-        `Insurance in Bundled: ${insInBundled ? 'Included' : 'Excluded'}`,
-        insNum ? `Insurance: ${fmt(insNum)}` : null,
-        `BT (Balance Transfer): ${bt || 'NO'}`,
-        emiDay ? `EMI Date (Every Month): ${emiDayLabel(emiDay)} of every Month` : null,
-        `Stamp Duty: ${stamp.trim() || 'As per government applicable'}`,
-        `GST Applicable: ${gstNum || 18}%`,
-      ].filter((v): v is string => v !== null).join('\n')
-      await api.post(`/api/loans/${loanId}/tracking`, {
-        name: 'EFIN-Approved', stage: dept, assignedUser: '',
-        status: 'COMPLETE', comment: remark, subNote,
-      })
-    },
-    onSuccess: () => { onApproved(); onClose() },
-    onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
-      setError(d?.message || d?.errors?.join(' ') || 'That approval could not be completed.')
-    },
-  })
-
-  function confirm() {
-    if (!amtNum) { setError(isIns ? 'Please enter the Sum Assured / Coverage' : 'Please enter the sanctioned Loan Amount'); return }
-    setError('')
-    submit.mutate()
-  }
-
-  const labelCls = 'block text-[11.5px] font-semibold text-[color:var(--text3)] mb-1'
-  const previewOn = amtNum > 0 || emiVal > 0
-
-  const Toggle = ({ on, onLabel, offLabel, onClick }: { on: boolean; onLabel: string; offLabel: string; onClick: () => void }) => (
-    <button type="button" onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold whitespace-nowrap transition-colors"
-      style={{
-        background: on ? 'rgba(10,88,154,.11)' : 'rgba(122,138,170,.10)',
-        borderColor: on ? 'rgba(10,88,154,.35)' : 'rgba(122,138,170,.3)',
-        color: on ? 'var(--accent)' : 'var(--text3, #7a8aaa)',
-      }}>
-      <span className="inline-block h-[7px] w-[7px] rounded-full" style={{ background: on ? 'var(--accent)' : 'var(--text3, #7a8aaa)' }} />
-      {on ? onLabel : offLabel}
-    </button>
-  )
-
-  return (
-    <Modal open onClose={onClose} size="xl"
-      title={isIns ? '🛡️ Insurance Policy Approval' : '✅ Approve with Details'}
-      subtitle={isIns ? 'Enter the approved policy details before confirming issuance' : 'Fill in the sanctioned offer before confirming approval'}
-      footer={<>
-        <Button size="sm" variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button size="sm" variant="success" loading={submit.isPending} onClick={confirm}>
-          <CheckCircle2 size={14} className="mr-1" />{isIns ? 'Confirm Issuance' : 'Confirm Approval'}
-        </Button>
-      </>}>
-      {error && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
-
-      {/* Sanctioned Loan Terms */}
-      <div className="text-[10.5px] font-bold uppercase tracking-[0.06em] text-[color:var(--accent)] mb-2">📋 {isIns ? 'Sanctioned Policy Terms' : 'Sanctioned Loan Terms'}</div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div>
-          <label className={labelCls}>{isIns ? 'Sum Assured / Coverage (₹) *' : 'Your Loan Amount (₹) *'}</label>
-          <NumberInput value={loanAmt} onChange={e => setLoanAmt(e.target.value)} className="efin-input" placeholder="e.g. 600000" />
-        </div>
-        <div>
-          <label className={labelCls}>{isIns ? 'Policy Term (Years)' : 'Tenure (Years)'}</label>
-          <NumberInput value={tenureYr} onChange={e => syncTenure('yr', e.target.value)} className="efin-input" placeholder="e.g. 5" />
-        </div>
-        <div>
-          <label className={labelCls}>{isIns ? 'Policy Term (Months)' : 'Tenure (Months)'}</label>
-          <NumberInput value={tenureMo} onChange={e => syncTenure('mo', e.target.value)} className="efin-input" placeholder="e.g. 60" />
-        </div>
-      </div>
-
-      {/* Rate & Charges */}
-      <div className="text-[10.5px] font-bold uppercase tracking-[0.06em] text-[color:var(--accent)] mt-4 mb-2">📊 Rate &amp; Charges</div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div>
-          <label className={labelCls}>{isIns ? 'Premium Rate / Return (%)' : 'Rate of Interest — Annual (%)'}</label>
-          <NumberInput step="0.01" value={roi} onChange={e => setRoi(e.target.value)} className="efin-input" placeholder="e.g. 12.50" />
-        </div>
-        <div>
-          <label className={labelCls}>Flat Reducing Rate (%)</label>
-          <NumberInput step="0.01" value={flatDisplay}
-            onChange={e => { const v = e.target.value; setFlatManual(v.trim() !== ''); setFlatStr(v) }}
-            className="efin-input" placeholder="Auto from ROI" />
-          <p className="mt-0.5 text-[10px] italic text-[color:var(--text3)]">
-            {flatManual ? 'Manual — clear to auto-calculate' : roiNum > 0 ? `Auto-calculated from ROI ${roiNum}%` : 'Enter ROI to auto-calculate'}
-          </p>
-        </div>
-        <div>
-          <div className="mb-1 flex items-center justify-between gap-1">
-            <label className="text-[11.5px] font-semibold text-[color:var(--text3)]">Processing Fee (%)</label>
-            <Toggle on={pfInBundled} onLabel="+ Add to Bundled: ON" offLabel="+ Add to Bundled: OFF" onClick={() => setPfInBundled(v => !v)} />
-          </div>
-          <NumberInput step="0.01" value={pfPct} onChange={e => setPfPct(e.target.value)} className="efin-input" placeholder="e.g. 1.50" />
-        </div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-        <div>
-          <label className={labelCls}>GST Applicable (%)</label>
-          <NumberInput step="0.01" value={gst} onChange={e => setGst(e.target.value)} className="efin-input" placeholder="18" />
-        </div>
-        <div>
-          <label className={labelCls}>Stamp Duty</label>
-          <input type="text" value={stamp} onChange={e => setStamp(e.target.value)} className="efin-input" placeholder="As per government applicable" />
-        </div>
-      </div>
-
-      {/* EMI & Bundled */}
-      <div className="text-[10.5px] font-bold uppercase tracking-[0.06em] text-[color:var(--accent)] mt-4 mb-2">🧮 {isIns ? 'Premium & Bundled Details' : 'EMI & Bundled Details'}</div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div>
-          <label className={labelCls}>{isIns ? 'Annual Premium (₹)' : 'EMI (Calculated — Rounded) ₹'}</label>
-          <NumberInput value={emiDisplay}
-            onChange={e => { const v = e.target.value; setEmiEdited(v.trim() !== ''); setEmiManual(v) }}
-            className="efin-input" placeholder="Auto-calculated" />
-        </div>
-        <div>
-          <label className={labelCls}>EMI Date (Every Month)</label>
-          <select value={emiDay} onChange={e => setEmiDay(e.target.value)} className="efin-input">
-            {EMI_DATE_DAYS.map(d => <option key={d} value={String(d)}>{emiDateOptionLabel(d)}</option>)}
-          </select>
-        </div>
-        <div>
-          <div className="mb-1 flex items-center justify-between gap-1">
-            <label className="text-[11.5px] font-semibold text-[color:var(--text3)]">Insurance Amount (₹)</label>
-            <Toggle on={insInBundled} onLabel="+ Insurance: ON" offLabel="+ Insurance: OFF" onClick={() => setInsInBundled(v => !v)} />
-          </div>
-          <NumberInput value={insurance} onChange={e => setInsurance(e.target.value)} className="efin-input" placeholder="e.g. 10699" />
-        </div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-        <div>
-          <label className={labelCls}>{isIns ? 'Total Premium Payable (₹)' : 'Bundled Loan Amount (₹)'}</label>
-          <NumberInput value={bundled || ''} readOnly disabled className="efin-input" placeholder="Auto-calculated" />
-        </div>
-        <div>
-          <label className={labelCls}>BT (Balance Transfer)</label>
-          <select value={bt} onChange={e => setBt(e.target.value)} className="efin-input">
-            <option value="NO">NO</option>
-            <option value="YES">YES</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Live preview strip */}
-      {previewOn && (
-        <div className="mt-4 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface2)] px-4 py-3 flex flex-wrap gap-x-8 gap-y-2">
-          {[
-            [isIns ? 'Sum Assured' : 'Loan Amount', amtNum ? '₹' + amtNum.toLocaleString('en-IN') : '—'],
-            [isIns ? 'Policy Term' : 'Tenure', months ? months + ' months' : '—'],
-            [isIns ? 'Rate / Return' : 'ROI (Annual)', roiNum ? roiNum + '%' : '—'],
-            [isIns ? 'Premium' : 'EMI', emiVal ? '₹' + emiVal.toLocaleString('en-IN') : '—'],
-            [isIns ? 'Total Payable' : 'Bundled Amt', bundled ? '₹' + bundled.toLocaleString('en-IN') : '—'],
-          ].map(([k, v]) => (
-            <div key={k} className="flex flex-col">
-              <span className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[color:var(--text3)]">{k}</span>
-              <span className="text-[13px] font-extrabold text-[color:var(--accent)]">{v}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Approval remark (Timeline) */}
-      <div className="text-[10.5px] font-bold uppercase tracking-[0.06em] text-[color:var(--accent)] mt-4 mb-2">💬 Approval Remark (Timeline)</div>
-      <input type="text" value={comment} onChange={e => setComment(e.target.value)} className="efin-input"
-        placeholder="e.g. Credit approved by lender — all documents verified" />
-    </Modal>
-  )
-}
-
 // ── Host card ──────────────────────────────────────────────────────────────
 // The Timeline's single `.tracking-actions` bar (efin-app.js:3213-3256). It
-// renders BOTH the CPA/task check actions AND the workflow actions Vanilla's
-// buildTimelineActionButtons produces (Underwriting / Approve / Disburse /
-// Deviation / Skip / Approved-Deviation), so the bar matches Vanilla 1:1.
+// renders the CPA/task check actions and the Underwriting move. Approve with
+// Details / Deviation / Skip / Approved Deviation / Disburse now live in the
+// Offers tab (lender-specific offers → deviation → credit approval → sanction
+// → disbursement); the bar shows a single "Offers & Approval" link instead.
 type OpenModal =
   | 'documents' | 'income' | 'bank' | 'ecs' | 'deal' | 'fi' | 'nach' | 'agreement'
-  | 'underwriting' | 'approve' | 'disburse' | 'deviation' | 'skip' | 'approveddev' | null
+  | 'underwriting' | null
 
 export default function LoanVerificationChecks({
   loanId, customerId, customerName, customerEmail, employmentType, loanStatus, loanType,
-  canChangeStatus, canDisburse, canDeviation,
-  requestedAmount, approvedAmount, tenureMonths, interestRate, sanctionDetail,
+  canChangeStatus, onOpenOffers,
   documentChecked, incomeChecked, bankChecked, ecsReturn, fiReportChecked, nachDone, customerAgreementDone,
 }: CheckProps) {
   const canPost = useHasPermission('canPostTracking')
   const dept = useCurrentUserDept()
   const qc = useQueryClient()
   const [open, setOpen] = useState<OpenModal>(null)
-  // Workflow-modal inputs (comment, deviation reason). The Approve modal
-  // (ApproveWithDetailsModal) owns its own rich sanction-form state.
+  // Underwriting-modal inputs.
   const [wfComment, setWfComment] = useState('')
-  const [reason, setReason] = useState('')
   const [wfError, setWfError] = useState('')
   // Latest FI-report result — lets the FI button re-appear after a Negative/
   // Pending outcome even once posted (legacy buildTimelineActionButtons:
@@ -1114,34 +799,24 @@ export default function LoanVerificationChecks({
     queryFn: () => api.get<{ data: { name: string; subNote?: string }[] }>(`/api/loans/${loanId}/tracking`).then(r => r.data.data ?? []),
     enabled: loanId > 0,
   })
-  // Deviation flags — used to auto-fill the deviation type when raising, exactly
-  // like Vanilla (single flag's type, else "Multiple Deviations").
   const acts = TIMELINE_ACTIONS[loanType ?? ''] ?? TIMELINE_ACTIONS.Personal
-  // NOTE: Vanilla raises/skips Deviation at app.status === 'approved' (i.e.
-  // AFTER Approve with Details — efin-app.js:27441-27445). This backend was
-  // deliberately restructured (LoanService.RaiseDeviationAsync /
-  // SkipDeviationAsync both hard-require LoanStatus.UnderReview and 400 on
-  // any other status) so deviation is raised BEFORE Approve with Details
-  // instead. The gate below must match the backend's enforced precondition,
-  // not Vanilla's literal stage name, or the button would show and then
-  // fail on click. Confirmed by reading LoanService.cs directly — do not
-  // "fix" this back to 'Approved' without also changing the backend.
-  const wantDeviation = acts.includes('deviation') && !!canDeviation && loanStatus === 'UnderReview'
-  const { data: devFlags } = useQuery({
-    queryKey: ['loan-deviations', loanId],
-    queryFn: () => loansApi.getDeviations(loanId).then(r => r.data.data ?? []),
-    enabled: wantDeviation && loanId > 0,
-    staleTime: 60_000,
+  // Deal confirmation sends the sanctioned terms, so it needs an active
+  // sanction (the backend refuses Approved → Acceptance without one). Shares
+  // the Offers tab's workflow cache.
+  const { data: workflow } = useQuery({
+    queryKey: workflowKey(loanId),
+    queryFn: () => offerWorkflowApi.get(loanId).then(r => r.data.data ?? null),
+    enabled: loanId > 0 && loanStatus === 'Approved',
   })
-  const derivedDevType = devFlags && devFlags.length === 1 ? devFlags[0].type : devFlags && devFlags.length > 1 ? 'Multiple Deviations' : 'Manual Deviation'
+  const hasActiveSanction = !!workflow?.sanctions.some(s => s.status === 'Active')
 
   const invalidateWf = () => {
     qc.invalidateQueries({ queryKey: ['tracking', loanId] })
     qc.invalidateQueries({ queryKey: LOAN_KEYS.detail(loanId) })
     qc.invalidateQueries({ queryKey: ['loans'] })
-    qc.invalidateQueries({ queryKey: ['loan-deviations', loanId] })
+    qc.invalidateQueries({ queryKey: workflowKey(loanId) })
   }
-  const closeWf = () => { setOpen(null); setWfComment(''); setReason(''); setWfError('') }
+  const closeWf = () => { setOpen(null); setWfComment(''); setWfError('') }
   const onWfErr = (e: unknown) => {
     const d = (e as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data
     setWfError(d?.message || d?.errors?.join(' ') || 'That action could not be completed.')
@@ -1155,49 +830,15 @@ export default function LoanVerificationChecks({
   // through the same POST /api/loans/{id}/tracking the check actions use.
   const postWfEntry = (name: string, comment: string, subNote: string, stage: string = dept) =>
     api.post(`/api/loans/${loanId}/tracking`, { name, stage, assignedUser: '', status: 'COMPLETE', comment, subNote })
-  // Reuse the existing loansApi endpoints — no new backend. Underwriting = move to UnderReview (Vanilla
-  // login→underwriting); Approve with Details = loansApi.approve; Disburse =
-  // loansApi.disburse; deviation raise/skip/decide = the deviation endpoints.
-  // Each also writes the Vanilla Timeline entry after the transition succeeds.
+  // Underwriting = move to UnderReview (Vanilla login→underwriting), then the
+  // Vanilla Timeline entry. Offer-chain transitions write their own Timeline
+  // entries server-side (OfferWorkflowService).
   const mUnderwriting = useMutation({
     mutationFn: async () => {
       await loansApi.updateStatus(loanId, { newStatus: 'UnderReview', comment: wfComment || undefined })
       await postWfEntry('EFIN-Underwriting', wfComment.trim() || 'Move', ' ')
     }, ...wfOpts,
   })
-  // Approve with Details is handled by ApproveWithDetailsModal (rich sanction
-  // form) — it owns its own approve + sanction-detail + EFIN-Approved posting.
-  const mDisburse = useMutation({
-    mutationFn: async () => {
-      await loansApi.disburse(loanId)
-      await postWfEntry('EFIN-Disbursed', 'Loan disbursed — funds transferred successfully', 'Loan disbursed — funds transferred successfully')
-      await postWfEntry('EFIN-Disbursed', 'Disbursement Done', ' ', 'System Comments')
-      await postWfEntry('EFIN-Disbursed', 'Work Flow Completed', ' ', 'System Comments')
-    }, ...wfOpts,
-  })
-  const mRaiseDev = useMutation({
-    mutationFn: async () => {
-      await loansApi.raiseDeviation(loanId, derivedDevType, reason)
-      // EFIN-Deviation routes to Comment (COMMENT_ONLY) — Vanilla posts the
-      // type + reason block there (efin-app.js:32128-32129).
-      await postWfEntry('EFIN-Deviation', `Deviation Type: ${derivedDevType}\nDeviation Reason: ${reason}`, '')
-    }, ...wfOpts,
-  })
-  const mSkipDev = useMutation({
-    mutationFn: async () => {
-      await loansApi.skipDeviation(loanId, reason || undefined)
-      // EFIN- SKIP Deviation routes to Sub Note (SUB_NOTE_ONLY) — efin-app.js:32150.
-      await postWfEntry('EFIN- SKIP Deviation', 'Deviation skipped', reason.trim() || ' ')
-    }, ...wfOpts,
-  })
-  const mApproveDev = useMutation({
-    mutationFn: async () => {
-      await loansApi.decideDeviation(loanId, true, wfComment || undefined)
-      // EFIN-Approved Deviation routes to Sub Note (SUB_NOTE_ONLY) — efin-app.js:32374.
-      await postWfEntry('EFIN-Approved Deviation', 'Deviation approved — proceeding to Sanction Stage', wfComment.trim() || 'Deviation approved — proceeding to Sanction Stage')
-    }, ...wfOpts,
-  })
-
   // Final-stage lock — legacy shows no action buttons on terminal loans
   // (isAppFinalLocked, efin-app.js:3218). Manual comments still go through the
   // Timeline's "Manual Comment" button (admin-only there, matching legacy).
@@ -1233,7 +874,7 @@ export default function LoanVerificationChecks({
   const showFi         = canPost && acts.includes('fi_report') && fiStage && (!fiReportChecked || fiNegOrPending)
   const showNach       = canPost && acts.includes('nach') && loanStatus === 'Acceptance' && !nachDone
   const showAgreement  = canPost && loanStatus === 'Acceptance' && !customerAgreementDone
-  const showDealConfirm = canPost && loanStatus === 'Approved'
+  const showDealConfirm = canPost && loanStatus === 'Approved' && hasActiveSanction
 
   // Workflow actions — Vanilla buildTimelineActionButtons, gated on
   // wf.timelineActions + status + the matching role permission. Insurance uses
@@ -1242,15 +883,11 @@ export default function LoanVerificationChecks({
   // approve (at underwriting); disburse_ins of disburse. Fold them in so the
   // same buttons render for insurance, relabelled below.
   const showUnderwriting = (acts.includes('underwriting') || acts.includes('approve_ins')) && loanStatus === 'Submitted' && !!canChangeStatus
-  const showApprove = (acts.includes('approve') || acts.includes('approve_ins')) && loanStatus === 'UnderReview' && !!canChangeStatus
-  // Disburse only once NACH + Customer Agreement are done, like Vanilla
-  // (nach_done && customer_agreement_done — efin-app.js:27442).
-  const showDisburse = (acts.includes('disburse') || acts.includes('disburse_ins')) && ['Approved', 'Acceptance'].includes(loanStatus) && !!canDisburse && !!nachDone && !!customerAgreementDone
-  const showDeviation = wantDeviation // raise/skip at UnderReview — see note above on wantDeviation
-  const showApprovedDeviation = acts.includes('deviation') && !!canDeviation && loanStatus === 'Decision'
-
+  // Offers / deviation / credit approval / sanction / disbursement: one link
+  // into the Offers tab, from Underwriting onwards (and Approved/Acceptance).
+  const showOffers = !!onOpenOffers && ['UnderReview', 'Offer', 'Decision', 'Approved', 'Acceptance'].includes(loanStatus)
   const anyCheck = showDocuments || showFi || showIncome || showBank || showEcs || showNach || showAgreement || showDealConfirm
-  const anyWorkflow = showUnderwriting || showApprove || showDisburse || showDeviation || showApprovedDeviation
+  const anyWorkflow = showUnderwriting || showOffers
   // Nothing to do → no empty "Actions:" bar (legacy renders no buttons).
   if (!anyCheck && !anyWorkflow) return null
 
@@ -1266,12 +903,8 @@ export default function LoanVerificationChecks({
         {/* Workflow actions (Vanilla buildTimelineActionButtons order). */}
         {showFi && <Button size="sm" variant="danger" onClick={() => setOpen('fi')}><FileSearch size={14} className="mr-1" />EFIN FI Report</Button>}
         {showUnderwriting && <Button size="sm" onClick={() => setOpen('underwriting')}><Search size={14} className="mr-1" />{isIns ? 'Verify Insurance' : 'Underwriting'}</Button>}
-        {showApprove && <Button size="sm" onClick={() => setOpen('approve')}><CheckCircle2 size={14} className="mr-1" />{isIns ? 'Approve Policy' : 'Approve with Details'}</Button>}
-        {showDeviation && <Button size="sm" variant="danger" onClick={() => setOpen('deviation')}><AlertTriangle size={14} className="mr-1" />Deviation</Button>}
-        {showDeviation && <Button size="sm" variant="secondary" onClick={() => setOpen('skip')}><SkipForward size={14} className="mr-1" />Skip Deviation</Button>}
-        {showApprovedDeviation && <Button size="sm" variant="success" onClick={() => setOpen('approveddev')}><CheckCircle2 size={14} className="mr-1" />Approved Deviation</Button>}
+        {showOffers && <Button size="sm" onClick={onOpenOffers}><FileSignature size={14} className="mr-1" />Offers &amp; Approval</Button>}
         {showNach && <Button size="sm" variant="danger" onClick={() => setOpen('nach')}><Repeat size={14} className="mr-1" />NACH</Button>}
-        {showDisburse && <Button size="sm" variant="success" onClick={() => setOpen('disburse')}><BadgeIndianRupee size={14} className="mr-1" />{isIns ? 'Issue Policy' : 'Disburse'}</Button>}
         {/* Stage / CPA check actions. */}
         {showDocuments && <Button size="sm" variant="secondary" onClick={() => setOpen('documents')}><FileCheck size={14} className="mr-1" />Documents Check</Button>}
         {showIncome && <Button size="sm" variant="secondary" onClick={() => setOpen('income')}><Wallet size={14} className="mr-1" />Income Check</Button>}
@@ -1298,47 +931,6 @@ export default function LoanVerificationChecks({
           {wfError && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{wfError}</div>}
           <label className="block text-xs font-medium text-[color:var(--text2)] mb-1">Comment (optional)</label>
           <textarea value={wfComment} onChange={e => setWfComment(e.target.value)} rows={2} className="efin-input" placeholder="Reason / remark" />
-        </Modal>
-      )}
-      {open === 'approve' && (
-        <ApproveWithDetailsModal
-          loanId={loanId} isIns={isIns} dept={dept}
-          requestedAmount={requestedAmount} approvedAmount={approvedAmount}
-          tenureMonths={tenureMonths} interestRate={interestRate}
-          sanctionDetail={sanctionDetail}
-          onClose={closeWf}
-          onApproved={invalidateWf}
-        />
-      )}
-      {open === 'disburse' && (
-        <Modal open onClose={closeWf} title={isIns ? 'Issue Policy' : 'Disburse Loan'} subtitle={isIns ? 'Confirm issuance of this insurance policy' : 'Confirm disbursement of this application'} size="sm"
-          footer={<><Button size="sm" variant="secondary" onClick={closeWf}>Cancel</Button><Button size="sm" variant="success" loading={mDisburse.isPending} onClick={() => mDisburse.mutate()}><BadgeIndianRupee size={14} className="mr-1" />{isIns ? 'Issue Policy' : 'Disburse'}</Button></>}>
-          {wfError && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{wfError}</div>}
-          <p className="text-sm text-[color:var(--text2)]">NACH mandate and Customer Agreement are complete. Confirm to disburse this loan.</p>
-        </Modal>
-      )}
-      {open === 'deviation' && (
-        <Modal open onClose={closeWf} title="Raise Deviation" subtitle={`Deviation type: ${derivedDevType}`} size="md"
-          footer={<><Button size="sm" variant="secondary" onClick={closeWf}>Cancel</Button><Button size="sm" variant="danger" loading={mRaiseDev.isPending} disabled={!reason.trim()} onClick={() => mRaiseDev.mutate()}><AlertTriangle size={14} className="mr-1" />Raise Deviation</Button></>}>
-          {wfError && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{wfError}</div>}
-          <label className="block text-xs font-medium text-[color:var(--text2)] mb-1">Deviation reason *</label>
-          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="efin-input" placeholder="Why this application deviates from standard policy" />
-        </Modal>
-      )}
-      {open === 'skip' && (
-        <Modal open onClose={closeWf} title="Skip Deviation" subtitle="Proceed without raising a deviation" size="sm"
-          footer={<><Button size="sm" variant="secondary" onClick={closeWf}>Cancel</Button><Button size="sm" loading={mSkipDev.isPending} onClick={() => mSkipDev.mutate()}><SkipForward size={14} className="mr-1" />Skip Deviation</Button></>}>
-          {wfError && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{wfError}</div>}
-          <label className="block text-xs font-medium text-[color:var(--text2)] mb-1">Reason (optional)</label>
-          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2} className="efin-input" placeholder="Note for the record" />
-        </Modal>
-      )}
-      {open === 'approveddev' && (
-        <Modal open onClose={closeWf} title="Approved Deviation" subtitle="Approve the raised deviation" size="sm"
-          footer={<><Button size="sm" variant="secondary" onClick={closeWf}>Cancel</Button><Button size="sm" variant="success" loading={mApproveDev.isPending} onClick={() => mApproveDev.mutate()}><CheckCircle2 size={14} className="mr-1" />Approve Deviation</Button></>}>
-          {wfError && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{wfError}</div>}
-          <label className="block text-xs font-medium text-[color:var(--text2)] mb-1">Decision comment (optional)</label>
-          <textarea value={wfComment} onChange={e => setWfComment(e.target.value)} rows={2} className="efin-input" placeholder="Note for the record" />
         </Modal>
       )}
     </Card>

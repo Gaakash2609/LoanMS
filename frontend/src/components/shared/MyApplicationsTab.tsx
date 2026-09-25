@@ -27,7 +27,7 @@ import type { LoanListItem, LoanStatus } from '@/types'
 // Those come from one GET /api/tasks grouped by loanId, not a call per row.
 
 const STATUSES: LoanStatus[] = [
-  'Draft', 'Submitted', 'UnderReview', 'Approved', 'Rejected', 'Disbursed', 'Closed',
+  'Draft', 'Submitted', 'UnderReview', 'Offer', 'Approved', 'Rejected', 'Disbursed', 'Closed',
 ] as LoanStatus[]
 
 const PRIORITY_CHIP: Record<string, string> = {
