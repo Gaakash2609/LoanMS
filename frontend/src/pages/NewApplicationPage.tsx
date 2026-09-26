@@ -1031,27 +1031,12 @@ export default function NewApplicationPage() {
           }
         }
 
-        // Persist the banks picked on Step 9's eligibility matcher as the
-        // loan's bank lines (which lenders this application goes to) via
-        // the existing PUT /api/loans/{id}/bank-lines — whole-set replace.
-        // Best-effort, same as documents above: the application itself is
-        // already created, so a failure here is a warning, not a rollback.
-        if (selectedBanks.length) {
-          try {
-            await loansApi.updateBankLines(result.loanId, selectedBanks.map(b => ({
-              bankName: b.bankName,
-              // No temp application number exists yet at origination — the
-              // Lender Details tab fills it in once the case is logged in
-              // with the bank.
-              tempApplicationNumber: '',
-              remarks: 'Selected from eligibility match at origination',
-            })))
-          } catch {
-            setDocUploadWarning(prev => prev ||
-              'Application submitted, but the selected banks could not be saved. ' +
-              'You can set them from the Lender Details tab.')
-          }
-        }
+        // Step 9's selected banks are NOT re-sent here: the submit request
+        // carries them (payload.selectedBanks) and the server writes them as
+        // the loan's bank lines inside the same transaction. The second
+        // PUT /bank-lines that used to follow was a duplicate which the
+        // application's own creators (BDE / DSA / Partner — no canAddBank)
+        // were refused, showing a false "banks could not be saved" warning.
       }
 
       return res

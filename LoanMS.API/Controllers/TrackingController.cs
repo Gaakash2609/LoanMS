@@ -49,6 +49,25 @@ public class TrackingController : BaseController
             CreatedByUserId = CurrentUserId, CreatedAt = DateTime.UtcNow
         };
         _db.TrackingEntries.Add(entry);
+
+        // A completed verification check (Documents / Bank / ECS / FI / NACH /
+        // Customer Agreement) sets its Overview flag here, in the same save as
+        // the Timeline row — the server records "done", not a second browser
+        // call (which the Sales Executive, who does the CPA checks in Vanilla,
+        // was refused, leaving checks half-recorded). Outside the check's stage
+        // window, or on a held / closed application, the row is kept as a note
+        // and no flag changes.
+        var check = LoanMS.Application.Services.VerificationChecks.ForEntry(entry.Name);
+        if (check != null && string.Equals(entry.Status, "COMPLETE", StringComparison.OrdinalIgnoreCase))
+        {
+            var loan = await _db.Loans.FirstOrDefaultAsync(l => l.Id == loanId);
+            if (loan != null && check.Stages.Contains(loan.Status) && !check.Get(loan))
+            {
+                check.Set(loan, true);
+                loan.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<object>.Ok(new { entry.Id }, "Tracking entry added."));
     }

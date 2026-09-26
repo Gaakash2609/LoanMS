@@ -12,8 +12,14 @@ export const LOAN_KEYS = {
   all:       ['loans'] as const,
   list:      (filter: LoanFilter) => ['loans', 'list', filter] as const,
   // userId included so switching accounts never serves one user's role-filtered
-  // loan detail to another user in the same browser session.
-  detail:    (id: number, userId?: number) => ['loans', 'detail', id, userId ?? 0] as const,
+  // loan detail to another user in the same browser session. Called WITHOUT a
+  // userId — as every mutation's invalidateQueries does — it returns the
+  // per-loan prefix, which matches the cached entry of whoever is signed in.
+  // (It used to fill in `userId ?? 0`, a key no cached query had, so those
+  // invalidations never refreshed the open application: e.g. a recorded
+  // Documents check kept its button and ⏳ badge until a manual reload.)
+  detail:    (id: number, userId?: number): readonly (string | number)[] =>
+    userId === undefined ? ['loans', 'detail', id] : ['loans', 'detail', id, userId],
   dashboard: ['loans', 'dashboard'] as const,
 }
 

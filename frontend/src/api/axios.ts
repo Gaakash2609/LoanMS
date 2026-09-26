@@ -37,7 +37,8 @@ let failedQueue: Array<{ resolve: (v: string) => void; reject: (e: unknown) => v
 const processQueue = (error: unknown, token: string | null = null) => {
   failedQueue.forEach(({ resolve, reject }) => {
     if (error) reject(error)
-    else resolve(token!)
+    // A null error always comes with the refreshed token (processQueue(null, newToken)).
+    else resolve(token as string)
   })
   failedQueue = []
 }

@@ -2,7 +2,7 @@ import api from './axios'
 import type { ApiResponse } from '@/types'
 
 export interface ReportData {
-  loans?: any
+  loans?: unknown
   loansByType: Array<{ loanType: string; count: number; totalAmount: number }>
   loansByStatus: Array<{ status: string; count: number }>
   monthlyDisbursements: Array<{ month: string; count: number; amount: number }>

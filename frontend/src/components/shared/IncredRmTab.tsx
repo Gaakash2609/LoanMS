@@ -45,7 +45,7 @@ function RmFormModal({
     // Returns void so both branches share one type — create resolves to
     // { id }, update to boolean, and neither result is used here.
     mutationFn: async (payload: IncredRmUpsertRequest) => {
-      if (isEdit) await incredRmApi.update(rm!.id, payload)
+      if (rm) await incredRmApi.update(rm.id, payload)
       else await incredRmApi.create(payload)
     },
     onSuccess: () => onSaved(),

@@ -138,6 +138,11 @@ public class DupReapplyArchiveIntegrationTests
     {
         LoanId = loanId, FullName = name, Mobile = mobile, Email = email, Pan = pan,
         Amount = 250000, LoanType = "personal_loan", LoanRate = 12, Tenure = 24, SalesPerson = SalesName,
+        // Final-submit completeness (Vanilla validateStep 1/3/7/9) — WizardController.
+        LocationId = LocA, Dob = "1990-01-01", Gender = "Male", Aadhar = "123412341234",
+        R1Name = "Ref One", R1Mobile = "9000000001", R1Relation = "Friend",
+        R2Name = "Ref Two", R2Mobile = "9000000002", R2Relation = "Colleague",
+        SelectedBanks = new() { new BankLineItemDto { BankName = "HDFC Bank" } },
     };
 
     private static ApiResponseDto<T> Body<T>(IActionResult r) => (ApiResponseDto<T>)((ObjectResult)r).Value!;
@@ -167,7 +172,7 @@ public class DupReapplyArchiveIntegrationTests
         var c = await SeedCustomer(env, null, "+91 98765-43210", "legacy@x.test");
         await SeedLoan(env, c.Id, LoanStatus.Submitted);
 
-        var r = await env.Wizard(SalesId, "Sales").Submit(Dto(null, "9876543210", "someone@x.test"));
+        var r = await env.Wizard(SalesId, "Sales").Submit(Dto("PQRST5678U", "9876543210", "someone@x.test"));
 
         r.Should().BeOfType<ConflictObjectResult>();
         Body<WizardSubmitResponseDto>(r).ErrorCode.Should().Be(ApiErrorCodes.ActiveApplicationExists);

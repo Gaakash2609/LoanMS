@@ -731,6 +731,21 @@ public class OfferWorkflowServiceTests
         (await env.Loans.UpdateStatusAsync(loan.Id, new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Acceptance }, Admin, "Admin"))
             .Message.Should().Contain("sanction");
         await env.Svc.GenerateSanctionAsync(loan.Id, null, C("LoginTeam"));
+        // Deal confirmation also needs a completed FI report with no Negative /
+        // Pending address (Vanilla _dcFinaliseAcceptance) — server-enforced now.
+        (await env.Loans.UpdateStatusAsync(loan.Id, new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Acceptance }, Admin, "Admin"))
+            .Message.Should().Contain("FI Report");
+        env.Db.TrackingEntries.Add(new TrackingEntry { LoanId = loan.Id, Name = "EFIN- FI report", Stage = "Credit Evaluation Officer", AssignedUser = "",
+            Status = "COMPLETE", SubNote = "Final Resi Address - Positive\nFinal Office Address - Pending", CreatedByUserId = Admin, CreatedAt = DateTime.UtcNow.AddMinutes(-2) });
+        // The follow-up system note shares the name but has no result lines — it must not hide the Pending result.
+        env.Db.TrackingEntries.Add(new TrackingEntry { LoanId = loan.Id, Name = "EFIN- FI report", Stage = "System Comments", AssignedUser = "",
+            Status = "COMPLETE", SubNote = "", CreatedByUserId = Admin, CreatedAt = DateTime.UtcNow.AddMinutes(-1) });
+        await env.Db.SaveChangesAsync();
+        (await env.Loans.UpdateStatusAsync(loan.Id, new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Acceptance }, Admin, "Admin"))
+            .Message.Should().Contain("Negative or Pending");
+        env.Db.TrackingEntries.Add(new TrackingEntry { LoanId = loan.Id, Name = "EFIN- FI report", Stage = "Credit Evaluation Officer", AssignedUser = "",
+            Status = "COMPLETE", SubNote = "Final Resi Address - Positive\nFinal Office Address - Positive", CreatedByUserId = Admin, CreatedAt = DateTime.UtcNow });
+        await env.Db.SaveChangesAsync();
         (await env.Loans.UpdateStatusAsync(loan.Id, new UpdateLoanStatusRequestDto { NewStatus = LoanStatus.Acceptance }, Admin, "Admin")).Success.Should().BeTrue();
         (await env.Loans.OverrideStatusAsync(loan.Id, LoanStatus.UnderReview, "force", Admin, "Admin")).Success.Should().BeFalse("an active sanction may not be stranded");
     }

@@ -23,4 +23,10 @@ public interface IOfferWorkflowHooks
     Task OnApplicationHeldAsync(int loanId, string? reason);
     /// <summary>Un-hold: resume the paused tasks.</summary>
     Task OnApplicationUnheldAsync(int loanId);
+    /// <summary>True when a (non-deleted) Timeline entry with exactly this name exists
+    /// on the loan — the recorded check behind an Overview verification flag.</summary>
+    Task<bool> HasTimelineEntryAsync(int loanId, string entryName);
+    /// <summary>Vanilla _dcFinaliseAcceptance: null when the latest recorded FI report
+    /// has neither address Negative nor Pending; otherwise the blocking message.</summary>
+    Task<string?> AcceptanceFiBlockerAsync(int loanId);
 }

@@ -1401,6 +1401,32 @@ public sealed class OfferWorkflowService : IOfferWorkflowService
     public Task<bool> HasCompletedDisbursementAsync(int loanId) =>
         _db.Disbursements.AnyAsync(d => d.LoanId == loanId && d.Type == S.TypeDisbursement && d.Status == S.DisbursementCompleted);
 
+    public Task<bool> HasTimelineEntryAsync(int loanId, string entryName) =>
+        _db.TrackingEntries.AnyAsync(t => t.LoanId == loanId && t.Name == entryName);
+
+    public async Task<string?> AcceptanceFiBlockerAsync(int loanId)
+    {
+        // Only entries carrying the result lines are the FI report; the system
+        // follow-up note shares the name "EFIN- FI report" but has no results, so
+        // "latest entry" must mean the latest REPORT (else a Pending FI slipped
+        // through behind its own follow-up note).
+        var subNotes = await _db.TrackingEntries
+            .Where(t => t.LoanId == loanId && t.Name == LoanMS.Application.Services.VerificationChecks.FiReport.EntryName)
+            .OrderByDescending(t => t.CreatedAt).ThenByDescending(t => t.Id)
+            .Select(t => t.SubNote).ToListAsync();
+        foreach (var note in subNotes)
+        {
+            var (resi, office) = LoanMS.Application.Services.VerificationChecks.ParseFiResult(note);
+            if (resi == null && office == null) continue;
+            static bool Bad(string? r) => string.Equals(r, "Negative", StringComparison.OrdinalIgnoreCase)
+                                       || string.Equals(r, "Pending", StringComparison.OrdinalIgnoreCase);
+            return Bad(resi) || Bad(office)
+                ? "Cannot move to Acceptance — EFIN FI Report results must not be Negative or Pending."
+                : null;
+        }
+        return "Cannot move to Acceptance — EFIN FI Report must be completed first.";
+    }
+
     public async Task OnApplicationRejectedAsync(int loanId, int userId, string? reason)
     {
         var why = "Application rejected" + (string.IsNullOrWhiteSpace(reason) ? "." : $": {reason!.Trim()}");

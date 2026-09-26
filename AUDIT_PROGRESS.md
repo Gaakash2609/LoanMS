@@ -35,6 +35,7 @@ Status values: `NOT_STARTED` · `IN_PROGRESS` · `DONE` · `OBSERVED_ONLY` (seen
 | X | Cross-cutting: security, performance, config/env, concurrency, transactions, audit trail, API contract, failure handling, pagination, background jobs, deployment parity | DONE | `715e610`, `42a3b9c`, `82fe44b` |
 | R | ⚠️ **User roles & access rights (2026-09-24)** — 11 roles × sidebar / route guard / backend API vs Vanilla, live on PostgreSQL | DONE (decisions #2, #4b, #6, #7, #8 taken by the business owner and implemented in module M) | `b9b7c4a`, `e9747fd`, `7e902a4`, `8b56a82` |
 | M | ⚠️ **Master prompt — role titles, permissions, access rights & security hardening (2026-09-24)** — Parts 1–8 | DONE (Parts 1–7 implemented, tested, live-verified on PostgreSQL; Part 8 = nothing to implement, see section) | `805aab4`, `8b94cae`, `d14f8a9`, `f177a3b`, `335dad9`, `49a861e` |
+| J | ⚠️ **Full journey audit — Wizard → Submit → Documents → Checks → Underwriting → Verification → Offer → Deviation → Approval → Sanction → Disbursement (2026-09-26)** | DONE — see section J (11 issues: 10 fixed, 1 Vanilla-parity observed) | (no git in this ZIP copy; files listed per fix) |
 
 ---
 
@@ -400,3 +401,64 @@ That line came from this session's own status note about the **local test API** 
 - DSA `GetAll` did have a menu gate (made ineffective by the fail-open matrix); `Export` had none.
 
 **Test-DB side effects** (`loanms_cleanup_0924` only): the permission row was saved/soft-deleted/corrupted during the probe and restored byte-identical (md5 checked); one test DSA (`VERIFY-PII`) created then soft-deleted.
+
+---
+
+## J — Full journey audit: Wizard Step 1 → Disbursement (2026-09-26)
+
+**Base:** `LoanMS-FINAL-2026-09-26-ALL-CHANGES.zip` (InCred A1–A7/B7, webhook binder, Approval Details card already in).
+**Resume rule:** continue from the first stage row below that is not `DONE`.
+**Harness:** `verification/audit_full_flow_pg_e2e.py` — drives the same API calls the React UI makes, asserts API **and** PostgreSQL rows; every check states the correct behaviour (FAIL = defect). Real PostgreSQL 18 in WSL (`loanms_audit2`, fresh, all migrations by `MigrateAsync`), API from this working copy on `:5299`, tokens minted with the API key (no login rate limit).
+
+### Stage tracker
+| Stage | Status | Notes |
+|---|---|---|
+| W — Wizard Steps 1–9 (draft/resume/validate/submit) | DONE — ISSUES FIXED | J-1…J-4; API W1–W8 36/36 on PG; browser walk Steps 1–9 as BDE (KYC → Personal → Address → Employment → CAM offer → References validation → Documents incl. salary-slip + Perfios → Loan Analytics bank gate → Submit) |
+| Submit | DONE — ISSUES FIXED | server final-submit rules (J-3); submit persists loan/customer/refs/bank line/docs (PG + UI) |
+| S1 Documents (upload/verify) | PASS (baseline) | BDE upload ✓, BDE verify 403 ✓, CEO verify ✓, PG status persisted ✓ |
+| S2 Documents Check | DONE — ISSUES FIXED | J-5/J-6/J-11; BDE UI check verified |
+| S3 Income Check | DONE — ISSUES FIXED | J-6; BDE UI run verified (manual review by reviewer roles) |
+| S4 Bank Details Check | DONE — ISSUES FIXED | J-5/J-11; BDE UI check verified, button clears without reload |
+| S5 ECS Return | DONE — ISSUES FIXED | J-5 |
+| S6 Underwriting | DONE — ISSUES FIXED | J-7 |
+| S7 Verification (FI) | DONE — ISSUES FIXED | J-10 |
+| S8 Offer / final selection | DONE — PASS | no new defect (offer E2E 109/109 + journey S8) |
+| S9 Deviation | DONE — PASS | self-approval / BDE refused, ZM approves |
+| S10 Credit Approval | DONE — PASS | maker-checker enforced |
+| S11 Sanction | DONE — PASS | immutable while active |
+| S12 Acceptance (deal confirmation, NACH, agreement) | DONE — ISSUES FIXED | J-8/J-10; J-9 observed |
+| S13 Disbursement | DONE — PASS | BDE / Payout refused, amount cap, idempotent |
+
+### Confirmed issues (baseline run, real PostgreSQL)
+| # | Stage | Issue (evidence) | Fix | Status |
+|---|---|---|---|---|
+| J-1 | W | `POST /api/wizard/draft` and `/validate` had **no `canCreateApp` check** (Submit had it). Payout & Recon / Product & Risk / Team Leader / BDM created 4 draft loans + customers; `/validate` ran the duplicate-customer lookup for them. | same `canCreateApp` gate on draft + validate (`WizardController`) | FIXED — W1 12/12 + PG 0 rows |
+| J-2 | W | `/validate` required interest rate > 0 (Vanilla step 6 = amount + tenure; Submit itself defaults 12 %) → a blank rate blocked the final submit. | rate rule removed from validate | FIXED — W4 |
+| J-3 | W | Submit accepted an application with no PAN / Location / References / bank / DOB / Gender / Aadhaar / Email — Vanilla `validateStep` 1/3/7/9 rules were UI-only. | `ValidateFinalSubmitCompleteness` (submit + validate): PAN, Location, DOB, Gender, Aadhaar, Email, both references, 1..laMaxBanks | FIXED — W5 10/10 |
+| J-4 | W | After submit React re-PUT the Step-9 banks via `/bank-lines` (BDE/DSA/Partner lack `canAddBank` → 403 → false "banks could not be saved" warning) although Submit already saves them in its own transaction. | duplicate call removed (`NewApplicationPage.tsx`) | FIXED — W6 |
+| J-5 | S2/S4/S5 | Check flags (Documents/Bank/ECS/FI/NACH/Agreement) were set by a browser `PATCH /overview` with **no recorded check and no stage rule** (`documentChecked:true` accepted with no Timeline row). | `VerificationChecks` (new) — `POST /tracking` sets the flag in the same save; `PATCH /overview` needs the recorded entry + stage window; frozen on hold/closed | FIXED — S2/S4/S5/S7/S12/X |
+| J-6 | S2–S5 | Vanilla lets **Sales Executive** do the CPA checks (efin-app.js:3238); React shows the buttons to the BDE but the flag PATCH (roles list) and income run (`OperationalRoles`) returned 403 — half-completed checks. | server-derived flags; `RunRoles` = operational + Sales for run/read (manual review unchanged) | FIXED — S3/S5 BDE |
+| J-7 | S6 | Underwriting did not require the checks, but Offer entry does and the check buttons disappear after Underwriting → an application moved early was stuck. Owner flow: Checks → Underwriting. | `UnderwritingEntryBlockers` in `UpdateStatusAsync`; CPA window includes Under Review | FIXED — S6 |
+| J-8 | S12 | Deal confirmation (Approved → Acceptance) required a completed, non-Negative/Pending FI report only in the React dialog; the server checked only the sanction. | `AcceptanceFiBlockerAsync` hook, enforced in `UpdateStatusAsync` | FIXED — S12 + unit test |
+| J-9 | S12 | Car / Overdraft / Insurance have no FI step, so the deal-confirmation dialog can never be sent for them. Same in Vanilla (`_dcFinaliseAcceptance` has no product filter); disbursement still works from Approved, so no dead end. | — (Vanilla parity) | OBSERVED_ONLY |
+| J-10 | S7/S12 | The FI follow-up system note is also named `EFIN- FI report` (pending cases) with no result lines; React read the **latest** entry, so a Pending FI looked complete. | only entries carrying the result lines count (server + React `isFiReportEntry`) | FIXED — S12 + unit test |
+
+### Harness result after fixes (real PostgreSQL, fresh DB): **104 / 104 passed** — Wizard W1–W8, Submit, S1–S13, X (history / timeline / final lock)
+Note for the harness: scope comes from real mappings — Credit Evaluation Manager = Login team it leads + UserLocations; Zonal Manager = UserLocations (not `Users.LocationId`).
+| J-11 | S2–S12 (UI) | React loan-detail query key is `['loans','detail',id,userId]` but 13 mutations invalidated `LOAN_KEYS.detail(id)` = `[...,id,0]` — never matched, so after a check / sanction save etc. the open application did not refresh (check button + ⏳ badge stayed until a manual reload; found in the browser walk). | `LOAN_KEYS.detail(id)` without a user returns the per-loan prefix (`useLoans.ts`) | FIXED — browser: Bank check button clears immediately |
+
+### Observed only (not changed — reason)
+- CPA check buttons show for every role holding `canPostTracking` (configurable RBAC matrix); Vanilla hard-codes Sales Executive / Login Team / Admin. The permission matrix is the newer, owner-approved mechanism (module M), so it is kept.
+- Deleting / renaming a check's Timeline entry does not reset its flag (Vanilla behaves the same; edit/delete need `canEditTracking` / `canDeleteTracking`).
+- `LoanRepository` doc comment says LocationHead scope = `User.LocationId`; the code (correctly, per module M) uses Admin-assigned `UserLocations`.
+
+### Tests after section J (actually run)
+- Backend `dotnet test`: **870 / 870** (840 before + 30 new: `VerificationChecksTests` 18, `WizardControllerTests` J-1/J-2/J-3 12; 21 existing fixtures completed for the new rules).
+- Frontend: `tsc` 0 errors, ESLint clean on touched files, Vitest **334 / 334**, `vite build` OK.
+- PostgreSQL E2E: `audit_full_flow_pg_e2e.py` **104 / 104**; `offer_workflow_pg_e2e.py` (updated to record checks instead of PATCHing flags) **109 / 109**.
+- Browser (API on dev SQLite): wizard Steps 1–9 + submit as BDE; BDE Documents / Bank / Income checks.
+
+### CI / Docker build fix (2026-09-26, after section J)
+- **Docker `dotnet publish` failed** in GitHub (`Gaakash2609/LoanMS` main, CD - ECS Fargate): `CS0101 … already contains a definition for 'BureauReportSummaryDto'`. Cause: the repo still carried **stale files that the newer code had deleted** (copying a ZIP over the repo adds/updates but never deletes). Removed from the repo (none referenced by live code): `BureauController.cs`, `LoanMS.Application/DTOs/Bureau/*` (20), `BureauAnalysisService.cs`, `DeviationEvaluator.cs`, `LoanDeviationDto.cs`, `DeviationEvaluatorTests.cs`, `AppDbContextExtensions.cs`, and frontend `utils/foir.ts` (+2 tests), `hooks/useCustomers.ts`, `pages/CibilPage.tsx`, `CustomersPage.tsx`, `CustomerDetailPage.tsx`, `features/ai/AIInsightPanel.tsx`, `CamOfferPanel.tsx.bak`. This ZIP never contained them.
+- **CI `npm run lint` (`--max-warnings 0`) failed** on 19 pre-existing warnings (18 non-null assertions, 1 `any`) in 13 files — fixed without behaviour change (guards / `?? ''` in render closures / typed assertions), same files in the repo and this ZIP.
+- Verified on the repo exactly as CI/CD run: `dotnet publish -c Release` OK, `dotnet build -c Release` 0 errors / 0 warnings, `dotnet test -c Release` 840/840 (repo version, before section J), `npm ci`, `lint` 0 warnings, `type-check` OK, Vitest 334/334, `build` + `build:docker` OK. This ZIP: publish OK, lint 0 warnings, type-check OK, Vitest 334/334, build OK.

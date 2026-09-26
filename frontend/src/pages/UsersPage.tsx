@@ -211,7 +211,7 @@ export default function UsersPage() {
     // User ID — legacy's copyable code chip.
     { key: 'employeeCode', label: 'User ID', sortable: true, sortValue: u => u.employeeCode ?? '', render: (u: User) => (
       u.employeeCode
-        ? <button type="button" onClick={() => navigator.clipboard?.writeText(u.employeeCode!)}
+        ? <button type="button" onClick={() => navigator.clipboard?.writeText(u.employeeCode ?? '')}
             title="Copy User ID"
             className="inline-flex items-center gap-1.5 font-mono text-[11px] px-2 py-1 rounded-md border whitespace-nowrap"
             style={{ background: 'var(--surface2)', borderColor: 'var(--border)', color: 'var(--text2)' }}>

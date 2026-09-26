@@ -117,6 +117,44 @@ public class WizardController : BaseController
     }
 
     /// <summary>
+    /// Final-submit completeness — the rules every product shares in Vanilla's
+    /// validateStep (efin-app.js:8324): Step 1 PAN + Location, Step 3 date of
+    /// birth / gender / Aadhaar / email, Step 7 both references complete, and
+    /// Step 9 one to laMaxBanks lenders (2 for Personal Loan, 3 otherwise —
+    /// efin-app.js:15835). They were enforced only in the browser, so a request
+    /// that bypassed the wizard could create an application the later stages
+    /// cannot process (no Location → never routed to a Credit Evaluation
+    /// Officer; no bank → Underwriting impossible). Formats stay in
+    /// ValidateFieldFormats; drafts (autosave) are not held to these rules.
+    /// Shared by Submit and Validate so the two cannot drift apart.
+    /// </summary>
+    private static List<string> ValidateFinalSubmitCompleteness(WizardSubmitDto dto)
+    {
+        static bool Blank(string? s) => string.IsNullOrWhiteSpace(s);
+        var errors = new List<string>();
+
+        if (Blank(dto.Pan))           errors.Add("PAN is required.");
+        if (!dto.LocationId.HasValue) errors.Add("Location is required.");
+        if (Blank(dto.Dob))           errors.Add("Date of birth is required.");
+        if (Blank(dto.Gender))        errors.Add("Gender is required.");
+        if (Blank(dto.Aadhar))        errors.Add("Aadhaar number is required.");
+        if (Blank(dto.Email))         errors.Add("Email address is required.");
+        if (Blank(dto.R1Name) || Blank(dto.R1Mobile) || Blank(dto.R1Relation))
+            errors.Add("Reference 1 name, mobile and relationship are required.");
+        if (Blank(dto.R2Name) || Blank(dto.R2Mobile) || Blank(dto.R2Relation))
+            errors.Add("Reference 2 name, mobile and relationship are required.");
+
+        var banks = dto.SelectedBanks?.Count(b => !Blank(b.BankName)) ?? 0;
+        var maxBanks = string.Equals(dto.LoanType, "personal_loan", StringComparison.OrdinalIgnoreCase) ? 2 : 3;
+        if (banks < 1)
+            errors.Add("Select at least 1 bank on Loan Analytics before submitting.");
+        else if (banks > maxBanks)
+            errors.Add($"Maximum {maxBanks} banks allowed for this loan type.");
+
+        return errors;
+    }
+
+    /// <summary>
     /// Validates DsaId / PartnerId / LocationId mapping (Phase 2A). Ownership,
     /// visibility, and document-security checks are explicitly out of scope for
     /// this phase — this only confirms the ids exist, are not deleted, and point
@@ -624,6 +662,7 @@ public class WizardController : BaseController
             errors.Add("Applicant name is required.");
         if (string.IsNullOrWhiteSpace(dto.Mobile))
             errors.Add("Mobile number is required.");
+        errors.AddRange(ValidateFinalSubmitCompleteness(dto));
         errors.AddRange(await ValidateMappingAsync(dto));
 
         // Phase 2 — resolved once, up front, so both the new-loan and
@@ -1151,6 +1190,12 @@ public class WizardController : BaseController
     [HttpPost("draft")]
     public async Task<IActionResult> SaveDraft([FromBody] WizardSubmitDto dto)
     {
+        // Same gate as Submit: a draft is a real application + customer row, so
+        // a role that may not create applications must not create drafts either
+        // (it could otherwise create customers and hold the 45-day slot).
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canCreateApp"))
+            return Forbid();
+
         // Not enough entered yet to be worth persisting.
         if (string.IsNullOrWhiteSpace(dto.Mobile) && string.IsNullOrWhiteSpace(dto.FullName))
             return Ok(ApiResponseDto<WizardSubmitResponseDto>.Ok(new WizardSubmitResponseDto(), "Nothing to save yet."));
@@ -1371,13 +1416,21 @@ public class WizardController : BaseController
     [HttpPost("validate")]
     public async Task<IActionResult> Validate([FromBody] WizardSubmitDto dto)
     {
+        // Runs the global customer / duplicate-application lookup, so it is part
+        // of creating an application — same gate as Submit and SaveDraft.
+        if (!await _rolePerm.IsAllowedAsync(CurrentUserRole, "canCreateApp"))
+            return Forbid();
+
         var errors = ValidateFieldFormats(dto);
 
         if (string.IsNullOrWhiteSpace(dto.FullName)) errors.Add("Full name is required.");
         if (string.IsNullOrWhiteSpace(dto.Mobile)) errors.Add("Mobile number is required.");
         if (dto.Amount <= 0) errors.Add("Loan amount must be greater than 0.");
         if (dto.Tenure <= 0 || dto.Tenure > 360) errors.Add("Tenure must be between 1-360 months.");
-        if (dto.LoanRate <= 0) errors.Add("Interest rate must be greater than 0.");
+        // No interest-rate rule: Vanilla validateStep(6) gates on amount + tenure
+        // only, and Submit applies its 12 % default to a blank rate — requiring it
+        // here blocked the final submit of a wizard the UI had accepted.
+        errors.AddRange(ValidateFinalSubmitCompleteness(dto));
 
         errors.AddRange(await ValidateMappingAsync(dto));
 

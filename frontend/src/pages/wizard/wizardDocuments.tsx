@@ -178,7 +178,7 @@ export function MandatoryDoc({ docKey, label, documents, onDocumentChange, error
           {uploading ? 'Saving…' : uploaded ? 'Saved ✓' : file ? 'Attached' : required ? 'Required' : 'Optional'}
         </span>
         {displayName && uploaded?.fileRef && loanId && (
-          <button type="button" onClick={() => previewLoanDocument(loanId, uploaded.fileRef!, onPreviewError)}
+          <button type="button" onClick={() => previewLoanDocument(loanId, uploaded.fileRef ?? '', onPreviewError)}
             className="text-[11px] text-efin-blue hover:underline font-medium">View</button>
         )}
         {displayName && (
@@ -276,7 +276,7 @@ export function SalarySlipDoc({ docKey, label, documents, onDocumentChange, erro
           {uploading ? 'Saving…' : uploaded ? 'Saved ✓' : file ? 'Attached' : 'Required'}
         </span>
         {displayName && uploaded?.fileRef && loanId && (
-          <button type="button" onClick={() => previewLoanDocument(loanId, uploaded.fileRef!, onPreviewError)}
+          <button type="button" onClick={() => previewLoanDocument(loanId, uploaded.fileRef ?? '', onPreviewError)}
             className="text-[11px] text-efin-blue hover:underline font-medium">View</button>
         )}
         {displayName && (
@@ -407,7 +407,7 @@ export function BankStatementDoc({ docKey, label, documents, onDocumentChange, e
           {uploading ? 'Saving…' : summary ? 'Perfios Verified ✓' : uploaded ? 'Saved ✓' : file ? 'Attached' : required ? 'Required' : 'Optional'}
         </span>
         {!file && uploaded?.fileRef && loanId && (
-          <button type="button" onClick={() => previewLoanDocument(loanId, uploaded.fileRef!, onPreviewError)}
+          <button type="button" onClick={() => previewLoanDocument(loanId, uploaded.fileRef ?? '', onPreviewError)}
             className="text-[11px] text-efin-blue hover:underline font-medium">View</button>
         )}
         {file && (

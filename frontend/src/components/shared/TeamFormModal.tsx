@@ -66,7 +66,9 @@ export default function TeamFormModal({
         return current.id
       }
       const res = await teamsApi.create(payload)
-      return res.data.data!.id
+      const created = res.data.data
+      if (!created) throw new Error('The team could not be created.')
+      return created.id
     },
     onSuccess: (id) => {
       invalidate()
@@ -91,7 +93,10 @@ export default function TeamFormModal({
   })
 
   const addMember = useMutation({
-    mutationFn: (userId: number) => teamsApi.addMember(current!.id, userId),
+    mutationFn: async (userId: number) => {
+      if (!current) throw new Error('Save the team first.')
+      return teamsApi.addMember(current.id, userId)
+    },
     onSuccess: (_res, userId) => {
       invalidate()
       const u = users.find(x => x.id === userId)
@@ -102,7 +107,10 @@ export default function TeamFormModal({
   })
 
   const removeMember = useMutation({
-    mutationFn: (userId: number) => teamsApi.removeMember(current!.id, userId),
+    mutationFn: async (userId: number) => {
+      if (!current) throw new Error('Save the team first.')
+      return teamsApi.removeMember(current.id, userId)
+    },
     onSuccess: (_res, userId) => {
       invalidate()
       if (current) setCurrent({ ...current, members: current.members.filter(m => m.userId !== userId) })

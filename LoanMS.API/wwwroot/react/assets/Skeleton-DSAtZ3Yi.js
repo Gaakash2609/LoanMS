@@ -1,0 +1,1 @@
+import{j as e}from"./query-BXkeQc0X.js";import{g as r}from"./index-U4DLUxYL.js";function t({className:n}){return e.jsx("div",{className:n,children:e.jsx(r,{size:"sm"})})}function i(n){return e.jsx(r,{size:"md"})}export{t as S,i as T};

@@ -69,7 +69,7 @@ export default function MasterListsCard() {
     )
   }
 
-  const def = MASTER_LIST_DEFS.find(d => d.key === activeKey)!
+  const def = MASTER_LIST_DEFS.find(d => d.key === activeKey) ?? MASTER_LIST_DEFS[0]
   const items = map[activeKey] ?? []
   const source = SOURCE_SCREEN[activeKey]
 

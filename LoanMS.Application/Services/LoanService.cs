@@ -45,14 +45,22 @@ public class LoanService : ILoanService
     public static bool RequiresFiReport(LoanType t) =>
         t is LoanType.Personal or LoanType.Business or LoanType.Home or LoanType.LAP or LoanType.Education or LoanType.Vehicle;
 
-    /// <summary>Verification checks that must be done before the Offer stage.</summary>
-    public static List<string> OfferEntryBlockers(Loan loan)
+    /// <summary>The CPA checks (Documents / Income / Bank / ECS) — required before
+    /// Underwriting (owner flow) and again at Offer entry.</summary>
+    public static List<string> UnderwritingEntryBlockers(Loan loan)
     {
         var b = new List<string>();
         if (!loan.DocumentChecked) b.Add("Documents check");
         if (!loan.IncomeChecked)   b.Add("Income check");
         if (!loan.BankChecked)     b.Add("Bank details check");
         if (!loan.EcsReturn)       b.Add("ECS return check");
+        return b;
+    }
+
+    /// <summary>Verification checks that must be done before the Offer stage.</summary>
+    public static List<string> OfferEntryBlockers(Loan loan)
+    {
+        var b = UnderwritingEntryBlockers(loan);
         if (RequiresFiReport(loan.LoanType) && !loan.FiReportChecked) b.Add("FI report");
         return b;
     }
@@ -418,6 +426,12 @@ public class LoanService : ILoanService
         if (request.NewStatus == LoanStatus.Acceptance && _offerHooks != null && !await _offerHooks.HasActiveSanctionAsync(loan.Id))
             return ApiResponseDto<LoanDto>.Fail(
                 "Generate the sanction first — deal confirmation needs an active sanction.", ApiErrorCodes.WorkflowStage);
+        // …and a completed FI report with no Negative / Pending address (Vanilla
+        // _dcFinaliseAcceptance, efin-app.js:34581). Was enforced only by the
+        // React dialog, so a direct call could move to Acceptance without it.
+        if (request.NewStatus == LoanStatus.Acceptance && _offerHooks != null
+            && await _offerHooks.AcceptanceFiBlockerAsync(loan.Id) is { } fiBlocker)
+            return ApiResponseDto<LoanDto>.Fail(fiBlocker, ApiErrorCodes.WorkflowStage);
 
         // Submitting a draft re-runs the duplicate + 45-day guard, so an old
         // draft resumed later cannot slip past a rule that applies today.
@@ -454,6 +468,16 @@ public class LoanService : ILoanService
                 return ApiResponseDto<LoanDto>.Fail(
                     "Cannot move to Under Review — add at least one complete Bank Details line "
                     + "(Bank Name, Application Number, Approved Loan) first.");
+
+            // Owner flow (2026-09-25): Submit → Documents / Income / Bank / ECS
+            // checks → Underwriting. The checks were never required here, but the
+            // Offer stage requires them and the check actions are offered only up
+            // to this point — an application moved early could never reach Offer.
+            var checkBlockers = UnderwritingEntryBlockers(loan);
+            if (checkBlockers.Count > 0)
+                return ApiResponseDto<LoanDto>.Fail(
+                    "Cannot move to Under Review — complete the checks first: " + string.Join(", ", checkBlockers) + ".",
+                    ApiErrorCodes.WorkflowStage);
         }
 
         // Disbursement pre-checks (NACH + Customer Agreement, verified InCred
@@ -1074,18 +1098,46 @@ public class LoanService : ILoanService
             loan.IncredRmName = string.IsNullOrWhiteSpace(request.IncredRmName) ? null : request.IncredRmName.Trim();
         if (request.AnalyticBank != null)
             loan.AnalyticBank = string.IsNullOrWhiteSpace(request.AnalyticBank) ? null : request.AnalyticBank.Trim();
-        if (request.DocumentChecked.HasValue) loan.DocumentChecked = request.DocumentChecked.Value;
         // SECURITY (Phase 5, vuln S1): IncomeChecked is NO LONGER client-settable
         // here. It is now DERIVED solely from an authoritative IncomeVerification
         // run (IncomeVerificationService), so a browser can never mark income
         // "verified" by PATCHing this flag. The request field is intentionally
         // ignored; income completion flows through /income-verification/run.
         // (The column itself is kept for DB/back-compat, per §11.)
-        if (request.BankChecked.HasValue)     loan.BankChecked     = request.BankChecked.Value;
-        if (request.EcsReturn.HasValue)       loan.EcsReturn       = request.EcsReturn.Value;
-        if (request.FiReportChecked.HasValue) loan.FiReportChecked = request.FiReportChecked.Value;
-        if (request.NachDone.HasValue)             loan.NachDone             = request.NachDone.Value;
-        if (request.CustomerAgreementDone.HasValue) loan.CustomerAgreementDone = request.CustomerAgreementDone.Value;
+        //
+        // The other verification flags follow the same principle: the server sets
+        // them when the check is recorded (POST /tracking, see VerificationChecks).
+        // A browser could previously assert any of them here with no recorded
+        // check and at any stage — so "done" is accepted only when the matching
+        // Timeline entry exists and the application is in that check's stage
+        // window, and nothing changes on a held / closed application.
+        foreach (var (value, check) in new (bool?, VerificationChecks.Check)[]
+                 {
+                     (request.DocumentChecked, VerificationChecks.Documents),
+                     (request.BankChecked, VerificationChecks.Bank),
+                     (request.EcsReturn, VerificationChecks.Ecs),
+                     (request.FiReportChecked, VerificationChecks.FiReport),
+                     (request.NachDone, VerificationChecks.Nach),
+                     (request.CustomerAgreementDone, VerificationChecks.Agreement),
+                 })
+        {
+            if (value is not bool wanted || check.Get(loan) == wanted) continue;
+            if (VerificationChecks.IsFrozen(loan.Status))
+                return ApiResponseDto<LoanDto>.Fail(
+                    $"Verification checks cannot be changed on a {loan.Status} application.", ApiErrorCodes.WorkflowStage);
+            if (wanted)
+            {
+                if (!check.Stages.Contains(loan.Status))
+                    return ApiResponseDto<LoanDto>.Fail(
+                        $"The {check.Label} can be recorded only at {VerificationChecks.StageList(check)} (this application is {loan.Status}).",
+                        ApiErrorCodes.WorkflowStage);
+                if (_offerHooks != null && !await _offerHooks.HasTimelineEntryAsync(loan.Id, check.EntryName))
+                    return ApiResponseDto<LoanDto>.Fail(
+                        $"Record the {check.Label} first — it is marked done when the check is recorded on the Timeline.",
+                        ApiErrorCodes.WorkflowStage);
+            }
+            check.Set(loan, wanted);
+        }
 
         await _uow.Loans.UpdateAsync(loan);
         await _uow.SaveChangesAsync();

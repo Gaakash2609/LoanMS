@@ -57,7 +57,7 @@ function RuleFormModal({ rule, usedKeys, onClose, onSaved }: {
 
   const save = useMutation({
     mutationFn: async (payload: PayoutRuleWriteRequest) => {
-      if (isEdit) await payoutApi.updateRule(rule!.id, payload)
+      if (rule) await payoutApi.updateRule(rule.id, payload)
       else await payoutApi.createRule(payload)
     },
     onSuccess: () => onSaved(),

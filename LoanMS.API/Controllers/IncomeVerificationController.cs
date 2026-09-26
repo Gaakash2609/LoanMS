@@ -17,6 +17,12 @@ public class IncomeVerificationController : BaseController
 {
     private const string OperationalRoles =
         "Admin,Manager,LoginTeam,TeamLeader,LocationHead,OperationManager";
+    // Vanilla lets the Sales Executive do the Income Check at WIP / Login
+    // (efin-app.js:3238) and React shows it the button, but the run (and the
+    // panel that shows its result) refused Sales with 403. Running is not an
+    // assertion — the server computes the result; completing a manual review
+    // stays with ReviewerRoles. Scope is still enforced by InScopeAsync.
+    private const string RunRoles = OperationalRoles + ",Sales";
     // Manual review is a supervisory decision — the front-line LoginTeam that runs
     // the check does not approve its own failed auto-verification (§15 authorized reviewer).
     private const string ReviewerRoles =
@@ -39,7 +45,7 @@ public class IncomeVerificationController : BaseController
 
     /// <summary>Run (or re-run) authoritative income verification and persist it.</summary>
     [HttpPost("/api/loans/{loanId:int}/income-verification/run")]
-    [Authorize(Roles = OperationalRoles)]
+    [Authorize(Roles = RunRoles)]
     public async Task<IActionResult> Run(int loanId, [FromBody] RunIncomeVerificationRequestDto request)
     {
         if (!await InScopeAsync(loanId)) return NotFound();
@@ -48,7 +54,7 @@ public class IncomeVerificationController : BaseController
 
     /// <summary>Latest persisted result for an applicant.</summary>
     [HttpGet("/api/loans/{loanId:int}/income-verification")]
-    [Authorize(Roles = OperationalRoles)]
+    [Authorize(Roles = RunRoles)]
     public async Task<IActionResult> GetLatest(int loanId,
         [FromQuery] ApplicantRole applicantRole = ApplicantRole.Applicant, [FromQuery] string? applicantKey = null)
     {
@@ -58,7 +64,7 @@ public class IncomeVerificationController : BaseController
 
     /// <summary>Append-only history of every run for the loan (§14 audit).</summary>
     [HttpGet("/api/loans/{loanId:int}/income-verification/history")]
-    [Authorize(Roles = OperationalRoles)]
+    [Authorize(Roles = RunRoles)]
     public async Task<IActionResult> GetHistory(int loanId)
     {
         if (!await InScopeAsync(loanId)) return NotFound();

@@ -1,0 +1,107 @@
+=== RUN 421046  API http://127.0.0.1:5299  DB loanms_audit2 ===
+PASS W1 Payout&Recon: wizard draft autosave refused (403)
+PASS W1 Payout&Recon: wizard submit refused (403)
+PASS W1 Payout&Recon: wizard validate (duplicate lookup) refused (403)
+PASS W1 Product&Risk: wizard draft autosave refused (403)
+PASS W1 Product&Risk: wizard submit refused (403)
+PASS W1 Product&Risk: wizard validate (duplicate lookup) refused (403)
+PASS W1 TeamLeader: wizard draft autosave refused (403)
+PASS W1 TeamLeader: wizard submit refused (403)
+PASS W1 TeamLeader: wizard validate (duplicate lookup) refused (403)
+PASS W1 BDM: wizard draft autosave refused (403)
+PASS W1 BDM: wizard submit refused (403)
+PASS W1 BDM: wizard validate (duplicate lookup) refused (403)
+PASS W1 PG: no draft/customer rows created by unauthorised roles
+PASS W2 draft autosave step 1 -> 200 Draft
+PASS W2 draft autosave step 6 updates SAME draft
+PASS W2 PG: draft persisted (Draft, step 6, 500000.00, 36, location)
+PASS W2 PG: both references saved on the draft
+PASS W2 resume: GET draft returns the saved fields (PAN, refs, productData)
+PASS W2 drafts list shows the draft
+PASS W3 other BDE: GET foreign draft -> 404
+PASS W3 other BDE: autosave with foreign draft id does not touch it
+PASS W3 other BDE: submit foreign draft -> 404
+PASS W4 validate: blank interest rate is not a blocker (Vanilla step 6)
+PASS W5 submit without PAN -> 400
+PASS W5 submit without Location -> 400
+PASS W5 submit without Reference 2 -> 400
+PASS W5 submit without Reference 1 relationship -> 400
+PASS W5 submit without a selected bank -> 400
+PASS W5 submit without more than 2 banks (Personal Loan) -> 400
+PASS W5 submit without date of birth -> 400
+PASS W5 submit without gender -> 400
+PASS W5 submit without Aadhaar -> 400
+PASS W5 submit without email -> 400
+PASS W6 submit resumed draft -> 200 Submitted (same record)
+PASS W6 PG: Submitted, created by + assigned to the BDE, location, lender
+PASS W6 PG: Step-9 bank persisted as bank line by the submit itself
+PASS W6 PG: status history Draft>Submitted
+PASS W6 BDE has no bank-lines write access (the wizard must not depend on it)
+PASS W7 second application for same PAN while one is active -> 409 blocked
+PASS W8 reload: loan readable by its BDE with Submitted status
+PASS S1 BDE uploads bank statement
+PASS S1 BDE uploads salary slip
+PASS S1 BDE cannot verify a document (403)
+PASS S1 Credit Evaluation Officer verifies the document
+PASS S1 PG: document verification persisted
+PASS S2 Documents flag without a recorded Documents check -> refused
+PASS S2 Payout officer cannot set verification flags
+PASS S2 PG: no flag was set by the refused calls
+PASS S2 Documents check recorded -> server sets DocumentChecked (no 2nd call)
+PASS S2 re-asserting a recorded check is accepted (idempotent)
+PASS S3 browser cannot assert Income Checked (flag stays false)
+PASS S3 BDE records the income check note
+PASS S3 BDE runs the income verification (persisted)
+PASS S3 BDE can read the income verification result
+PASS S3 BDE cannot complete income manual review
+PASS S3 Credit Evaluation Manager completes income review
+PASS S3 PG: IncomeChecked derived true by the server
+PASS S4 bank details check recorded -> BankChecked set by server
+PASS S6 Credit Evaluation Officer has no canAddBank (403)
+PASS S6 Zonal Manager saves Lender Details (application no. + approved loan)
+PASS S6 Underwriting blocked while the ECS check is missing (owner flow: checks first)
+PASS S5 ECS flag without a recorded ECS check -> refused
+PASS S5 BDE records ECS return -> EcsReturn set by server
+PASS S6 cannot jump from Submitted straight to Offer
+PASS S6 BDE cannot move to Underwriting
+PASS S6 Credit Evaluation Officer moves to Underwriting
+PASS S6 CPA check entry at Under Review is kept as a note
+PASS S7 Offer blocked until FI report
+PASS S7 FI flag without a recorded FI report -> refused
+PASS S7 FI report recorded -> FiReportChecked set by server (Vanilla final_report)
+PASS S7 BDE cannot move to Offer
+PASS S7 Verification complete -> Offer
+PASS S7 PG: status Offer
+PASS S8 BDE cannot create an offer
+PASS S8 two lender offers created
+PASS S8 BDE (application access) selects the final offer
+PASS S8 selected offer is Final
+PASS S9 deviation rule created by Chief Admin
+PASS S9 re-check marks deviation Required on the final offer
+PASS S9 credit approval blocked while a deviation is required
+PASS S9 deviation raised -> Decision stage
+PASS S9 raiser cannot approve own deviation (403)
+PASS S9 BDE cannot approve a deviation
+PASS S9 Zonal Manager approves the deviation -> back to Offer
+PASS S10 offer maker cannot credit-approve own terms (403)
+PASS S10 BDE cannot credit-approve
+PASS S10 Credit Evaluation Manager credit-approves -> Approved
+PASS S11 BDE cannot generate the sanction
+PASS S11 sanction generated (Active, SAN- number)
+PASS S11 sanctioned terms immutable while sanction active (409)
+PASS S12 NACH/Agreement flags without recorded entries -> refused
+PASS S12 Acceptance blocked while the FI office result is Pending (latest REPORT, not the follow-up note)
+PASS S12 updated FI report recorded at Approved
+PASS S12 Approved -> Acceptance with an active sanction + positive FI
+PASS S12 NACH + Agreement recorded -> flags set by server
+PASS S13 BDE cannot disburse
+PASS S13 Payout officer cannot disburse
+PASS S13 amount above net disbursement refused
+PASS S13 Zonal Manager disburses -> Disbursed
+PASS S13 idempotent repeat creates no second disbursement
+PASS X status history covers the whole journey
+PASS X timeline has check + workflow rows
+PASS X verification flags frozen after disbursement
+PASS X disbursed application cannot be moved back
+
+=== 104 / 104 passed ===

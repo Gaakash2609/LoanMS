@@ -281,7 +281,7 @@ export default function SanctionDetailCard({ loan }: { loan: Loan }) {
       >
         <span style={{ fontSize: 16 }}>✅</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 800, color: 'var(--accent)' }}>Sanction Details</div>
+          <div style={{ fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 800, color: 'var(--accent)' }}>Approval Details</div>
           <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>{lockLabel}</div>
         </div>
         {canEdit && saveState !== 'idle' && (

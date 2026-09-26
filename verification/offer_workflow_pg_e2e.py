@@ -10,7 +10,7 @@ import base64, hashlib, hmac, json, os, subprocess, sys, time, urllib.request, u
 
 API = os.environ.get("API_URL", "http://localhost:5099")
 KEY = os.environ.get("JWT_KEY", "e2e-offer-workflow-verification-key-0123456789abcdef")
-PSQL = ["psql", "-h", "127.0.0.1", "-p", "5433", "-U", "loanms", "-d", "loanms_offer_e2e", "-v", "ON_ERROR_STOP=0", "-tA"]
+PSQL = ["psql", "-h", "127.0.0.1", "-p", "5433", "-U", "loanms", "-d", os.environ.get("PGDB", "loanms_offer_e2e"), "-v", "ON_ERROR_STOP=0", "-tA"]
 RESULTS = []
 
 def sql(q):
@@ -153,17 +153,26 @@ check("API: loan created", s in (200, 201), (s, r))
 loan = r["data"]["id"]
 s, r = call("PATCH", f"/api/loans/{loan}/submit", T_ADMIN)
 s, r = call("PUT", f"/api/loans/{loan}/bank-lines", T_ADMIN, {"bankLines": [{"bankName": f"E2E HDFC {RUN}", "tempApplicationNumber": "T1", "applicationNumber": "APP1", "approvedLoan": 500000}]})
-s, r = call("PATCH", f"/api/loans/{loan}/status", T_ADMIN, {"newStatus": "UnderReview", "comment": "uw"})
-check("API: loan in UnderReview", s == 200 and r["data"]["status"] == "UnderReview", (s, r))
 
-s, r = call("POST", f"/api/loans/{loan}/workflow/move-to-offer", T_CEO, {})
-check("API: move-to-offer blocked until checks done (409)", s == 409 and "Documents check" in (r.get("message") or ""), (s, r))
-s, r = call("PATCH", f"/api/loans/{loan}/overview", T_ADMIN, {"documentChecked": True, "incomeChecked": True, "bankChecked": True, "ecsReturn": True, "fiReportChecked": True})
-s, r = call("POST", f"/api/loans/{loan}/workflow/move-to-offer", T_CEO, {})
-check("API: IncomeChecked is not client-settable (still blocked on Income check)", s == 409 and "Income check" in (r.get("message") or ""), (s, r))
+# Checks come before Underwriting (owner flow; server-enforced since the 2026-09-26 audit, J-7).
+s, r = call("PATCH", f"/api/loans/{loan}/status", T_ADMIN, {"newStatus": "UnderReview", "comment": "uw"})
+check("API: Underwriting blocked until the checks are done (J-7)", s in (400, 409) and "Documents check" in ((r.get("message") or "") + " ".join(r.get("errors") or [])), (s, r))
+s, r = call("PATCH", f"/api/loans/{loan}/overview", T_ADMIN, {"documentChecked": True, "incomeChecked": True, "bankChecked": True, "ecsReturn": True})
+check("API: check flags cannot be asserted without the recorded checks (J-5)", s in (400, 409), (s, r))
+def record(lid, name, sub=""):
+    return call("POST", f"/api/loans/{lid}/tracking", T_ADMIN, {"name": name, "stage": "Admin", "assignedUser": "", "status": "COMPLETE", "comment": name, "subNote": sub})
+for n in ("EFIN — Documents", "EFIN- Bank Details Check", "EFIN-Charge"):
+    record(loan, n)
+out, _ = sql(f'SELECT "DocumentChecked","BankChecked","EcsReturn","IncomeChecked" FROM "Loans" WHERE "Id"={loan};')
+check("PG: recording the checks set Documents/Bank/ECS server-side; Income still false", out == "t|t|t|f", out)
 # IncomeChecked is derived only from an authoritative IncomeVerification run (Perfios / salary
 # slip pipeline, not reproducible here) — simulate that outcome directly in PostgreSQL.
 sql(f'UPDATE "Loans" SET "IncomeChecked"=true WHERE "Id"={loan};')
+s, r = call("PATCH", f"/api/loans/{loan}/status", T_ADMIN, {"newStatus": "UnderReview", "comment": "uw"})
+check("API: loan in UnderReview", s == 200 and r["data"]["status"] == "UnderReview", (s, r))
+s, r = call("POST", f"/api/loans/{loan}/workflow/move-to-offer", T_CEO, {})
+check("API: move-to-offer blocked until the FI report is recorded (409)", s == 409 and "FI report" in (r.get("message") or ""), (s, r))
+record(loan, "EFIN- FI report", "Final Resi Address - Positive\nFinal Office Address - Positive")
 s, r = call("POST", f"/api/loans/{loan}/workflow/move-to-offer", T_CEO, {"reason": "Verification complete"})
 check("API: move-to-offer 200", s == 200 and r["data"]["loanStatus"] == "Offer", (s, r))
 out, _ = sql(f'SELECT "Status" FROM "Loans" WHERE "Id"={loan};')
@@ -302,7 +311,7 @@ disb = {"amount": net, "disbursementDate": time.strftime("%Y-%m-%dT00:00:00Z"), 
         "accountHolderName": "Asha E2E", "utr": "UTRE2E0001", "lenderReference": "LAN-9", "mode": "NEFT"}
 s, r = call("POST", f"/api/loans/{loan}/workflow/disbursements", T_CEO, disb)
 check("API: disbursement blocked until NACH + agreement (409)", s == 409 and "Nach" in (r.get("message") or ""), (s, r))
-call("PATCH", f"/api/loans/{loan}/overview", T_ADMIN, {"nachDone": True, "customerAgreementDone": True})
+record(loan, "EFIN-Nach"); record(loan, "EFIN-Customer Agreement")
 s, r = call("POST", f"/api/loans/{loan}/workflow/disbursements", T_CEO, disb)
 check("API: disbursement blocked until Bank Details Check is 'Okay to Process' (409)", s == 409 and "not verified" in (r.get("message") or ""), (s, r))
 def bank_check(acct, result):
@@ -360,9 +369,11 @@ s, r = call("POST", "/api/loans", T_ADMIN, {"customerId": cust2, "loanType": "Pe
 loan2 = r["data"]["id"]
 call("PATCH", f"/api/loans/{loan2}/submit", T_ADMIN)
 call("PUT", f"/api/loans/{loan2}/bank-lines", T_ADMIN, {"bankLines": [{"bankName": f"E2E HDFC {RUN}", "tempApplicationNumber": "T2", "applicationNumber": "APP2", "approvedLoan": 300000}]})
-call("PATCH", f"/api/loans/{loan2}/status", T_ADMIN, {"newStatus": "UnderReview"})
-call("PATCH", f"/api/loans/{loan2}/overview", T_ADMIN, {"documentChecked": True, "bankChecked": True, "ecsReturn": True, "fiReportChecked": True})
+for n in ("EFIN — Documents", "EFIN- Bank Details Check", "EFIN-Charge"):
+    record(loan2, n)
 sql(f'UPDATE "Loans" SET "IncomeChecked"=true WHERE "Id"={loan2};')
+call("PATCH", f"/api/loans/{loan2}/status", T_ADMIN, {"newStatus": "UnderReview"})
+record(loan2, "EFIN- FI report", "Final Resi Address - Positive\nFinal Office Address - Positive")
 call("POST", f"/api/loans/{loan2}/workflow/move-to-offer", T_CEO, {})
 for b in (HDFC, IDFC):
     call("POST", f"/api/loans/{loan2}/workflow/offers", T_CEO, {"bankId": b, "loanAmount": 300000, "tenureMonths": 24, "baseRoi": 13, "offeredRoi": 12,

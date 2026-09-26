@@ -100,12 +100,14 @@ export async function extractText(pdf: PDFDocumentProxy): Promise<string> {
     const rowTol = Math.max(4, Math.min(medianGap * 0.6, 14))
 
     for (const p of positioned) {
-      if (curY === null || Math.abs(p.y - curY) > rowTol) {
-        curRow = []
-        rows.push(curRow)
+      let row: PositionedItem[] | null = curRow
+      if (row === null || curY === null || Math.abs(p.y - curY) > rowTol) {
+        row = []
+        rows.push(row)
+        curRow = row
         curY = p.y
       }
-      curRow!.push(p)
+      row.push(p)
     }
 
     // Step 3: within each row sort by X (left to right)

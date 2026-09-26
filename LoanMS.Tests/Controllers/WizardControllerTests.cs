@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;   // InMemoryEventId
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace LoanMS.Tests.Controllers;
@@ -34,7 +35,8 @@ namespace LoanMS.Tests.Controllers;
 /// </summary>
 public class WizardControllerTests
 {
-    private static (WizardController controller, AppDbContext db) CreateController(int currentUserId = 1, string currentUserRole = "Sales")
+    private static (WizardController controller, AppDbContext db) CreateController(int currentUserId = 1, string currentUserRole = "Sales",
+        LoanMS.API.Services.IRolePermissionService? rolePerm = null)
     {
         // WizardController.Submit wraps its work in a real transaction
         // (WizardController.cs:346, BeginTransactionAsync). The EF Core InMemory
@@ -49,6 +51,10 @@ public class WizardControllerTests
             .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
         var db = new AppDbContext(options);
+        // Final submit requires a Location (Vanilla validateStep 1); one real row
+        // so the mapping check (location exists, not deleted) passes.
+        db.Locations.Add(new Location { Id = TestLocationId, Name = "Pune", City = "Pune", State = "Maharashtra", IsActive = true });
+        db.SaveChanges();
 
         var claims = new ClaimsIdentity(new[]
         {
@@ -56,7 +62,7 @@ public class WizardControllerTests
             new Claim("role", currentUserRole)
         }, "TestAuth");
 
-        var controller = new WizardController(db, NullLogger<WizardController>.Instance, RolePermissionTestDouble.AllowAll(),
+        var controller = new WizardController(db, NullLogger<WizardController>.Instance, rolePerm ?? RolePermissionTestDouble.AllowAll(),
             new LoanMS.API.Services.LoginUserAssignmentService(db),
             CentralRulesTestFactory.Create(db).Customers, CentralRulesTestFactory.Create(db).Loans)
         {
@@ -69,12 +75,23 @@ public class WizardControllerTests
         return (controller, db);
     }
 
-    /// <summary>Minimal but Submit()-complete DTO: format-valid, no DSA/Partner/Location mapping.</summary>
+    private const int TestLocationId = 1;
+
+    /// <summary>Minimal but Submit()-complete DTO: format-valid, the final-submit
+    /// completeness fields (Vanilla validateStep 1/3/7/9), no DSA/Partner mapping.</summary>
     private static WizardSubmitDto CreateValidDto(string? salesPerson) => new()
     {
         FullName    = "Test Applicant",
         Mobile      = "9876543210",
         Email       = "applicant@test.com",
+        Pan         = "ABCDE1234F",
+        Dob         = "1990-01-01",
+        Gender      = "Male",
+        Aadhar      = "123412341234",
+        LocationId  = TestLocationId,
+        R1Name = "Ref One", R1Mobile = "9000000001", R1Relation = "Friend",
+        R2Name = "Ref Two", R2Mobile = "9000000002", R2Relation = "Colleague",
+        SelectedBanks = new() { new BankLineItemDto { BankName = "HDFC Bank" } },
         Amount      = 100000,
         LoanType    = "personal_loan",
         LoanRate    = 12,
@@ -526,5 +543,75 @@ public class WizardControllerTests
         response.Data!.LoanId.Should().Be(foreign.Id);
         var updated = await db.Loans.FirstAsync(l => l.Id == foreign.Id);
         updated.RequestedAmount.Should().Be(75000);
+    }
+
+    // ── Journey audit 2026-09-26 (AUDIT_PROGRESS.md section J) ───────────────
+
+    // J-1: a role without canCreateApp could create draft applications and
+    // customers through autosave, and run the duplicate lookup via validate.
+    [Fact]
+    public async Task SaveDraftAndValidate_WithoutCanCreateApp_AreForbidden_AndCreateNothing()
+    {
+        var deny = new Moq.Mock<LoanMS.API.Services.IRolePermissionService>();
+        deny.Setup(r => r.IsAllowedAsync(Moq.It.IsAny<string?>(), Moq.It.IsAny<string>()))
+            .ReturnsAsync((string? _, string key) => key != "canCreateApp");
+        var (controller, db) = CreateController(currentUserRole: "Accounts", rolePerm: deny.Object);
+
+        (await controller.SaveDraft(CreateValidDto("Ravi Kumar"))).Should().BeOfType<ForbidResult>();
+        (await controller.Validate(CreateValidDto("Ravi Kumar"))).Should().BeOfType<ForbidResult>();
+        (await db.Loans.CountAsync()).Should().Be(0);
+        (await db.Customers.CountAsync()).Should().Be(0);
+    }
+
+    // J-3: Vanilla validateStep 1/3/7/9 rules are enforced by the server on the
+    // final submit (they were browser-only).
+    [Theory]
+    [InlineData("pan", "PAN is required")]
+    [InlineData("location", "Location is required")]
+    [InlineData("dob", "Date of birth is required")]
+    [InlineData("gender", "Gender is required")]
+    [InlineData("aadhar", "Aadhaar number is required")]
+    [InlineData("email", "Email address is required")]
+    [InlineData("ref1", "Reference 1 name, mobile and relationship are required")]
+    [InlineData("ref2", "Reference 2 name, mobile and relationship are required")]
+    [InlineData("nobank", "Select at least 1 bank")]
+    [InlineData("threebanks", "Maximum 2 banks allowed")]
+    public async Task Submit_MissingFinalSubmitField_IsRejected(string missing, string expected)
+    {
+        var (controller, db) = CreateController();
+        db.Users.Add(new User { FullName = "Ravi Kumar", Email = "ravi@efin.com", Role = UserRole.Sales, IsActive = true });
+        await db.SaveChangesAsync();
+        var dto = CreateValidDto("Ravi Kumar");
+        switch (missing)
+        {
+            case "pan": dto.Pan = null; break;
+            case "location": dto.LocationId = null; break;
+            case "dob": dto.Dob = null; break;
+            case "gender": dto.Gender = null; break;
+            case "aadhar": dto.Aadhar = null; break;
+            case "email": dto.Email = ""; break;
+            case "ref1": dto.R1Relation = null; break;
+            case "ref2": dto.R2Name = null; break;
+            case "nobank": dto.SelectedBanks = new(); break;
+            case "threebanks": dto.SelectedBanks = new() { new() { BankName = "A" }, new() { BankName = "B" }, new() { BankName = "C" } }; break;
+        }
+
+        var result = await controller.Submit(dto);
+
+        result.Should().BeOfType<BadRequestObjectResult>();
+        ExtractResponse(result).Errors.Should().Contain(e => e.StartsWith(expected));
+        (await db.Loans.CountAsync()).Should().Be(0);
+    }
+
+    // J-2: Vanilla step 6 gates on amount + tenure only; a blank rate (Submit
+    // defaults it to 12 %) must not block the pre-submit validation.
+    [Fact]
+    public async Task Validate_BlankInterestRate_IsNotABlocker()
+    {
+        var (controller, _) = CreateController();
+        var dto = CreateValidDto("Ravi Kumar");
+        dto.LoanRate = 0;
+
+        (await controller.Validate(dto)).Should().BeOfType<OkObjectResult>();
     }
 }

@@ -112,18 +112,16 @@ function usePostTracking(loanId: number) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (entry: { name: string; stage: string; status: string; comment: string; subNote?: string; overviewFlag?: OverviewFlag }) => {
-      const res = await api.post(`/api/loans/${loanId}/tracking`, {
+      // The server sets the matching Overview flag (entry.overviewFlag) itself
+      // when it records a completed check (TrackingController +
+      // VerificationChecks) — the durable equivalent of Vanilla's
+      // app.document_checked / bank_check / ecs_return / final_report being set
+      // alongside the tracking row. No second browser call: it was refused for
+      // the Sales Executive and could leave the check half-recorded.
+      return api.post(`/api/loans/${loanId}/tracking`, {
         name: entry.name, stage: entry.stage, assignedUser: '',
         status: entry.status, comment: entry.comment, subNote: entry.subNote ?? '',
       })
-      // After the audit entry lands, flip the matching Overview verification
-      // flag so its badge turns ✓ Done — the durable equivalent of Vanilla's
-      // app.document_checked / incom_check / bank_check / ecs_return /
-      // final_report being set alongside the tracking row.
-      if (entry.overviewFlag) {
-        await loansApi.updateOverview(loanId, { [entry.overviewFlag]: true })
-      }
-      return res
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tracking', loanId] })
@@ -552,6 +550,14 @@ function parseFiResult(subNote?: string): { resi?: string; office?: string } {
   return { resi, office }
 }
 
+// The FI REPORT entries only — the follow-up system note (fiSystemNote) is also
+// named 'EFIN- FI report' for pending results but carries no result lines, so
+// "latest entry" used to be that note and a Pending FI looked complete.
+// Same rule as the server's Acceptance gate (AcceptanceFiBlockerAsync).
+function isFiReportEntry(e: { name: string; subNote?: string }): boolean {
+  return e.name === 'EFIN- FI report' && /Final (Resi|Office) Address/i.test(e.subNote ?? '')
+}
+
 function DealConfirmModal({ loanId, customerName, customerEmail, onClose }: { loanId: number; customerName?: string; customerEmail?: string; onClose: () => void }) {
   const qc = useQueryClient()
   const dept = useCurrentUserDept()
@@ -559,7 +565,7 @@ function DealConfirmModal({ loanId, customerName, customerEmail, onClose }: { lo
     queryKey: ['tracking', loanId],
     queryFn: () => api.get<{ data: { name: string; subNote?: string; createdAt: string }[] }>(`/api/loans/${loanId}/tracking`).then(r => r.data.data ?? []),
   })
-  const fiEntries = (tracking ?? []).filter(e => e.name === 'EFIN- FI report')
+  const fiEntries = (tracking ?? []).filter(isFiReportEntry)
   const latestFi = fiEntries[fiEntries.length - 1]
   const { resi, office } = parseFiResult(latestFi?.subNote)
   const fiIncomplete = !latestFi
@@ -683,8 +689,8 @@ function FiReportModal({ loanId, onClose }: { loanId: number; onClose: () => voi
         name: sys.task, stage: 'System Comments', assignedUser: '',
         status: 'COMPLETE', comment: sys.comment, subNote: '',
       })
-      // Flip the Overview "FI Report" badge to ✓ Done.
-      await loansApi.updateOverview(loanId, { fiReportChecked: true })
+      // The "FI Report" badge turns ✓ Done server-side: recording the
+      // 'EFIN- FI report' entry above sets FiReportChecked (VerificationChecks).
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tracking', loanId] })
@@ -858,10 +864,15 @@ export default function LoanVerificationChecks({
   //   • Deal Confirmation → Approved; NACH / Customer Agreement → Acceptance
   //     (efin-app.js:3232-3235, 27457-27459).
   // Each check also hides once its flag is done, exactly like legacy's `if (!flag)`.
-  const cpaStage = loanStatus === 'Draft' || loanStatus === 'Submitted'
+  // Under Review is included only for applications moved to Underwriting before
+  // Underwriting required the checks: Offer entry needs them, so a missing check
+  // must stay completable there (the server accepts it in the same window).
+  // A new application cannot reach Under Review with a check missing, so
+  // nothing extra shows for it.
+  const cpaStage = loanStatus === 'Draft' || loanStatus === 'Submitted' || loanStatus === 'UnderReview'
   const fiStage  = loanStatus === 'UnderReview' || loanStatus === 'Approved' || loanStatus === 'Decision'
 
-  const fiEntries = (tracking ?? []).filter(e => e.name === 'EFIN- FI report')
+  const fiEntries = (tracking ?? []).filter(isFiReportEntry)
   const latestFi = fiEntries[fiEntries.length - 1]
   const fi = parseFiResult(latestFi?.subNote)
   const fiNegOrPending = !!latestFi && (fi.resi === 'Negative' || fi.resi === 'Pending' || fi.office === 'Negative' || fi.office === 'Pending')

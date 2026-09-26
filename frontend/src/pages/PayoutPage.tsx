@@ -300,7 +300,10 @@ function NewClaimModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   // Auto payout suggestion (legacy cl-suggested-amount-box) once the loan resolves.
   const { data: suggestion, isFetching: suggestLoading } = useQuery({
     queryKey: ['payout-suggest', matchedLoan?.id],
-    queryFn: () => payoutApi.suggestPayout(matchedLoan!.id).then(r => r.data.data),
+    queryFn: () => {
+      if (!matchedLoan) throw new Error('No application selected.')   // unreachable: enabled: !!matchedLoan
+      return payoutApi.suggestPayout(matchedLoan.id).then(r => r.data.data)
+    },
     enabled: !!matchedLoan, retry: false, staleTime: 30_000,
   })
 
@@ -324,8 +327,10 @@ function NewClaimModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   }, [matchedLoan?.id, suggestion])
 
   const submit = useMutation({
-    mutationFn: () => payoutApi.submitClaim({
-      loanId: matchedLoan!.id,
+    mutationFn: async () => {
+      if (!matchedLoan) throw new Error('Select an application first.')
+      return payoutApi.submitClaim({
+      loanId: matchedLoan.id,
       // Only meaningful (and only honored server-side) for Admin —
       // everyone else's value here is ignored by the backend anyway, but
       // omitting it for them keeps the payload matching what actually
@@ -355,7 +360,8 @@ function NewClaimModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
       asmEmail: f.asmEmail || undefined,
       asmName: f.asmName || undefined,
       asmMobile: f.asmMobile || undefined,
-    }),
+    })
+    },
     onSuccess: () => onSuccess(),
     onError: (err: unknown) => {
       const msg = (err as { response?: { data?: { message?: string; errors?: string[] } } })?.response?.data

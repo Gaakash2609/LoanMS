@@ -97,7 +97,10 @@ export default function LocationsPage() {
   // endpoint only overwrites Code when a non-blank one is supplied
   // (LocationsController.cs:60), so omitting it preserves the existing value.
   const update = useMutation({
-    mutationFn: () => api.put(`/api/locations/${editing!.id}`, payload()),
+    mutationFn: async () => {
+      if (!editing) throw new Error('No location selected.')
+      return api.put(`/api/locations/${editing.id}`, payload())
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['locations'] })
       setFeedback('Location saved ✓')

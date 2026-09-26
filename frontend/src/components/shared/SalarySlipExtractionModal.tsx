@@ -109,7 +109,8 @@ export default function SalarySlipExtractionModal({ onClose, onConfirm }: {
     if (!password.trim()) return
     setBusy(true)
     for (let i = 0; i < slips.length; i++) {
-      if (slips[i].status === 'locked' && slips[i].file) await extractSlip(i, slips[i].file!, password.trim())
+      const lockedFile = slips[i].file
+      if (slips[i].status === 'locked' && lockedFile) await extractSlip(i, lockedFile, password.trim())
     }
     setBusy(false)
   }
@@ -237,7 +238,7 @@ export default function SalarySlipExtractionModal({ onClose, onConfirm }: {
           {!canConfirm ? (
             <Button size="sm" onClick={runAnalysis} disabled={!canAnalyze}>🔍 Extract &amp; Verify Salary Data</Button>
           ) : (
-            <Button size="sm" onClick={() => onConfirm(slips.filter(s => s.file).map(s => s.file!), avgNet)}>✅ Confirm &amp; Attach to Documents</Button>
+            <Button size="sm" onClick={() => onConfirm(slips.flatMap(s => (s.file ? [s.file] : [])), avgNet)}>✅ Confirm &amp; Attach to Documents</Button>
           )}
         </div>
       </div>
