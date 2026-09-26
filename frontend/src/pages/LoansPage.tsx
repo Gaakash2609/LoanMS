@@ -454,7 +454,7 @@ export default function LoansPage() {
                           <td><span className="efin-mono-id">{loan.loanNumber}</span></td>
                           <td>
                             <div className="ap-person">
-                              <span className="ap-avatar" aria-hidden>{initials(loan.customerName || loan.customerPhone)}</span>
+                              <span className="ap-avatar" aria-hidden>{initials(loan.customerName)}</span>
                               <div className="min-w-0">
                                 <p className="ap-person-name">
                                   {loan.customerName || <span className="ap-muted">—</span>}
@@ -472,7 +472,9 @@ export default function LoansPage() {
                                     </span>
                                   )}
                                 </p>
-                                <p className="ap-person-phone">{loan.customerPhone}</p>
+                                {/* Mobile number intentionally NOT rendered on the Applications
+                                    list (security / PII — screen-share & shoulder-surfing risk).
+                                    It is still available on the loan detail page. */}
                               </div>
                             </div>
                           </td>

@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, type CSSProperties } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileText, Lock, Pencil, Check } from 'lucide-react'
-import { Card, CardHeader } from '@/components/ui/Card'
+import { Check } from 'lucide-react'
 import { InlineLoader } from '@/components/ui/LoadingSpinner'
 import { loansApi } from '@/api/loansApi'
 import { offerWorkflowApi } from '@/api/offerWorkflowApi'
@@ -205,164 +204,201 @@ export default function SanctionDetailCard({ loan }: { loan: Loan }) {
     return () => clearTimeout(timer.current)
   }, [sig, canEdit, save])
 
-  // ── UI helpers ────────────────────────────────────────────────────────────
-  const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-500'
-  const labelCls = 'text-xs font-medium text-gray-600 block mb-1'
+  // ── UI — verbatim look of Vanilla's Approval Details section ──────────────
+  // Shell: index.html:1089 (#detail-approval-section — 1.5px accent-tint
+  // border, 14px radius, gradient header strip with ✅, accent Outfit title,
+  // lock label as the header's sub-line, ▾/▸ collapse, 16/20 body padding).
+  // Read-only body: fieldGrid() (efin-app.js:3784) via the shared
+  // .detail-fgrid/.detail-fg/.field-val port. Editable body: the inline
+  // form-group inputs of renderDetailApproval (efin-app.js:7375). Legacy's
+  // rgba(26,79,163) tints use the brand blue #0a589a.
+  const [open, setOpen] = useState(true) // legacy _approvalSectionOpen = true
+
+  const fieldStyle: CSSProperties = {
+    border: '1px solid var(--border)', borderRadius: 8, padding: '7px 10px',
+    width: '100%', fontSize: 13, background: 'var(--surface2)', color: 'var(--text)',
+  }
+  const hintStyle: CSSProperties = { fontSize: 10, color: 'var(--text3)', marginTop: 3, fontStyle: 'italic' }
+  // Vanilla .form-grid gap is 14px (measured); the shared .detail-fgrid uses 16px.
+  const gridStyle: CSSProperties = { gap: 14 }
+  // Labels nested beside a toggle aren't direct children, so .detail-fg > label
+  // misses them; Vanilla's descendant .form-group label still styles them.
+  const nestedLabel: CSSProperties = {
+    fontSize: 10, textTransform: 'uppercase', letterSpacing: '1.1px', color: '#7a91c0', fontWeight: 800, marginBottom: 0,
+  }
+  const labelRow: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }
 
   const PillToggle = ({ on, onLabel, offLabel, onClick }: { on: boolean; onLabel: string; offLabel: string; onClick: () => void }) => (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold whitespace-nowrap transition-colors"
       style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px 3px 7px', borderRadius: 20,
+        fontSize: 10.5, fontWeight: 700, fontFamily: 'var(--font-body)', cursor: 'pointer',
+        border: '1.5px solid', whiteSpace: 'nowrap', transition: 'background .2s,color .2s,border-color .2s',
         background: on ? 'rgba(10,88,154,.11)' : 'rgba(122,138,170,.10)',
         borderColor: on ? 'rgba(10,88,154,.35)' : 'rgba(122,138,170,.3)',
-        color: on ? 'var(--accent)' : 'var(--text3, #7a8aaa)',
+        color: on ? 'var(--accent)' : 'var(--text3)',
       }}
     >
-      <span className="inline-block h-[7px] w-[7px] rounded-full" style={{ background: on ? 'var(--accent)' : 'var(--text3, #7a8aaa)' }} />
+      <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: on ? 'var(--accent)' : 'var(--text3)' }} />
       {on ? onLabel : offLabel}
     </button>
   )
 
-  const Tile = ({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) => (
-    <div className="rounded-xl border border-gray-100 bg-white px-4 py-3">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-1 text-lg font-semibold" style={accent ? { color: accent } : undefined}>{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>}
-    </div>
-  )
+  // fieldGrid() cell — no emoji: none of these labels are in legacy's iconMap.
+  const FG = ({ label, value }: { label: string; value: string }) => {
+    const empty = !value || value === '—'
+    return (
+      <div className="detail-fg">
+        <label>{label}</label>
+        <div className={`field-val ${empty ? 'empty' : ''}`}>{value || '—'}</div>
+      </div>
+    )
+  }
+
+  const lockLabel = canEdit
+    ? <span style={{ color: 'var(--success)', fontWeight: 600 }}>✏️ You can update these details</span>
+    : <span style={{ color: 'var(--text3)' }}>🔒 {sanctionActive
+        ? 'View-only — the sanction is generated and immutable; use Amendment in the Offers tab to correct it'
+        : !isAuthority
+          ? 'View-only — only the Chief Administrator, Zonal Manager and Credit Evaluation Manager / Officer edit sanction terms'
+          : `View-only — sanction terms are recorded after credit approval (application is ${loan.status})`}</span>
 
   return (
-    <Card>
-      <CardHeader
-        title={<><span className="section-icon-badge"><FileText size={15} /></span> Sanction Details</>}
-        subtitle="Sanctioned terms, fees & the bundled loan amount the EMI is charged on"
-      />
-
-      {/* Lock-state hint — legacy approval-section-lock-label (efin-app.js:7357). */}
-      <div className="mb-3 flex items-center justify-between gap-2 text-xs">
-        {canEdit ? (
-          <span className="inline-flex items-center gap-1 font-medium" style={{ color: 'var(--success)' }}>
-            <Pencil size={12} /> Editable by your role — changes are saved automatically
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-gray-500">
-            <Lock size={12} />
-            {sanctionActive
-              ? 'View-only — the sanction is generated and immutable; use Amendment in the Offers tab to correct it'
-              : !isAuthority
-                ? 'View-only — only the Chief Administrator, Zonal Manager and Credit Evaluation Manager / Officer edit sanction terms'
-                : `View-only — sanction terms are recorded after credit approval (application is ${loan.status})`}
-          </span>
-        )}
-        {canEdit && (
-          <span className="inline-flex items-center gap-1 text-[11px]">
-            {saveState === 'saving' && <><InlineLoader size={12} className="text-gray-400" /><span className="text-gray-400">Saving…</span></>}
+    <div style={{ border: '1.5px solid rgba(10,88,154,.25)', borderRadius: 14, overflow: 'hidden', background: '#fff' }}>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => !o) } }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', cursor: 'pointer',
+          background: 'linear-gradient(135deg,rgba(10,88,154,.07),rgba(10,88,154,.03))',
+          borderBottom: open ? '1px solid rgba(10,88,154,.12)' : 'none',
+        }}
+      >
+        <span style={{ fontSize: 16 }}>✅</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 800, color: 'var(--accent)' }}>Sanction Details</div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>{lockLabel}</div>
+        </div>
+        {canEdit && saveState !== 'idle' && (
+          <span className="inline-flex items-center gap-1" style={{ fontSize: 11 }}>
+            {saveState === 'saving' && <><InlineLoader size={12} className="text-gray-400" /><span style={{ color: 'var(--text3)' }}>Saving…</span></>}
             {saveState === 'saved' && <><Check size={12} style={{ color: 'var(--success)' }} /><span style={{ color: 'var(--success)' }}>Saved</span></>}
-            {saveState === 'error' && <span className="text-red-600">Save failed</span>}
+            {saveState === 'error' && <span style={{ color: 'var(--danger, #e31e25)' }}>Save failed</span>}
           </span>
         )}
+        <span style={{ color: 'var(--text3)', fontSize: 12 }}>{open ? '▾' : '▸'}</span>
       </div>
 
-      {canEdit ? (
-        /* ── Editable inline grid — legacy renderDetailApproval editable form ── */
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3">
-          <div>
-            <label className={labelCls}>Loan Amount (₹)</label>
-            <NumberInput min="0" step="1" value={loanAmt} onChange={e => setLoanAmt(e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Tenure (Months)</label>
-            <NumberInput min="1" step="1" value={tenureMo} onChange={e => setTenureMo(e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Rate of Interest — Annual (%)</label>
-            <NumberInput min="0" step="0.01" value={roiPct} onChange={e => onRoiChange(e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Flat Reducing Rate (%)</label>
-            <NumberInput min="0" step="0.01" value={flatStr}
-              onChange={e => { const v = e.target.value; setFlatManual(v.trim() !== ''); setFlatStr(v) }}
-              className={inputCls}
-            />
-            <p className="mt-0.5 text-[10px] italic text-gray-400">
-              {flatManual ? 'Saved value — edit to override' : 'Auto from ROI'}
-            </p>
-          </div>
-          <div>
-            <label className={labelCls}>Processing Fee (%)</label>
-            <NumberInput min="0" step="0.01" value={pfPercent} onChange={e => setPfPercent(e.target.value)} className={inputCls} placeholder="e.g. 1.5" />
-          </div>
-          <div>
-            <label className={labelCls}>EMI (Calculated — Rounded) ₹</label>
-            <NumberInput min="0" step="1" value={emiStr} onChange={e => setEmiStr(e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>EMI Date</label>
-            <select value={emiDay} onChange={e => setEmiDay(e.target.value)} className={inputCls}>
-              {EMI_DATE_DAYS.map(d => <option key={d} value={String(d)}>{emiDateOptionLabel(d)}</option>)}
-            </select>
-          </div>
-          <div>
-            <div className="mb-1 flex items-center justify-between gap-1">
-              <label className="text-xs font-medium text-gray-600">Insurance Amount (₹)</label>
-              <PillToggle on={insInBundled} onLabel="+ Insurance: ON" offLabel="+ Insurance: OFF" onClick={() => setInsInBundled(v => !v)} />
+      {open && (
+        <div style={{ padding: '16px 20px' }}>
+          {canEdit ? (
+            /* ── Editable form — legacy renderDetailApproval editable branch ── */
+            <div className="detail-fgrid" style={gridStyle}>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
+                  background: 'rgba(10,88,154,.06)', border: '1px solid rgba(10,88,154,.15)',
+                  borderRadius: 10, fontSize: 12, color: 'var(--accent)',
+                }}>
+                  ✏️ <strong>Editable by your role.</strong>&nbsp; Changes are saved immediately to the application record.
+                </div>
+              </div>
+              <div className="detail-fg">
+                <label>Loan Amount (₹)</label>
+                <NumberInput min="0" step="1" value={loanAmt} onChange={e => setLoanAmt(e.target.value)} style={fieldStyle} />
+              </div>
+              <div className="detail-fg">
+                <label>Tenure (Months)</label>
+                <NumberInput min="1" step="1" value={tenureMo} onChange={e => setTenureMo(e.target.value)} style={fieldStyle} />
+              </div>
+              <div className="detail-fg">
+                <label>Rate of Interest — Annual (%)</label>
+                <NumberInput min="0" step="0.01" value={roiPct} onChange={e => onRoiChange(e.target.value)} style={fieldStyle} />
+              </div>
+              <div className="detail-fg">
+                <label>Flat Reducing Rate (%)</label>
+                <NumberInput min="0" step="0.01" value={flatStr}
+                  onChange={e => { const v = e.target.value; setFlatManual(v.trim() !== ''); setFlatStr(v) }}
+                  style={fieldStyle}
+                />
+                <div style={hintStyle}>{flatManual ? 'Saved value — edit to override' : 'Auto from ROI'}</div>
+              </div>
+              <div className="detail-fg">
+                <label>Processing Fee (%)</label>
+                <NumberInput min="0" step="0.01" value={pfPercent} onChange={e => setPfPercent(e.target.value)} style={fieldStyle} />
+              </div>
+              <div className="detail-fg">
+                <label>EMI (Calculated — Rounded) ₹</label>
+                <NumberInput min="0" step="1" value={emiStr} onChange={e => setEmiStr(e.target.value)} style={fieldStyle} />
+              </div>
+              <div className="detail-fg">
+                <label>EMI Date</label>
+                <select value={emiDay} onChange={e => setEmiDay(e.target.value)} style={fieldStyle}>
+                  {EMI_DATE_DAYS.map(d => <option key={d} value={String(d)}>{emiDateOptionLabel(d)}</option>)}
+                </select>
+              </div>
+              <div className="detail-fg">
+                <div style={labelRow}>
+                  <label style={nestedLabel}>Insurance Amount (₹)</label>
+                  <PillToggle on={insInBundled} onLabel="+ Insurance: ON" offLabel="+ Insurance: OFF" onClick={() => setInsInBundled(v => !v)} />
+                </div>
+                <NumberInput min="0" step="1" value={insurance} onChange={e => setInsurance(e.target.value)} style={fieldStyle} />
+              </div>
+              <div className="detail-fg">
+                <div style={labelRow}>
+                  <label style={nestedLabel}>Bundled Loan Amount (₹)</label>
+                  <PillToggle on={pfInBundled} onLabel="+ Proc. Fee: ON" offLabel="+ Proc. Fee: OFF" onClick={() => setPfInBundled(v => !v)} />
+                </div>
+                {/* Computed — legacy dvAutoRecalc overwrites this on any source
+                    change and never persists a manual value (only the flags). */}
+                <NumberInput value={bundled || ''} readOnly style={{ ...fieldStyle, cursor: 'default' }} />
+              </div>
+              <div className="detail-fg">
+                <label>BT (Balance Transfer)</label>
+                <select value={isBt ? 'YES' : 'NO'} onChange={e => setIsBt(e.target.value === 'YES')} style={fieldStyle}>
+                  <option value="NO">NO</option>
+                  <option value="YES">YES</option>
+                </select>
+              </div>
+              <div className="detail-fg">
+                <label>GST Applicable (%)</label>
+                <NumberInput min="0" step="0.01" value={gst} onChange={e => setGst(e.target.value)} style={fieldStyle} />
+              </div>
+              <div className="detail-fg">
+                <label>Stamp Duty</label>
+                <input type="text" value={stampDuty} onChange={e => setStampDuty(e.target.value)} style={fieldStyle} />
+              </div>
             </div>
-            <NumberInput min="0" step="1" value={insurance} onChange={e => setInsurance(e.target.value)} className={inputCls} placeholder="0" />
-          </div>
-          <div>
-            <div className="mb-1 flex items-center justify-between gap-1">
-              <label className="text-xs font-medium text-gray-600">Bundled Loan Amount (₹)</label>
-              <PillToggle on={pfInBundled} onLabel="+ Proc. Fee: ON" offLabel="+ Proc. Fee: OFF" onClick={() => setPfInBundled(v => !v)} />
+          ) : (
+            /* ── Read-only — legacy fieldGrid rows (efin-app.js:7472-7488):
+                 same labels, order and formats; plain values, no colouring. ── */
+            <div className="detail-fgrid" style={gridStyle}>
+              <FG label="Your Loan Amount" value={fmt(loanAmtNum)} />
+              <FG label="Tenure (Years)" value={tenureNum ? `${+(tenureNum / 12).toFixed(1)} yrs` : '—'} />
+              <FG label="Tenure (Months)" value={tenureNum ? `${tenureNum} months` : '—'} />
+              <FG label="Rate of Interest (Annual)" value={pct(roiNum)} />
+              <FG label="Flat Reducing Rate" value={pct(flatNum)} />
+              <FG label="Processing Fee" value={pct(pfNum)} />
+              <FG label="EMI (Calculated)" value={fmt(emiNum)} />
+              <FG label="EMI Date" value={sd?.emiDate ? emiDateOptionLabel(parseInt(emiDay, 10) || 3) : '—'} />
+              <FG label="Insurance" value={fmt(insNum)} />
+              <FG label="Bundled Loan Amount" value={fmt(bundled)} />
+              <FG label="Proc. Fee in Bundled" value={pfInBundled ? '✅ Included' : '—  Excluded'} />
+              <FG label="Insurance in Bundled" value={insInBundled ? '✅ Included' : '—  Excluded'} />
+              <FG label="BT (Balance Transfer)" value={isBt ? 'YES' : 'NO'} />
+              <FG label="GST Applicable" value={pct(gstNum)} />
+              <FG label="Stamp Duty" value={stampDuty || '—'} />
             </div>
-            {/* Read-only computed — legacy dvAutoRecalc overwrites this field on
-                any source change and never persists a manual value (only the
-                bundle flag persists), so it is always the computed amount. */}
-            <NumberInput value={bundled || ''} readOnly disabled className={inputCls} />
-            <p className="mt-0.5 text-[10px] italic text-gray-400">
-              {bundled > loanAmtNum ? `+${formatCurrency(bundled - loanAmtNum)} financed` : 'Auto — no add-ons financed'}
-            </p>
-          </div>
-          <div>
-            <label className={labelCls}>BT (Balance Transfer)</label>
-            <select value={isBt ? 'YES' : 'NO'} onChange={e => setIsBt(e.target.value === 'YES')} className={inputCls}>
-              <option value="NO">NO</option>
-              <option value="YES">YES</option>
-            </select>
-          </div>
-          <div>
-            <label className={labelCls}>GST Applicable (%)</label>
-            <NumberInput min="0" step="0.01" value={gst} onChange={e => setGst(e.target.value)} className={inputCls} placeholder="18" />
-          </div>
-          <div>
-            <label className={labelCls}>Stamp Duty</label>
-            <input type="text" value={stampDuty} onChange={e => setStampDuty(e.target.value)} className={inputCls} placeholder="As per government applicable" />
-          </div>
-        </div>
-      ) : (
-        /* ── Read-only grid — legacy renderDetailApproval read-only fieldGrid
-             (efin-app.js:7472-7488): same rows, labels and formats. ── */
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <Tile label="Loan Amount" value={fmt(loanAmtNum)} sub={sd?.sanctionLoanAmt != null ? 'Sanctioned' : loan.approvedAmount != null ? 'Approved' : undefined} accent="var(--accent)" />
-          <Tile label="Tenure (Years)" value={tenureNum ? `${+(tenureNum / 12).toFixed(1)} yrs` : '—'} accent="var(--text2)" />
-          <Tile label="Tenure (Months)" value={tenureNum ? `${tenureNum} months` : '—'} accent="var(--text2)" />
-          <Tile label="Rate of Interest (Annual)" value={pct(roiNum)} accent="var(--text2)" />
-          <Tile label="Flat Reducing Rate" value={pct(flatNum)} accent="var(--text2)" />
-          <Tile label="Processing Fee" value={pct(pfNum)} accent="var(--warn)" />
-          <Tile label="EMI (Calculated)" value={fmt(emiNum)} accent="var(--accent3)" />
-          <Tile label="EMI Date" value={sd?.emiDate ? emiDateOptionLabel(parseInt(emiDay, 10) || 3) : '—'} accent="var(--text2)" />
-          <Tile label="Insurance" value={fmt(insNum)} accent="#a159ff" />
-          <Tile label="Bundled Loan Amount" value={fmt(bundled)} sub={bundled > loanAmtNum ? `+${formatCurrency(bundled - loanAmtNum)} financed` : undefined} accent="var(--success)" />
-          <Tile label="Proc. Fee in Bundled" value={pfInBundled ? '✅ Included' : '— Excluded'} accent="var(--text2)" />
-          <Tile label="Insurance in Bundled" value={insInBundled ? '✅ Included' : '— Excluded'} accent="var(--text2)" />
-          <Tile label="BT (Balance Transfer)" value={isBt ? 'YES' : 'NO'} accent="var(--text2)" />
-          <Tile label="GST Applicable" value={pct(gstNum)} accent="var(--text2)" />
-          <Tile label="Stamp Duty" value={stampDuty || '—'} accent="var(--text2)" />
+          )}
+
+          {error && <p className="mt-3 text-sm" style={{ color: 'var(--danger, #e31e25)' }}>{error}</p>}
         </div>
       )}
-
-      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-    </Card>
+    </div>
   )
 }

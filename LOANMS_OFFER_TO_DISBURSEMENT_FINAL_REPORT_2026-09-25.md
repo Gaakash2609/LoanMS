@@ -149,9 +149,8 @@ Bugs found and fixed in this pass: (6) re-check bumped every offer's version eve
 - Tranche disbursement not implemented (legacy + backend have a single Disburse action; the schema allows more rows).
 - Not invented (no existing policy): role-wise approval amount/ROI limits (only a rule-level "max approvable breach"),
   maker-checker on rule changes (every change is a new version + audit row).
-- **Production database migration has NOT been run** — `deploy/migrations/20260925_OfferWorkflow_Complete.idempotent.sql`
-  must be applied by you (or the API applies both migrations on start-up). The first migration refuses to run if any
-  application / status-history row still holds NI or Cancelled.
+- **Production:** deployed on 2026-09-26 (see §6). Not yet checked with a real login in production — the
+  owner must sign in at app.mudrahub.com and open a loan's **Offers** tab (I may not enter production passwords).
 - ESLint: 19 warnings remain, all pre-existing `no-non-null-assertion` in 13 files outside this feature (left
   untouched by the scope rule); every file changed here lints clean.
 
@@ -161,3 +160,20 @@ Bugs found and fixed in this pass: (6) re-check bumped every offer's version eve
 **RBAC:** 4 authority roles enforced server-side; backend 11×18 matrix (199/199) + frontend button matrix; masking + IDOR verified.
 **Migrations:** `20260925041918_AddOfferWorkflowAndStatusChecks`, `20260925091531_AddBureauUploadOfferValidityTaskPause`.
 **api-bridge.js:** not extended (legacy shell unused); its approve/disburse calls now get an explicit 409.
+
+### 6. Production deployment — 2026-09-26
+
+| Item | Value |
+|---|---|
+| Pre-deploy RDS snapshot | `loanms-pre-offerworkflow-20260926-0350` (instance `loanms-staging`, status *available*, 100 %) |
+| Image | `664418956749.dkr.ecr.ap-south-1.amazonaws.com/loanms:offerworkflow-20260926` (digest `sha256:0239366d12521c7fb6de13b27cd8cc65e17819e7409c706f296b34455f0427fb`), built from this package with `deploy/docker/Dockerfile` |
+| ECS | cluster `loanms-prod`, service `loanms-api`: task definition `loanms-prod:93` → **`loanms-prod:94`** (a copy of :93 with only the image changed; secrets and settings untouched) |
+| Rollout | started 09:38 IST, completed 09:40 IST; new task HEALTHY, 0 failed tasks, old task stopped |
+| Database | both migrations applied by the API on start-up (`MigrateAsync`; a failure there stops start-up, so a healthy task proves they applied). The NI/Cancelled guard passed — production held no such rows. |
+| Live checks (no login) | `/health` 200; `/` and `/login` serve the React app; `/api/loans/{id}/workflow`, `/api/deviation-rules`, `/api/reports/offer-pipeline` exist and answer 401 without a token; the served bundle contains the new Offers UI (bureau upload, re-check, reassign, lender validity) |
+| Not checked | anything behind a production login (owner to verify) |
+
+**Rollback:** `aws ecs update-service --region ap-south-1 --cluster loanms-prod --service loanms-api --task-definition loanms-prod:93`.
+The migrations are additive, but once any application is moved to the new **Offer** stage the previous version
+cannot read that status — after that, fix forward instead of rolling back (or restore the snapshot above,
+which loses every change made since 09:20 IST on 2026-09-26).

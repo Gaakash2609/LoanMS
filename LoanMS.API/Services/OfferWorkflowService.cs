@@ -86,6 +86,7 @@ public sealed class OfferWorkflowService : IOfferWorkflowService
         "EFIN-Approved", "EFIN-Credit Rejected", "EFIN-Sanction Generated", "EFIN-Sanction Cancelled",
         "EFIN-Sanction Revoked", "EFIN-Sanction Amendment", "EFIN-Disbursed", "EFIN-Disbursement Reversed",
         "EFIN-Deviation Re-evaluated", "EFIN-Deviation Reassigned", "EFIN-Bureau Report Uploaded",
+        "EFIN-Deviation Closed",
     };
 
     public static readonly string[] BureauProviders = { "CIBIL", "Experian", "Equifax", "CRIF High Mark" };
@@ -260,14 +261,25 @@ public sealed class OfferWorkflowService : IOfferWorkflowService
     public async Task<ApiResponseDto<LoanWorkflowDto>> GetAsync(int loanId, WorkflowCaller c)
     {
         if (!await InScopeAsync(loanId, c.UserId, c.Role)) return NotFound();
-        var loan = await _db.Loans.AsNoTracking().Include(l => l.Customer).FirstOrDefaultAsync(l => l.Id == loanId);
-        if (loan == null) return NotFound();
+        if (!await _db.Loans.AsNoTracking().AnyAsync(l => l.Id == loanId)) return NotFound();
 
         // Lazy expiry (also enforced at every action): an active offer past its
         // validity is expired before anyone can see or act on it as valid.
-        try { if (await ExpireOffersAsync(loanId, c)) await _db.SaveChangesAsync(); }
+        // Then repair an application left at Decision with no open deviation
+        // request (e.g. the final offer expired while the deviation was waiting
+        // for the approver) — otherwise nobody gets an Approve/Reject button and
+        // the application is stuck at Decision for good.
+        try
+        {
+            if (await ExpireOffersAsync(loanId, c)) await _db.SaveChangesAsync();
+            if (await ReconcileDecisionStageAsync(loanId, c)) await _db.SaveChangesAsync();
+        }
         catch (DbUpdateException) { /* a concurrent action expired/changed it first — the fresh read below shows it */ }
         _db.ChangeTracker.Clear();
+
+        // Read the loan AFTER the repair above so the status shown is current.
+        var loan = await _db.Loans.AsNoTracking().Include(l => l.Customer).FirstOrDefaultAsync(l => l.Id == loanId);
+        if (loan == null) return NotFound();
 
         var masked = Is(c.Role, MaskedRoles);
         var offers = await _db.ApplicationOffers.AsNoTracking().Include(o => o.Revisions)
@@ -528,7 +540,12 @@ public sealed class OfferWorkflowService : IOfferWorkflowService
     /// <summary>Expire active offers past validity (before sanction). Returns true if anything changed (not saved).</summary>
     private async Task<bool> ExpireOffersAsync(int loanId, WorkflowCaller c)
     {
-        var today = Now;
+        // "Valid until 26-Sep" means valid for the WHOLE of 26-Sep. ValidUntil is
+        // stored as a date (midnight), so comparing it with the current time
+        // expired offers at 00:00 of their last valid day — and an offer entered
+        // as "valid until today" expired the moment it was saved. That silently
+        // closed pending deviation requests before the approver could act.
+        var today = Now.Date;
         var hasSanction = await _db.Sanctions.AnyAsync(s => s.LoanId == loanId && s.Status == S.SanctionActive);
         if (hasSanction) return false; // the sanction snapshot is what counts from here on
         var expiring = await _db.ApplicationOffers
@@ -549,6 +566,33 @@ public sealed class OfferWorkflowService : IOfferWorkflowService
                 wasFinal ? "The expired offer was the selected final offer — select a valid offer or revise it." : " ", c with { Role = "System" });
         }
         return expiring.Count > 0;
+    }
+
+    /// <summary>
+    /// Self-heal for an application sitting at Decision without any open
+    /// (Raised) deviation request. Decision exists only while a deviation waits
+    /// for an approver; if that request was closed some other way (offer
+    /// expired, superseded, withdrawn) the application must return to Offer,
+    /// otherwise no one sees Approve/Reject and nothing can move it forward.
+    /// Also resets an offer still flagged "Raised" with no raised request so the
+    /// deviation can be raised again. Stages changes; the caller saves.
+    /// </summary>
+    private async Task<bool> ReconcileDecisionStageAsync(int loanId, WorkflowCaller c)
+    {
+        var loan = await _db.Loans.FirstOrDefaultAsync(l => l.Id == loanId);
+        if (loan == null || loan.Status != LoanStatus.Decision) return false;
+        if (await _db.OfferDeviations.AnyAsync(d => d.LoanId == loanId && d.Status == S.RequestRaised)) return false;
+
+        foreach (var o in await _db.ApplicationOffers.Where(o => o.LoanId == loanId && o.DeviationStatus == S.DevRaised).ToListAsync())
+        {
+            o.DeviationStatus = S.DevRequired;
+            o.Version++; o.UpdatedAt = Now;
+        }
+        const string why = "No open deviation request (it was closed — e.g. the offer expired or was revised). Application returned to the Offer stage.";
+        Transition(loan, LoanStatus.Offer, "[AUTO] " + why, c.UserId);
+        Timeline(loanId, "EFIN-Deviation Closed", why, "Select / revise the offer and raise the deviation again if still required.", c with { Role = "System" });
+        Audit("Loan", loanId, "DecisionStageReconciled", new { Status = LoanStatus.Decision.ToString() }, new { Status = LoanStatus.Offer.ToString() }, why, c);
+        return true;
     }
 
     private async Task CloseOpenDeviationsAsync(int offerId, string reason)

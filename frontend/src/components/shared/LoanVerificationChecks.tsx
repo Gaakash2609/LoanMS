@@ -742,7 +742,7 @@ function FiReportModal({ loanId, onClose }: { loanId: number; onClose: () => voi
 // its tracking entry — LoanService.UpdateStatusAsync enforces the same gate
 // server-side on Disburse, and LoanDetailPage's client-side gate reads these
 // flags first, falling back to tracking-entry presence for older loans.
-function SimpleActionModal({ loanId, title, subtitle, entryName, confirmLabel, overviewFlag, onClose }: {
+export function SimpleActionModal({ loanId, title, subtitle, entryName, confirmLabel, overviewFlag, onClose }: {
   loanId: number; title: string; subtitle: string; entryName: string; confirmLabel: string; overviewFlag?: OverviewFlag; onClose: () => void
 }) {
   const post = usePostTracking(loanId)

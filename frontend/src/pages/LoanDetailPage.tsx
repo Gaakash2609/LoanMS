@@ -17,12 +17,12 @@ import {
   PauseCircle, PlayCircle,
   Lightbulb, Copy, Check, Ellipsis, ChevronDown, Archive,
 } from 'lucide-react'
-import type { Loan, ApiResponse } from '@/types'
+import type { Loan } from '@/types'
 import { useState, useMemo, useEffect, lazy, Suspense } from 'react'
 import type { ReactNode } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import ObligationsWorkspace from '@/components/shared/ObligationsWorkspace'
-import { Plus, Trash2, Pencil, RotateCcw } from 'lucide-react'
+import { Trash2, RotateCcw } from 'lucide-react'
 import LenderEmailCard from '@/components/shared/LenderEmailCard'
 import { LENDER_EMAIL_VISIBLE_STAGES } from '@/utils/lenderEmailTemplates'
 import { perfiosApi } from '@/api/perfiosApi'
@@ -32,7 +32,6 @@ import LoanVerificationChecks from '@/components/shared/LoanVerificationChecks'
 import OffersTab, { workflowKey } from '@/components/shared/OffersTab'
 import { offerWorkflowApi } from '@/api/offerWorkflowApi'
 import { loansApi } from '@/api/loansApi'
-import api from '@/api/axios'
 
 // Lazy: each is a whole tab's worth of code (TrackingPage is a full page
 // component reused here; PerfiosWorkflow pulls in the pdfjs-dist PDF
@@ -49,6 +48,7 @@ const PerfiosWorkflow = lazy(() => import('@/components/shared/PerfiosWorkflow')
 // enough on its own to keep out of the main route chunk.
 const PerfiosAnalysisResults = lazy(() => import('@/components/shared/PerfiosAnalysisResults'))
 import LoanDocumentsCard from '@/components/shared/LoanDocumentsCard'
+import BankDetailsPanel from '@/components/shared/BankDetailsPanel'
 import SanctionDetailCard from '@/components/shared/SanctionDetailCard'
 import { hasReachedSanctionStage } from '@/utils/loanStage'
 import IncomeVerificationPanel from '@/components/shared/IncomeVerificationPanel'
@@ -161,151 +161,9 @@ function ObligationsTab({ loanId, loan }: { loanId: number; loan: Loan }) {
   return <ObligationsWorkspace loanId={loanId} loan={loan} />
 }
 
-// ── Bank Details sub-tab — Vanilla's #lender-panel-banks (index.html:1147):
-// the per-bank lender-processing table (Bank / Temp App No / App No / Approved
-// Loan / Remarks) with a View↔Edit toolbar, plus the Disbursement
-// Pre-Conditions checklist below it. React previously showed only the
-// bank-statement extraction card here; the bankLines table (data already on
-// loan.bankLines, written via PUT /bank-lines) had no UI on this tab.
-type BankLineRow = { id?: number; bankName: string; tempApplicationNumber: string; applicationNumber: string; approvedLoan: string; remarks: string }
-const EMPTY_BANK_ROW: BankLineRow = { bankName: '', tempApplicationNumber: '', applicationNumber: '', approvedLoan: '', remarks: '' }
-
-function BankLinesCard({ loan }: { loan: Loan }) {
-  const qc = useQueryClient()
-  const user = useAuthStore(s => s.user)
-  // Mirrors PUT /api/loans/{id}/bank-lines [Authorize(Roles=...)].
-  const canEdit = ['Admin', 'Manager', 'LoginTeam', 'TeamLeader', 'LocationHead', 'OperationManager', 'Accounts', 'ProductTeam'].includes(user?.role ?? '')
-  // Vanilla hides the Application Number column for Partner users
-  // (index.html:1174 `bank-col-appno` gets style="display:none" when
-  // currentUser.role==='partner') — Partners only ever see the Temp
-  // Application Number, not the lender-assigned one.
-  const isPartner = user?.role === 'Partner'
-  const toRows = (): BankLineRow[] => (loan.bankLines ?? []).map(b => ({
-    id: b.id, bankName: b.bankName ?? '', tempApplicationNumber: b.tempApplicationNumber ?? '',
-    applicationNumber: b.applicationNumber ?? '', approvedLoan: b.approvedLoan != null ? String(b.approvedLoan) : '',
-    remarks: b.remarks ?? '',
-  }))
-  const [editing, setEditing] = useState(false)
-  const [rows, setRows] = useState<BankLineRow[]>(toRows)
-  const [error, setError] = useState('')
-
-  // Disbursement pre-conditions status (NACH / Customer Agreement via tracking,
-  // Doc Check via the Overview flag) — legacy's pre-condition checklist.
-  const { data: tracking } = useQuery({
-    queryKey: ['tracking', loan.id],
-    queryFn: () => api.get<ApiResponse<{ name: string }[]>>(`/api/loans/${loan.id}/tracking`).then(r => r.data.data ?? []),
-  })
-  const trk = tracking ?? []
-  const preconds = [
-    { label: 'NACH / eMandate Setup', note: 'Register NACH mandate for auto-debit of EMIs', done: !!loan.nachDone || trk.some(e => e.name === 'EFIN-Nach') },
-    { label: 'Customer Agreement Signed', note: 'Loan agreement signed by customer', done: !!loan.customerAgreementDone || trk.some(e => e.name === 'EFIN-Customer Agreement') },
-    { label: 'Document Check Complete', note: 'All KYC and income documents verified', done: !!loan.documentChecked },
-  ]
-  const pendingCount = preconds.filter(p => !p.done).length
-
-  const save = useMutation({
-    mutationFn: () => loansApi.updateBankLines(loan.id, rows.filter(r => r.bankName.trim()).map(r => ({
-      bankName: r.bankName.trim(), tempApplicationNumber: r.tempApplicationNumber.trim(),
-      applicationNumber: r.applicationNumber.trim() || undefined,
-      approvedLoan: r.approvedLoan ? Number(r.approvedLoan) : undefined,
-      remarks: r.remarks.trim() || undefined,
-    }))),
-    onSuccess: () => { setEditing(false); setError(''); qc.invalidateQueries({ queryKey: LOAN_KEYS.detail(loan.id) }) },
-    onError: (err: unknown) => {
-      const d = (err as { response?: { data?: { message?: string } } })?.response?.data
-      setError(d?.message || 'Could not save bank details.')
-    },
-  })
-
-  const set = (i: number, k: keyof BankLineRow, v: string) => setRows(p => p.map((r, j) => j === i ? { ...r, [k]: v } : r))
-
-  return (
-    <div className="space-y-5">
-      <Card>
-        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text3)' }}>
-            <span className="w-2 h-2 rounded-full" style={{ background: editing ? 'var(--accent)' : 'var(--text3)' }} />
-            {editing ? 'Edit mode' : 'View mode'}
-          </div>
-          {canEdit && (editing ? (
-            <div className="flex gap-2">
-              <Button size="sm" loading={save.isPending} onClick={() => save.mutate()}>Save</Button>
-              <Button size="sm" variant="secondary" onClick={() => { setRows(toRows()); setEditing(false); setError('') }}>Cancel</Button>
-            </div>
-          ) : (
-            <Button size="sm" onClick={() => setEditing(true)}><Pencil size={13} className="mr-1" /> Edit</Button>
-          ))}
-        </div>
-        {error && <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
-        <div className="overflow-x-auto rounded-[14px] border border-token">
-          <table className="table-premium w-full border-collapse" style={{ minWidth: 820 }}>
-            <thead>
-              <tr className="text-left border-b border-token">
-                {['Bank', 'Temporary Application Number', 'Application Number', 'Approved Loan Amount', 'Remarks']
-                  .filter(h => !(isPartner && h === 'Application Number')).map(h => (
-                  <th key={h} className="py-3 px-4 text-[10.5px] font-semibold uppercase" style={{ letterSpacing: '1px', color: 'var(--text3)' }}>{h}</th>
-                ))}
-                {editing && <th className="w-10" />}
-              </tr>
-            </thead>
-            <tbody>
-              {(editing ? rows : toRows()).length === 0 ? (
-                <tr><td colSpan={(isPartner ? 4 : 5) + (editing ? 1 : 0)} className="py-8 text-center text-sm" style={{ color: 'var(--text3)' }}>No lender lines yet.</td></tr>
-              ) : (editing ? rows : toRows()).map((r, i) => (
-                <tr key={r.id ?? i} className="border-b border-token last:border-0">
-                  {editing ? (<>
-                    <td className="p-2"><input className="w-full border border-gray-300 rounded px-2 py-1 text-sm" value={r.bankName} onChange={e => set(i, 'bankName', e.target.value)} placeholder="Bank / NBFC" /></td>
-                    <td className="p-2"><input className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono" value={r.tempApplicationNumber} onChange={e => set(i, 'tempApplicationNumber', e.target.value)} /></td>
-                    {!isPartner && <td className="p-2"><input className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono" value={r.applicationNumber} onChange={e => set(i, 'applicationNumber', e.target.value)} /></td>}
-                    <td className="p-2"><input className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-right" value={r.approvedLoan} onChange={e => set(i, 'approvedLoan', e.target.value)} /></td>
-                    <td className="p-2"><input className="w-full border border-gray-300 rounded px-2 py-1 text-sm" value={r.remarks} onChange={e => set(i, 'remarks', e.target.value)} /></td>
-                    <td className="p-2 text-center"><button onClick={() => setRows(p => p.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
-                  </>) : (<>
-                    <td className="py-3 px-4 font-medium" style={{ color: 'var(--text)' }}>{r.bankName || '—'}</td>
-                    <td className="py-3 px-4 font-mono text-xs" style={{ color: 'var(--text2)' }}>{r.tempApplicationNumber || '—'}</td>
-                    {!isPartner && <td className="py-3 px-4 font-mono text-xs" style={{ color: 'var(--text2)' }}>{r.applicationNumber || '—'}</td>}
-                    <td className="py-3 px-4 font-mono tabular-nums text-right">{r.approvedLoan ? formatCurrency(Number(r.approvedLoan)) : '0'}</td>
-                    <td className="py-3 px-4 text-xs" style={{ color: 'var(--text3)' }}>{r.remarks || '—'}</td>
-                  </>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {editing && (
-          <button onClick={() => setRows(p => [...p, { ...EMPTY_BANK_ROW }])}
-            className="mt-3 text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--accent)' }}>
-            <Plus size={13} /> Add lender line
-          </button>
-        )}
-      </Card>
-
-      {/* Disbursement Pre-Conditions — legacy checklist. Actions live in the
-          Timeline tab (NACH / Customer Agreement / checks); this mirrors the
-          status shown in Vanilla's Lender Details panel. */}
-      <Card>
-        <CardHeader
-          title={<><span className="section-icon-badge">🔒</span> Disbursement Pre-Conditions</>}
-          action={<span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: pendingCount ? 'rgba(230,126,0,.14)' : 'rgba(0,212,170,.15)', color: pendingCount ? 'var(--warn)' : 'var(--accent2)' }}>{pendingCount ? `${pendingCount} Pending` : 'All Done'}</span>}
-        />
-        <div className="space-y-2.5">
-          {preconds.map(p => (
-            <div key={p.label} className="flex items-center gap-3 py-2 px-3 rounded-lg" style={{ background: 'var(--surface2)' }}>
-              <span>{p.done ? '✅' : '⏳'}</span>
-              <div className="flex-1">
-                <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{p.label}</p>
-                <p className="text-xs" style={{ color: 'var(--text3)' }}>{p.note}</p>
-              </div>
-              <span className="text-[11px] font-bold" style={{ color: p.done ? 'var(--accent2)' : 'var(--warn)' }}>{p.done ? 'Done' : 'Pending'}</span>
-            </div>
-          ))}
-          <p className="text-[11px] pt-1" style={{ color: 'var(--text3)' }}>Complete these from the Timeline tab's action bar (NACH, Customer Agreement, checks).</p>
-        </div>
-      </Card>
-    </div>
-  )
-}
-
+// ── Bank Details sub-tab — now BankDetailsPanel (components/shared), a 1:1
+// port of Vanilla's #lender-panel-banks (renderBankBody / bankDetailsSave /
+// _renderDisburseChecklist). ──────────────────────────────────────────────
 function BankIncredTabs({ loan }: { loan: Loan }) {
   const loanId = loan.id
   const [tab, setTab] = useState<'bank' | 'incred' | 'lenderEmail'>('bank')
@@ -325,7 +183,8 @@ function BankIncredTabs({ loan }: { loan: Loan }) {
   // own color regardless of active state (InCred's ⚡ stays orange even when
   // it isn't the selected sub-tab), which a recolored icon component can't do.
   const tabs = [
-    { key: 'bank' as const, label: 'Loan Source', emoji: '🏦', allowed: canBank },
+    // Vanilla sub-tab label (index.html #lender-subtab-banks): "Bank Details".
+    { key: 'bank' as const, label: 'Bank Details', emoji: '🏦', allowed: canBank },
     // U+FE0F forces the coloured emoji glyph; without it ⚡ can render as a
     // plain text glyph in the tab's grey instead of orange.
     { key: 'incred' as const, label: 'InCred', emoji: '\u26A1\uFE0F', allowed: canIncred },
@@ -356,7 +215,7 @@ function BankIncredTabs({ loan }: { loan: Loan }) {
         // account-extraction card (AccountDetailsCard) was removed from this
         // tab — Perfios report itself lives under Reports, not duplicated here.
         <div className="space-y-6">
-          <BankLinesCard loan={loan} />
+          <BankDetailsPanel loan={loan} />
         </div>
       )}
     </div>

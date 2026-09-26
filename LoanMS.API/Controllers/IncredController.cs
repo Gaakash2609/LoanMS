@@ -6,7 +6,9 @@ using LoanMS.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -84,7 +86,7 @@ public class IncredController : BaseController
             try
             {
                 var secret = _protector.Unprotect(encSecret);
-                return (baseUrl, clientId, secret);
+                return (_normalizeBaseUrl(baseUrl), clientId, secret);
             }
             catch (Exception ex)
             {
@@ -102,6 +104,21 @@ public class IncredController : BaseController
         throw new InvalidOperationException(
             "InCred is not configured. Set incred_base_url, incred_client_id, and " +
             "incred_client_secret_enc in Settings before using InCred integration endpoints.");
+    }
+
+    // ── Base URL normalisation (incred_mixin.py parity) ──────────────────────
+    // The reference calls https://api.incred.com/v3/auth/... and
+    // https://api.incred.com/v3/digital-partner/... — every InCred route lives
+    // under /v3. Settings previously suggested the bare host
+    // (https://api.incred.com), which made every call 404. A host-only value is
+    // completed with /v3; any value that already carries a path is kept as-is.
+    internal static string _normalizeBaseUrl(string baseUrl)
+    {
+        var trimmed = baseUrl.Trim().TrimEnd('/');
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) &&
+            (uri.AbsolutePath == "/" || uri.AbsolutePath == ""))
+            return trimmed + "/v3";
+        return trimmed;
     }
 
     // ── Token caching (Item 4) ──────────────────────────────────────────────
@@ -279,9 +296,10 @@ public class IncredController : BaseController
         var client = _http.CreateClient("incred");
         var (resp, body) = await _sendIncredRequestAsync(method, url, token, jsonBody, client, opName, ct, allowTransientRetry);
 
-        if (resp != null && (int)resp.StatusCode == 401)
+        if (resp != null && _isAuthFailure((int)resp.StatusCode, body))
         {
-            _log.LogWarning("InCred {Op} got 401 with cached token — refreshing token and retrying once", opName);
+            _log.LogWarning("InCred {Op} got auth failure ({Status}) with cached token — refreshing token and retrying once",
+                opName, resp.StatusCode);
             var freshToken = await _getTokenCached(creds, ct, forceRefresh: true);
             if (freshToken == null)
                 throw new InvalidOperationException("Failed to refresh InCred token after 401");
@@ -293,6 +311,27 @@ public class IncredController : BaseController
 
         _log.LogInformation("InCred {Op} [{Status}]: {Body}", opName, resp.StatusCode, body[..Math.Min(body.Length, 300)]);
         return ((int)resp.StatusCode, body);
+    }
+
+    // ── Auth-failure detection (incred_mixin.py parity) ─────────────────────
+    // The reference fetches a fresh token on every call and treats
+    // `statusCode == 403` or `invalid == true` in InCred's JSON body as
+    // "Auth / token expired". Since tokens are cached here, a stale token
+    // rejected that way (HTTP 401/403, or a body-level 403/invalid) must force
+    // a refresh — previously only a bare HTTP 401 did, so a 403-rejected stale
+    // token kept being reused until the cache TTL ran out.
+    internal static bool _isAuthFailure(int httpStatus, string body)
+    {
+        if (httpStatus == 401 || httpStatus == 403) return true;
+        if (string.IsNullOrWhiteSpace(body)) return false;
+        try
+        {
+            var root = JsonDocument.Parse(body).RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return false;
+            if (_getString(root, "statusCode") == "403") return true;
+            return root.TryGetProperty("invalid", out var inv) && inv.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException) { return false; }
     }
 
     private async Task<(HttpResponseMessage? resp, string body)> _sendIncredRequestAsync(
@@ -341,7 +380,12 @@ public class IncredController : BaseController
         var req = new HttpRequestMessage(method, url);
         req.Headers.Add("jwt_token", jwtToken);   // ← correct: REQUEST header
         if (jsonBody != null)
-            req.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+        {
+            // Exactly "application/json" like the reference's requests.post(json=...);
+            // StringContent's default would append "; charset=utf-8".
+            req.Content = new StringContent(jsonBody, Encoding.UTF8);
+            req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        }
         return req;
     }
 
@@ -491,7 +535,7 @@ public class IncredController : BaseController
     //            PARTNER_DATA.RM_EMAIL (optional) }
     // ─────────────────────────────────────────────────────────────────────────
     [HttpPost("application/init")]
-    public async Task<IActionResult> CreateApplication([FromBody] JsonElement payload)
+    public async Task<IActionResult> CreateApplication([ModelBinder(typeof(RawJsonBodyBinder))] JsonElement payload)
     {
         if (await DenyIncredProxyAsync() is { } denied) return denied;
         // payload is a struct — an empty/invalid body or a Content-Type other than
@@ -530,7 +574,7 @@ public class IncredController : BaseController
     // Payload: { APPLICATION_ID, BUREAU_CONSENT: { status:'Y', date:'ISO' } }
     // ─────────────────────────────────────────────────────────────────────────
     [HttpPost("offer/request")]
-    public async Task<IActionResult> OfferRequest([FromBody] JsonElement payload)
+    public async Task<IActionResult> OfferRequest([ModelBinder(typeof(RawJsonBodyBinder))] JsonElement payload)
     {
         if (await DenyIncredProxyAsync() is { } denied) return denied;
         if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
@@ -563,7 +607,7 @@ public class IncredController : BaseController
     // Payload: { APPLICATION_ID, REQUEST_ID }
     // ─────────────────────────────────────────────────────────────────────────
     [HttpPost("offer/status")]
-    public async Task<IActionResult> PollOfferStatus([FromBody] JsonElement payload)
+    public async Task<IActionResult> PollOfferStatus([ModelBinder(typeof(RawJsonBodyBinder))] JsonElement payload)
     {
         if (await DenyIncredProxyAsync() is { } denied) return denied;
         if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
@@ -691,15 +735,33 @@ public class IncredController : BaseController
             ["MNAME"]              = customer.FatherName ?? "",
             ["LNAME"]              = lastName,
             ["PAN"]                = customer.PanNumber ?? "",
-            ["DOB"]                = customer.DateOfBirth?.ToString("dd/MM/yyyy") ?? "",
+            // InvariantCulture: "/" is a culture date-separator token, so the
+            // current culture could emit 01-01-1990 instead of the spec's 01/01/1990.
+            ["DOB"]                = customer.DateOfBirth?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) ?? "",
             ["GENDER"]             = incredGender,
             ["EMPLOYMENT_TYPE"]    = incredEmploymentType,
             ["PARTNER_REFERENCE"]  = loan.Id.ToString(),
+            // NET_MONTHLY is an integer in the reference (net_salary = fields.Integer);
+            // a raw decimal could serialize as 50000.00.
             ["EMPLOYMENT"]         = new[] { new Dictionary<string, object?> {
-                ["SALARY"] = new Dictionary<string, object?> { ["NET_MONTHLY"] = customer.MonthlyIncome ?? 0 }
+                ["SALARY"] = new Dictionary<string, object?> {
+                    ["NET_MONTHLY"] = (long)Math.Round(customer.MonthlyIncome ?? 0, MidpointRounding.AwayFromZero)
+                }
             }},
             ["ADDRESS"]            = new[] { addressEntry },
         };
+
+        // PARTNER_DATA.RM_EMAIL — the reference sends the selected InCred RM's
+        // email (rm_email_id.email). The loan stores the RM as the picker's
+        // label "Name (Location)" (IncredTab.tsx rmLabel), so resolve it back to
+        // the RM master row. Omitted only when no RM email can be resolved,
+        // exactly like the reference's `if rec.rm_email_id.email` guard.
+        var rmEmail = await _resolveRmEmailAsync(loan.IncredRmName);
+        if (!string.IsNullOrWhiteSpace(rmEmail))
+            initPayload["PARTNER_DATA"] = new Dictionary<string, object?> { ["RM_EMAIL"] = rmEmail };
+        else
+            _log.LogWarning("InCred create application (loan {LoanId}): no RM email resolved from '{Rm}' — PARTNER_DATA.RM_EMAIL not sent",
+                loanId, loan.IncredRmName);
 
         var initJson = JsonSerializer.Serialize(initPayload);
         _log.LogInformation("InCred create application (loan {LoanId}) payload: {Payload}", loanId, initJson);
@@ -727,9 +789,34 @@ public class IncredController : BaseController
 
         if (!_getBool(initResult, "status"))
         {
-            var err = _getString(initResult, "message") ?? _getString(initResult, "errorCode") ?? "InCred application creation failed";
-            loan.IncredErrorMessage = err;
+            // Error branches mirror incred_create_application exactly.
+            var code       = _getString(initResult, "errorCode");
+            var msg        = _getString(initResult, "message") ?? "";
+            var statusCode = _getString(initResult, "statusCode");
             loan.IncredLastSyncedAt = DateTime.UtcNow;
+
+            // 2) Duplicate Request — the reference records it and returns without raising.
+            if (msg == "Duplicate Request Detected")
+            {
+                _log.LogWarning("InCred duplicate request (loan {LoanId}): {Msg}", loanId, msg);
+                loan.IncredErrorMessage = msg;
+                await _db.SaveChangesAsync();
+                return Ok(ApiResponseDto<IncredLoanInfoDto>.Ok(_mapIncredInfo(loan), msg));
+            }
+
+            string err;
+            if (code == "E0002")                                   // 1) duplicate in-progress application
+                err = !string.IsNullOrEmpty(msg) ? msg : "You already have an in-progress application";
+            else if (code == "E0003")                              // 3) invalid PAN
+                err = "Invalid PAN: " + msg;
+            else if (statusCode == "403" || (initResult.TryGetProperty("invalid", out var inv) && inv.ValueKind == JsonValueKind.True))
+                err = "Authentication error: " + (!string.IsNullOrEmpty(msg) ? msg : "Authorization failed"); // 4) auth
+            else                                                   // 5) anything else
+                err = !string.IsNullOrEmpty(msg) ? msg : (!string.IsNullOrEmpty(code) ? code : "InCred application creation failed");
+
+            _log.LogError("InCred create application failed (loan {LoanId}) [{Code}]: {Err}", loanId, code ?? statusCode, err);
+            // Stored exactly as the reference stores it (raw message for E0003).
+            loan.IncredErrorMessage = code == "E0003" ? msg : err;
             await _db.SaveChangesAsync();
             return BadRequest(ApiResponseDto<IncredLoanInfoDto>.Ok(_mapIncredInfo(loan), err));
         }
@@ -744,7 +831,7 @@ public class IncredController : BaseController
         await _db.SaveChangesAsync();
 
         // ── Step 2: offer/request ─────────────────────────────────────────────
-        var consentDate = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.000Z");
+        var consentDate = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.000Z", CultureInfo.InvariantCulture);
         var offerReqPayload = new Dictionary<string, object?>
         {
             ["APPLICATION_ID"] = loan.IncredApplicationId,
@@ -909,11 +996,49 @@ public class IncredController : BaseController
     };
 
     // ── Small JSON helpers: InCred sometimes returns numbers as strings ────────
-    private static bool _getBool(JsonElement el, string prop) =>
-        el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.True;
+    // Mirrors Python's `if not result.get('status')`: true, a non-zero number or
+    // the string "true" count as success.
+    private static bool _getBool(JsonElement el, string prop)
+    {
+        if (el.ValueKind != JsonValueKind.Object || !el.TryGetProperty(prop, out var v)) return false;
+        return v.ValueKind switch
+        {
+            JsonValueKind.True   => true,
+            JsonValueKind.Number => v.TryGetDecimal(out var n) && n != 0,
+            JsonValueKind.String => string.Equals(v.GetString(), "true", StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
+    }
 
-    private static string? _getString(JsonElement el, string prop) =>
-        el.TryGetProperty(prop, out var v) ? v.GetString() : null;
+    // Mirrors Python's `.get()`: never throws on type. JsonElement.GetString()
+    // throws on a number, so a numeric APPLICATION_ID / REQUEST_ID /
+    // PARTNER_REFERENCE / statusCode used to abort the whole flow after InCred
+    // had already created the application on its side.
+    private static string? _getString(JsonElement el, string prop)
+    {
+        if (el.ValueKind != JsonValueKind.Object || !el.TryGetProperty(prop, out var v)) return null;
+        return v.ValueKind switch
+        {
+            JsonValueKind.String => v.GetString(),
+            JsonValueKind.Number => v.GetRawText(),
+            JsonValueKind.True   => "true",
+            JsonValueKind.False  => "false",
+            _ => null,
+        };
+    }
+
+    // Resolve Loan.IncredRmName ("Name (Location)", as saved by IncredTab.tsx's
+    // rmLabel) back to the RM master row's email. Falls back to a plain name
+    // match for values saved without the "(Location)" suffix.
+    private async Task<string?> _resolveRmEmailAsync(string? rmLabel)
+    {
+        if (string.IsNullOrWhiteSpace(rmLabel)) return null;
+        var label = rmLabel.Trim();
+        var rms = await _db.IncredRmEmails.AsNoTracking().ToListAsync();
+        var rm = rms.FirstOrDefault(r => $"{r.Name} ({r.Location ?? ""})" == label)
+              ?? rms.FirstOrDefault(r => string.Equals(r.Name.Trim(), label, StringComparison.OrdinalIgnoreCase));
+        return rm?.Email?.Trim();
+    }
 
     private static decimal _getDecimal(JsonElement el, string prop)
     {
@@ -935,7 +1060,7 @@ public class IncredController : BaseController
     // POST /api/incred/loan/application/eligibility  (mirrors incredCheckEligibility)
     // ─────────────────────────────────────────────────────────────────────────
     [HttpPost("loan/application/eligibility")]
-    public async Task<IActionResult> CheckEligibility([FromBody] JsonElement payload)
+    public async Task<IActionResult> CheckEligibility([ModelBinder(typeof(RawJsonBodyBinder))] JsonElement payload)
     {
         if (await DenyIncredProxyAsync() is { } denied) return denied;
         var creds = await _loadCreds();
@@ -960,7 +1085,7 @@ public class IncredController : BaseController
     // POST /api/incred/loan/application/{id}/document  (mirrors incredUploadDocument)
     // ─────────────────────────────────────────────────────────────────────────
     [HttpPost("loan/application/{id}/document")]
-    public async Task<IActionResult> UploadDocument(string id, [FromBody] JsonElement payload)
+    public async Task<IActionResult> UploadDocument(string id, [ModelBinder(typeof(RawJsonBodyBinder))] JsonElement payload)
     {
         if (await DenyIncredAppAsync(id) is { } denied) return denied;
         var creds = await _loadCreds();
@@ -985,7 +1110,7 @@ public class IncredController : BaseController
     // POST /api/incred/loan/application/{id}/cancel  (mirrors incredCancelApp)
     // ─────────────────────────────────────────────────────────────────────────
     [HttpPost("loan/application/{id}/cancel")]
-    public async Task<IActionResult> CancelApplication(string id, [FromBody] JsonElement payload)
+    public async Task<IActionResult> CancelApplication(string id, [ModelBinder(typeof(RawJsonBodyBinder))] JsonElement payload)
     {
         if (await DenyIncredAppAsync(id) is { } denied) return denied;
         var creds = await _loadCreds();
@@ -1035,7 +1160,7 @@ public class IncredController : BaseController
     // PATCH /api/incred/loan/application/{id}/applicant  (mirrors incredUpdateApplicant)
     // ─────────────────────────────────────────────────────────────────────────
     [HttpPatch("loan/application/{id}/applicant")]
-    public async Task<IActionResult> UpdateApplicant(string id, [FromBody] JsonElement payload)
+    public async Task<IActionResult> UpdateApplicant(string id, [ModelBinder(typeof(RawJsonBodyBinder))] JsonElement payload)
     {
         if (await DenyIncredAppAsync(id) is { } denied) return denied;
         var creds = await _loadCreds();
@@ -1102,7 +1227,7 @@ public class IncredController : BaseController
     [AllowAnonymous]
     [HttpPost]
     [Route("/incred/loan/webhook")]
-    public async Task<IActionResult> ReceiveWebhook([FromBody] JsonElement payload)
+    public async Task<IActionResult> ReceiveWebhook([ModelBinder(typeof(RawJsonBodyBinder))] JsonElement payload)
     {
         try
         {
@@ -1148,10 +1273,12 @@ public class IncredController : BaseController
 
             _log.LogInformation("Received InCred Webhook: {Payload}", payload.GetRawText());
 
-            string? applicationId = payload.TryGetProperty("APPLICATION_ID", out var a) ? a.GetString() : null;
-            string? partnerRef    = payload.TryGetProperty("PARTNER_REFERENCE", out var p) ? p.GetString() : null;
-            string? evt           = payload.TryGetProperty("EVENT", out var e) ? e.GetString() : null;
-            string? status        = payload.TryGetProperty("STATUS", out var s) ? s.GetString() : null;
+            // Type-tolerant reads (webhook.py uses data.get + int(partner_ref)):
+            // a numeric PARTNER_REFERENCE/APPLICATION_ID used to throw here.
+            string? applicationId = _getString(payload, "APPLICATION_ID");
+            string? partnerRef    = _getString(payload, "PARTNER_REFERENCE");
+            string? evt           = _getString(payload, "EVENT");
+            string? status        = _getString(payload, "STATUS");
 
             // Loans now live in the DB (see matching block below), so we match here
             // server-side against APPLICATION_ID / PARTNER_REFERENCE. Still log the
@@ -1374,5 +1501,39 @@ public class IncredController : BaseController
         rm.IsDeleted = true; rm.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(ApiResponseDto<bool>.Ok(true, "Deleted."));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BUGFIX: the API's input formatter is Newtonsoft (Program.cs AddNewtonsoftJson),
+// which cannot populate a System.Text.Json JsonElement — every [FromBody]
+// JsonElement arrived as a default (Undefined) value, so the inbound InCred
+// webhook and the raw proxy endpoints always answered "Request body is missing
+// or is not valid JSON" for perfectly valid JSON (confirmed on a live local run).
+// This binder reads the raw request body and parses it with System.Text.Json.
+// An empty or unparsable body still binds to a default JsonElement, so each
+// action's existing "missing/invalid body" handling is unchanged.
+// ─────────────────────────────────────────────────────────────────────────────
+internal sealed class RawJsonBodyBinder : IModelBinder
+{
+    public async Task BindModelAsync(ModelBindingContext bindingContext)
+    {
+        var request = bindingContext.HttpContext.Request;
+        if (request.Body.CanSeek) request.Body.Position = 0;
+
+        using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
+        var raw = await reader.ReadToEndAsync(bindingContext.HttpContext.RequestAborted);
+
+        JsonElement value = default;
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                value = doc.RootElement.Clone();
+            }
+            catch (JsonException) { /* leave default → action reports invalid JSON */ }
+        }
+        bindingContext.Result = ModelBindingResult.Success(value);
     }
 }

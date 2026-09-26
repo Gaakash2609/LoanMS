@@ -443,6 +443,40 @@ public class OfferWorkflowServiceTests
     }
 
     [Fact]
+    public async Task OfferValidUntilToday_StaysValidForTheWholeDay()
+    {
+        var (env, loan) = await AtOfferStage();
+        using var _ = env;
+        var o = OfferOf(await env.Svc.CreateOfferAsync(loan.Id, Offer(Hdfc, validUntil: DateTime.UtcNow.Date), C("LoginTeam")), Hdfc);
+        env.Db.ChangeTracker.Clear();
+        var view = await env.Svc.GetAsync(loan.Id, C("Sales"));
+        view.Data!.Offers.Single(x => x.Id == o.Id).Status.Should().NotBe(S.OfferExpired, "valid-until today means valid for all of today");
+    }
+
+    [Fact]
+    public async Task FinalOfferExpiresWhileDeviationPending_ApplicationReturnsToOffer_NotStuckAtDecision()
+    {
+        var (env, loan) = await AtOfferStage();
+        using var _ = env;
+        var o = OfferOf(await env.Svc.CreateOfferAsync(loan.Id, Offer(Icici, validUntil: DateTime.UtcNow.Date.AddDays(1)), C("Manager")), Icici);
+        await env.Svc.SelectOfferAsync(loan.Id, o.Id, new OfferActionRequestDto(), C("Sales"));
+        (await env.Svc.RaiseDeviationAsync(loan.Id, o.Id, new RaiseOfferDeviationRequestDto { DeviationType = "ROI", Reason = "x" }, null, C("Manager"))).Success.Should().BeTrue();
+        (await env.StatusOf(loan.Id)).Should().Be(LoanStatus.Decision);
+
+        // The validity lapses before the approver opens the application.
+        env.Db.ChangeTracker.Clear();
+        var row = await env.Db.ApplicationOffers.FirstAsync(x => x.Id == o.Id);
+        row.ValidUntil = DateTime.UtcNow.AddDays(-1);
+        await env.Db.SaveChangesAsync(); env.Db.ChangeTracker.Clear();
+
+        var view = await env.Svc.GetAsync(loan.Id, C("OperationManager"));
+        view.Success.Should().BeTrue();
+        view.Data!.LoanStatus.Should().Be(LoanStatus.Offer.ToString(), "Decision with no open deviation would leave nobody an Approve/Reject button");
+        view.Data.Deviations.Single().Status.Should().Be(S.RequestClosed);
+        (await env.StatusOf(loan.Id)).Should().Be(LoanStatus.Offer);
+    }
+
+    [Fact]
     public async Task DeclinedTerms_CannotBeApproved_UntilRevised()
     {
         var (env, loan) = await AtOfferStage();

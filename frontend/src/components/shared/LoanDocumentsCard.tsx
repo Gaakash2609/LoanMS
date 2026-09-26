@@ -1,20 +1,43 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileText, FileImage, FileSpreadsheet, Upload, Download, Trash2, File as FileIcon, CheckCircle2, XCircle, RefreshCw } from 'lucide-react'
+import {
+  FileText, FileImage, FileSpreadsheet, Upload, Download, Trash2, File as FileIcon, CheckCircle2, XCircle, RefreshCw,
+  MoreHorizontal, HardDrive, Clock, FolderOpen,
+} from 'lucide-react'
 import { Card, CardHeader } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
 import { InlineLoader } from '@/components/ui/LoadingSpinner'
 import { loansApi, type LoanDocument } from '@/api/loansApi'
 import { useHasPermission, useCanVerifyDocs } from '@/hooks/usePermissions'
 import { formatDateTime } from '@/utils/format'
 import { SkeletonText } from '@/components/ui/Skeleton'
 
-// Review-status → badge presentation. Missing/undefined status (older backend
-// rows) is treated as Pending.
-function statusBadge(status: LoanDocument['status']): { variant: 'success' | 'danger' | 'warning'; label: string } {
-  if (status === 'Verified') return { variant: 'success', label: 'Verified' }
-  if (status === 'Rejected') return { variant: 'danger', label: 'Rejected' }
-  return { variant: 'warning', label: 'Pending' }
+// Review-status → pill + top-strip presentation. Missing/undefined status
+// (older backend rows) is treated as Pending.
+function statusInfo(status: LoanDocument['status']): { key: 'verified' | 'rejected' | 'pending'; label: string } {
+  if (status === 'Verified') return { key: 'verified', label: 'Verified' }
+  if (status === 'Rejected') return { key: 'rejected', label: 'Rejected' }
+  return { key: 'pending', label: 'Pending' }
+}
+
+// Friendly title for the backend's whitelisted documentType keys — the card
+// title is now the document TYPE ("Bank Statement"), with the uploaded file
+// name shown underneath, because uploaded file names are often meaningless
+// ("269.88 Kb", "IMG_2031.jpg").
+const DOC_TYPE_LABEL: Record<string, string> = {
+  identity: 'Identity Proof',
+  address: 'Address Proof',
+  income: 'Income Proof',
+  bank_statement: 'Bank Statement',
+  salary_slip: 'Salary Slip',
+  itr: 'Form 16 / ITR',
+  gst: 'GST Registration',
+  property: 'Property Document',
+  other: 'Other Document',
+}
+export function docTypeLabel(type?: string | null): string {
+  const t = (type ?? '').trim()
+  if (!t) return 'Document'
+  return DOC_TYPE_LABEL[t.toLowerCase()] ?? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 // Document types offered on upload — mirrors the legacy app-detail
@@ -59,7 +82,14 @@ export function fmtSize(bytes: number) {
 // server-side storage path, not something to parse for this). Presentation
 // only: it does not change what documentType is stored or displayed.
 export function fileVisual(name: string) {
-  const ext = (name.split('.').pop() || '').toLowerCase()
+  // Only treat the text after the last dot as an extension when it really
+  // looks like one (2–5 letters/digits, no spaces). Names such as
+  // "269.88 Kb" or "137.45 Kb (1)" previously produced bogus "88 KB" /
+  // "45 KB (1)" type badges.
+  const n = (name ?? '').trim()
+  const dot = n.lastIndexOf('.')
+  const raw = dot > 0 ? n.slice(dot + 1).toLowerCase() : ''
+  const ext = /^[a-z][a-z0-9]{1,4}$/.test(raw) ? raw : ''
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].includes(ext)) return { Icon: FileImage, label: ext.toUpperCase() }
   if (['xls', 'xlsx', 'csv'].includes(ext)) return { Icon: FileSpreadsheet, label: ext.toUpperCase() }
   if (ext === 'pdf') return { Icon: FileText, label: 'PDF' }
@@ -91,6 +121,18 @@ export default function LoanDocumentsCard({ loanId }: { loanId: number }) {
   const canVerify = useCanVerifyDocs()
   const replaceRef = useRef<HTMLInputElement>(null)
   const [replaceId, setReplaceId] = useState<number | null>(null)
+  // Which card's "⋯" overflow menu (Reject / Replace / Delete) is open.
+  const [menuId, setMenuId] = useState<number | null>(null)
+  useEffect(() => {
+    if (menuId == null) return
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement)?.closest?.('.ldoc-menu-wrap')) setMenuId(null)
+    }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuId(null) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc) }
+  }, [menuId])
 
   const { data: docs, isLoading } = useQuery({
     queryKey: ['loanDocuments', loanId],
@@ -188,9 +230,40 @@ export default function LoanDocumentsCard({ loanId }: { loanId: number }) {
     }
   }
 
+  const list = docs ?? []
+  const counts = list.reduce(
+    (acc, d) => { acc[statusInfo(d.status).key]++; return acc },
+    { verified: 0, pending: 0, rejected: 0 },
+  )
+  const subtitle = [
+    `${list.length} uploaded`,
+    counts.verified ? `${counts.verified} verified` : '',
+    counts.pending ? `${counts.pending} pending` : '',
+    counts.rejected ? `${counts.rejected} rejected` : '',
+  ].filter(Boolean).join(' · ')
+
+  const uploadControls = canUpload ? (
+    <div className="ldoc-upload">
+      <select value={docType} onChange={e => setDocType(e.target.value)}
+        className="ldoc-select" aria-label="Document type">
+        {DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+      </select>
+      <input ref={fileRef} type="file" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) upload.mutate(f) }} />
+      <button type="button" className="ldoc-upload-btn"
+        onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
+        {upload.isPending ? <><InlineLoader size={13} /> Uploading…</> : <><Upload size={14} /> Upload</>}
+      </button>
+    </div>
+  ) : undefined
+
   return (
     <Card>
-      <CardHeader title={<><span className="section-icon-badge"><FileText size={15} /></span> Documents</>} subtitle={`${docs?.length ?? 0} uploaded`} />
+      <CardHeader
+        title={<><span className="section-icon-badge"><FileText size={15} /></span> Documents</>}
+        subtitle={isLoading ? undefined : subtitle}
+        action={uploadControls}
+      />
 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{error}</div>}
 
@@ -198,94 +271,98 @@ export default function LoanDocumentsCard({ loanId }: { loanId: number }) {
       <input ref={replaceRef} type="file" className="hidden"
         onChange={e => onReplaceFileChosen(e.target.files?.[0])} />
 
-      {canUpload && (
-        <div className="flex flex-wrap items-end gap-2 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-          <div>
-            <label className="block text-[11px] font-semibold text-gray-500 mb-1">Document Type</label>
-            <select value={docType} onChange={e => setDocType(e.target.value)}
-              className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white">
-              {DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="flex-1 min-w-[180px]">
-            <label className="block text-[11px] font-semibold text-gray-500 mb-1">File</label>
-            <input ref={fileRef} type="file"
-              onChange={e => { const f = e.target.files?.[0]; if (f) upload.mutate(f) }}
-              className="block w-full text-xs text-gray-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-efin-blue file:text-white hover:file:bg-efin-blue-dark" />
-          </div>
-          {upload.isPending && <span className="text-xs text-gray-500 pb-2 inline-flex items-center gap-1.5"><InlineLoader size={12} /> Uploading…</span>}
-        </div>
-      )}
-
       {isLoading ? (
         <SkeletonText lines={3} className="py-2" />
-      ) : (docs ?? []).length === 0 ? (
-        <p className="text-sm text-gray-400 py-6 text-center">No documents uploaded yet.</p>
+      ) : list.length === 0 ? (
+        <div className="ldoc-empty">
+          <span className="ldoc-empty-icon"><FolderOpen size={22} /></span>
+          <p className="ldoc-empty-title">No documents uploaded yet</p>
+          {canUpload && <p className="ldoc-empty-sub">Pick a document type and click Upload to add the first one.</p>}
+        </div>
       ) : (
-        // Real document cards — icon by file type, a preview-area strip,
-        // a status badge and download/delete actions — replacing the
-        // previous plain divided-row list. Same data, same actions
-        // (download/delete), same permission gating as before.
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {(docs ?? []).map(d => {
+        // Modern document cards: status colour strip on top, file-type tile,
+        // document TYPE as the title with the file name below, a meta strip
+        // (size · uploaded at), and Download / Verify with the less-frequent
+        // Reject / Replace / Delete tucked into a "⋯" menu. Same data, same
+        // actions, same permission gating as before.
+        <div className="ldoc-grid">
+          {list.map(d => {
             const { Icon, label } = fileVisual(d.documentName)
-            const sb = statusBadge(d.status)
+            const st = statusInfo(d.status)
+            const showVerify = canVerify && d.status !== 'Verified'
+            const showReject = canVerify && d.status !== 'Rejected'
+            const hasMenu = showReject || canUpload
             return (
-              <div key={d.id} className="doc-card">
-                <div className="doc-card-preview">
-                  <div className="doc-card-icon">
-                    <Icon size={20} strokeWidth={2} />
+              <div key={d.id} className={`ldoc-card ldoc-card--${st.key}`}>
+                <div className="ldoc-body">
+                  <div className="ldoc-head">
+                    <div className="ldoc-file" title={label}>
+                      <Icon size={16} strokeWidth={2} />
+                      <span>{label}</span>
+                    </div>
+                    <div className="ldoc-titles">
+                      <p className="ldoc-title">{docTypeLabel(d.documentType)}</p>
+                      <p className="ldoc-name" title={d.documentName}>{d.documentName || '—'}</p>
+                    </div>
+                    <span className={`ldoc-pill ldoc-pill--${st.key}`}>{st.label}</span>
                   </div>
-                </div>
-                <div className="p-3">
-                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <p className="text-[13px] font-semibold text-gray-800 leading-snug break-words line-clamp-2">{d.documentName}</p>
-                    <Badge variant="info">{label}</Badge>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                    <Badge variant={sb.variant}>{sb.label}</Badge>
-                    {(d.version ?? 1) > 1 && <span className="text-[10px] text-gray-400">v{d.version}</span>}
-                  </div>
-                  <p className="text-[11px] text-gray-500">
-                    {d.documentType}
-                    {d.applicantRole === 'CoApplicant' && <span className="ml-1.5"><Badge variant="default">Co-Applicant</Badge></span>}
-                  </p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">{fmtSize(d.fileSizeBytes)} · {formatDateTime(d.uploadedAt)}</p>
-                  {d.status === 'Rejected' && d.reviewNote && (
-                    <p className="text-[11px] text-red-600 mt-1 leading-snug"><span className="font-semibold">Reason:</span> {d.reviewNote}</p>
+
+                  {(d.applicantRole === 'CoApplicant' || (d.version ?? 1) > 1) && (
+                    <div className="ldoc-tags">
+                      {d.applicantRole === 'CoApplicant' && <span className="ldoc-tag">Co-Applicant</span>}
+                      {(d.version ?? 1) > 1 && <span className="ldoc-tag">v{d.version}</span>}
+                    </div>
                   )}
 
-                  <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-gray-100">
-                    <button onClick={() => download(d)} title="Download"
-                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold text-efin-blue bg-[color:var(--accent-subtle)] hover:bg-[color:var(--accent-subtle)]/70 transition-colors">
+                  <div className="ldoc-meta">
+                    <span><HardDrive size={12} /> {fmtSize(d.fileSizeBytes)}</span>
+                    <span><Clock size={12} /> {formatDateTime(d.uploadedAt)}</span>
+                  </div>
+
+                  {d.status === 'Rejected' && d.reviewNote && (
+                    <p className="ldoc-reason"><span>Reason:</span> {d.reviewNote}</p>
+                  )}
+
+                  <div className="ldoc-actions">
+                    <button type="button" onClick={() => download(d)} className="ldoc-btn ldoc-btn--primary">
                       <Download size={13} /> Download
                     </button>
-                    {canVerify && d.status !== 'Verified' && (
-                      <button onClick={() => verify.mutate(d.id)} disabled={verify.isPending} title="Verify"
-                        className="p-1.5 rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600 transition-colors disabled:opacity-50">
-                        <CheckCircle2 size={15} />
+                    {showVerify && (
+                      <button type="button" onClick={() => verify.mutate(d.id)} disabled={verify.isPending}
+                        className="ldoc-btn ldoc-btn--verify">
+                        <CheckCircle2 size={13} /> Verify
                       </button>
                     )}
-                    {canVerify && d.status !== 'Rejected' && (
-                      <button onClick={() => promptReject(d)} disabled={reject.isPending} title="Reject (reason required)"
-                        className="p-1.5 rounded-lg hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors disabled:opacity-50">
-                        <XCircle size={15} />
-                      </button>
-                    )}
-                    {canUpload && (
-                      <button onClick={() => startReplace(d.id)} disabled={replace.isPending} title="Replace (new version)"
-                        className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-efin-blue transition-colors disabled:opacity-50">
-                        <RefreshCw size={15} />
-                      </button>
-                    )}
-                    {canUpload && (
-                      <button
-                        onClick={() => { if (confirm(`Delete "${d.documentName}"?`)) remove.mutate(d.id) }}
-                        title="Delete"
-                        className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                    {hasMenu && (
+                      <div className="ldoc-menu-wrap">
+                        <button type="button" className="ldoc-more" title="More actions"
+                          aria-haspopup="menu" aria-expanded={menuId === d.id}
+                          onClick={() => setMenuId(menuId === d.id ? null : d.id)}>
+                          <MoreHorizontal size={15} />
+                        </button>
+                        {menuId === d.id && (
+                          <div className="ldoc-menu" role="menu">
+                            {showReject && (
+                              <button type="button" role="menuitem" disabled={reject.isPending}
+                                onClick={() => { setMenuId(null); promptReject(d) }}>
+                                <XCircle size={14} /> Reject
+                              </button>
+                            )}
+                            {canUpload && (
+                              <button type="button" role="menuitem" disabled={replace.isPending}
+                                onClick={() => { setMenuId(null); startReplace(d.id) }}>
+                                <RefreshCw size={14} /> Replace (new version)
+                              </button>
+                            )}
+                            {canUpload && (
+                              <button type="button" role="menuitem" className="is-danger"
+                                onClick={() => { setMenuId(null); if (confirm(`Delete "${d.documentName}"?`)) remove.mutate(d.id) }}>
+                                <Trash2 size={14} /> Delete
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

@@ -1,4 +1,39 @@
-# LoanMS — Deploy notes (audit release, 2026-09-23)
+# LoanMS — Deploy notes
+
+## Release 2026-09-26 — Offer → Deviation → Credit Approval → Sanction → Disbursement (DEPLOYED)
+
+Deployed to production on 2026-09-26 as ECS task definition **`loanms-prod:94`**, image
+`loanms:offerworkflow-20260926`. Full record: §6 of
+[LOANMS_OFFER_TO_DISBURSEMENT_FINAL_REPORT_2026-09-25.md](LOANMS_OFFER_TO_DISBURSEMENT_FINAL_REPORT_2026-09-25.md).
+
+- **Backup taken first:** RDS snapshot `loanms-pre-offerworkflow-20260926-0350`.
+- **Migrations:** `20260925041918_AddOfferWorkflowAndStatusChecks` and
+  `20260925091531_AddBureauUploadOfferValidityTaskPause`, applied by the API at start-up. For a manual
+  run use `deploy/migrations/20260925_OfferWorkflow_Complete.idempotent.sql` (safe to run twice). The first
+  migration refuses to run if any application or status-history row holds a status outside `LoanStatus`
+  (e.g. NI / Cancelled).
+- **Rollback:** `update-service` back to `loanms-prod:93`, but only before any application reaches the new
+  `Offer` stage; the previous version cannot read that status. After that, fix forward.
+- **Still to do by the owner:** sign in to production and open a loan's **Offers** tab; set each lender's
+  "Offer validity (days)" in Lender Configuration; create the lender deviation rules (Policy & Product →
+  Deviation Rules). Until a lender has rules, its offers go to manual review.
+
+## How to deploy this package again
+
+Build and push from the folder that contains `LoanMS.slnx` (use a clean copy: no `node_modules`, `bin` or
+`obj`, because the Dockerfile copies the folders as they are):
+
+```bash
+aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 664418956749.dkr.ecr.ap-south-1.amazonaws.com
+docker buildx build --platform linux/amd64 -f deploy/docker/Dockerfile -t 664418956749.dkr.ecr.ap-south-1.amazonaws.com/loanms:<tag> --push .
+```
+
+Register a new revision copied from the **currently running** task definition with only the image changed,
+then `aws ecs update-service --region ap-south-1 --cluster loanms-prod --service loanms-api --task-definition loanms-prod:<new-revision>`.
+
+---
+
+# Earlier release — audit release, 2026-09-23
 
 This package is `LoanMS-Debug.zip` (received 2026-09-23) plus the audit
 commits recorded in [AUDIT_PROGRESS.md](AUDIT_PROGRESS.md). Every fix, its root

@@ -300,7 +300,7 @@ type Action =
   | { kind: 'add' } | { kind: 'revise'; offer: ApplicationOffer } | { kind: 'withdraw'; offer: ApplicationOffer }
   | { kind: 'select'; offer: ApplicationOffer } | { kind: 'unselect'; offer: ApplicationOffer }
   | { kind: 'raise'; offer: ApplicationOffer } | { kind: 'skip'; offer: ApplicationOffer } | { kind: 'credit'; offer: ApplicationOffer }
-  | { kind: 'decide'; deviationId: number } | { kind: 'moveToOffer' } | { kind: 'back' }
+  | { kind: 'decide'; deviationId: number; approve: boolean } | { kind: 'moveToOffer' } | { kind: 'back' }
   | { kind: 'sanction' } | { kind: 'cancelSanction'; sanction: Sanction } | { kind: 'disburse'; sanction: Sanction }
   | { kind: 'reverse'; disbursementId: number } | { kind: 'bureau' } | { kind: 'reassign'; deviation: OfferDeviationRequest }
 
@@ -445,8 +445,10 @@ export default function OffersTab({ loanId, requestedAmount, tenureMonths }: { l
                 {d.decidedAt && <p className="text-[12px]" style={{ color: 'var(--text3)' }}>{d.status} by {d.decidedBy} on {formatDateTime(d.decidedAt)}{d.decisionComment ? ` — ${d.decisionComment}` : ''}</p>}
                 {d.closedReason && <p className="text-[12px]" style={{ color: 'var(--text3)' }}>Closed: {d.closedReason}</p>}
                 {d.flags && d.flags.length > 0 && <div className="mt-2"><ChecksList checks={d.flags} /></div>}
-                <DeviationButtons acts={deviationActions(d, wf, me?.id)}
-                  onDecide={() => setAction({ kind: 'decide', deviationId: d.id })} onReassign={() => setAction({ kind: 'reassign', deviation: d })} />
+                <DeviationButtons d={d} wf={wf} acts={deviationActions(d, wf, me?.id)}
+                  onApprove={() => setAction({ kind: 'decide', deviationId: d.id, approve: true })}
+                  onReject={() => setAction({ kind: 'decide', deviationId: d.id, approve: false })}
+                  onReassign={() => setAction({ kind: 'reassign', deviation: d })} />
               </div>
             ))}
           </div>
@@ -556,7 +558,7 @@ export default function OffersTab({ loanId, requestedAmount, tenureMonths }: { l
         onSubmit={(type, reason) => go(() => offerWorkflowApi.raiseDeviation(loanId, a.offer.id, type, reason, idemKey), 'Deviation raised')} />}
       {a?.kind === 'skip' && <ReasonModal title="Skip deviation" subtitle="An authorised bypass of the policy deviation — your name, the reason and the time are recorded." confirm="Skip deviation" onClose={close} pending={run.isPending} error={error}
         onSubmit={reason => go(() => offerWorkflowApi.skipDeviation(loanId, a.offer.id, reason), 'Deviation skipped')} />}
-      {a?.kind === 'decide' && <DecideModal error={error} pending={run.isPending} onClose={close}
+      {a?.kind === 'decide' && <DecideModal approve={a.approve} error={error} pending={run.isPending} onClose={close}
         onSubmit={(approve, comment) => go(() => offerWorkflowApi.decideDeviation(loanId, a.deviationId, approve, comment, idemKey), approve ? 'Deviation approved' : 'Deviation rejected')} />}
       {a?.kind === 'credit' && <CreditApprovalModal offer={a.offer} error={error} pending={run.isPending} onClose={close}
         onSubmit={(decision, comment) => go(() => offerWorkflowApi.creditApproval(loanId, a.offer.id, decision, a.offer.currentRevisionNo, comment, idemKey),
@@ -613,15 +615,19 @@ function RaiseDeviationModal({ wf, offer, onClose, onSubmit, pending, error }: {
   )
 }
 
-function DecideModal({ onClose, onSubmit, pending, error }: { onClose: () => void; onSubmit: (approve: boolean, comment?: string) => void; pending: boolean; error: string }) {
+function DecideModal({ approve, onClose, onSubmit, pending, error }: { approve: boolean; onClose: () => void; onSubmit: (approve: boolean, comment?: string) => void; pending: boolean; error: string }) {
   const [comment, setComment] = useState('')
   return (
-    <Modal open onClose={onClose} title="Decide deviation" size="md" subtitle="Approving the deviation does not approve the credit terms — Credit approval is a separate step."
+    <Modal open onClose={onClose} title={approve ? 'Approve deviation' : 'Reject deviation'} size="md"
+      subtitle={approve
+        ? 'Approving the deviation does not approve the credit terms — Credit approval is a separate step.'
+        : 'The application returns to the Offer stage: revise the terms, choose another offer, or reject the application.'}
       footer={<><Button size="sm" variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button size="sm" variant="danger" loading={pending} disabled={pending || !comment.trim()} onClick={() => onSubmit(false, comment.trim())}>Reject</Button>
-        <Button size="sm" variant="success" loading={pending} disabled={pending} onClick={() => onSubmit(true, comment.trim() || undefined)}>Approve</Button></>}>
+        {approve
+          ? <Button size="sm" variant="success" loading={pending} disabled={pending} onClick={() => onSubmit(true, comment.trim() || undefined)}><CheckCircle2 size={14} className="mr-1" />Approve deviation</Button>
+          : <Button size="sm" variant="danger" loading={pending} disabled={pending || !comment.trim()} onClick={() => onSubmit(false, comment.trim())}><XCircle size={14} className="mr-1" />Reject deviation</Button>}</>}>
       <ErrorBox msg={error} />
-      <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--text2)' }}>Comment (required to reject)</label>
+      <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--text2)' }}>{approve ? 'Comment (optional)' : 'Reason for rejection (required)'}</label>
       <textarea value={comment} onChange={e => setComment(e.target.value)} rows={3} className="efin-input" />
     </Modal>
   )
@@ -716,12 +722,27 @@ function DisburseModal({ sanction, onClose, onSubmit, pending, error }: {
   )
 }
 
-function DeviationButtons({ acts, onDecide, onReassign }: { acts: ReturnType<typeof deviationActions>; onDecide: () => void; onReassign: () => void }) {
-  if (!acts.length) return null
+// Approve / Reject shown straight on the pending request (previously a single
+// "Decide deviation" button that users did not recognise as the approval step).
+// When the viewer can't act, say WHY instead of silently showing nothing.
+function DeviationButtons({ d, wf, acts, onApprove, onReject, onReassign }: {
+  d: OfferDeviationRequest; wf: LoanWorkflow; acts: ReturnType<typeof deviationActions>
+  onApprove: () => void; onReject: () => void; onReassign: () => void
+}) {
+  if (d.status !== 'Raised') return null
+  const canDecide = acts.includes('decide')
+  let why = ''
+  if (!canDecide && !acts.includes('ownRequest')) {
+    if (wf.loanStatus === 'OnHold') why = 'Application is on hold — un-hold it to decide this deviation.'
+    else if (wf.loanStatus !== 'Decision') why = `Application is at ${wf.loanStatus}, not Decision — refresh the page.`
+    else why = 'Only Chief Administrator, Zonal Manager, Credit Evaluation Manager or Credit Evaluation Officer can approve a deviation.'
+  }
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      {acts.includes('ownRequest') && <p className="text-[12px]" style={{ color: 'var(--warn)' }}>You raised this deviation — a different approver must decide it.</p>}
-      {acts.includes('decide') && <Button size="sm" onClick={onDecide}><ShieldCheck size={14} className="mr-1" />Decide deviation</Button>}
+      {acts.includes('ownRequest') && <p className="text-[12px]" style={{ color: 'var(--warn)' }}>You raised this deviation — a different approver{d.assignedApprover ? ` (${d.assignedApprover})` : ''} must decide it.</p>}
+      {why && <p className="text-[12px]" style={{ color: 'var(--text3)' }}>{why}</p>}
+      {canDecide && <Button size="sm" variant="success" onClick={onApprove}><CheckCircle2 size={14} className="mr-1" />Approve</Button>}
+      {canDecide && <Button size="sm" variant="danger" onClick={onReject}><XCircle size={14} className="mr-1" />Reject</Button>}
       {acts.includes('reassign') && <Button size="sm" variant="ghost" onClick={onReassign}><UserCog size={14} className="mr-1" />Reassign approver</Button>}
     </div>
   )

@@ -146,7 +146,7 @@ export default function IncredCredentialsCard() {
                 label="Base URL *"
                 value={form.baseUrl}
                 onChange={e => set('baseUrl', e.target.value)}
-                placeholder="https://api.incred.com"
+                placeholder="https://api.incred.com/v3"
               />
             </div>
             <Input
